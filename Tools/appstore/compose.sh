@@ -21,12 +21,14 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 # Keep ids + order in sync with SHOTS/ORDER in storyboard.html.
-# iPhone drops windows (no multi-window story in the one-window shell);
-# every platform carries its own keys shot (rail / ornament cluster).
+# v1.3 order (2026-08-07): herdr + fileviewer in on iPad/visionOS, mosh +
+# drop out there (both stay iPhone shots); iPhone tells herdr as the mixed
+# deck and still drops windows (one-window shell); every platform carries
+# its own keys shot (rail / ornament cluster).
 shots_for() { # macOS bash 3.2 has no associative arrays
   case "$1" in
-    visionos|ipad) echo "wall windows agents strip launch drop widgets mosh keys themes" ;;
-    iphone)        echo "wall keys agents strip launch drop widgets mosh themes" ;;
+    visionos|ipad) echo "wall windows herdr agents strip launch fileviewer widgets keys themes" ;;
+    iphone)        echo "wall keys agents herdr strip launch drop widgets mosh themes" ;;
   esac
 }
 size_for() {
@@ -57,6 +59,10 @@ for platform in visionos ipad iphone; do
   size="$(size_for "$platform")"
   dest="$(dest_for "$platform")"
   mkdir -p "$dest"
+  # Renumbering means stale names linger and push the set past ASC's cap of
+  # 10 — clear this platform's files before recomposing (iphone and ipad
+  # share the ios dir, so the glob must stay platform-prefixed).
+  rm -f "${dest}/${platform}"-*.png
   i=0
   for shot in $(shots_for "$platform"); do
     i=$((i + 1))

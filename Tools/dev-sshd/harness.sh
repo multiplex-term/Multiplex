@@ -10,7 +10,21 @@
 #   ./harness.sh turn    fake agent turn in agent:cc (busy title → idle);
 #                        optional seconds arg, default 8
 #   ./harness.sh ask     fake permission dialog in agent:cc (needs-you state)
-#   ./harness.sh stop    stop sshd and kill demo sessions
+#   ./harness.sh herdr   seed real herdr SESSIONS (brew install herdr) —
+#                        one deck tile each — with agent-shaped foreground
+#                        fakes + deterministic `pane report-agent` states:
+#                        mpx-demo RUNNING,
+#                        mpx-blocked NEEDS YOU, mpx-done carries an
+#                        off-focus derived `done`; the
+#                        herdr-mode analog of `demo`; point the app at
+#                        state/seed-herdr.json — or, with `demo` also run,
+#                        at state/seed-mixed.json for one host showing BOTH
+#                        backends' tiles
+#   ./harness.sh bind    run the real `mpx bind` against this sshd with a
+#                        pinned token/PIN, so the app's bind flow can be
+#                        driven headlessly (MULTIPLEX_AUTO_BIND /
+#                        MULTIPLEX_BIND_AUTOPIN); prints the payload URL
+#   ./harness.sh stop    stop sshd, kill demo sessions, retire herdr fakes
 #
 # Everything lives in ./state/ (gitignored).
 set -euo pipefail
@@ -28,6 +42,10 @@ start() {
     [ -f "$STATE/client_ed25519" ] || ssh-keygen -q -t ed25519 -N '' -C multiplex-dev-client -f "$STATE/client_ed25519"
     cp "$STATE/client_ed25519.pub" "$STATE/authorized_keys"
     chmod 600 "$STATE/authorized_keys"
+    # `mpx bind --hostkeys-dir` looks for sshd's own naming, so publish the
+    # harness host key under that name too — the bind flow then pins a real
+    # fingerprint belonging to this sshd.
+    cp "$STATE/host_ed25519.pub" "$STATE/ssh_host_ed25519_key.pub"
 
     cat > "$STATE/sshd_config" <<EOF
 Port $PORT
@@ -70,7 +88,16 @@ seed = {
 # MULTIPLEX_SEED_HOST here to flip devbox to mosh; seed.json flips it back.
 (state / "seed-mosh.json").write_text(json.dumps(dict(seed, useMosh=True), indent=2))
 (state / "seed-mosh-v6.json").write_text(json.dumps(dict(seed, hostname="::1", useMosh=True), indent=2))
-print(f"wrote {state / 'seed.json'} (+ seed-mosh.json, seed-mosh-v6.json)")
+# Same host again, herdr backend — pair with `./harness.sh herdr`.
+(state / "seed-herdr.json").write_text(json.dumps(dict(seed, sessionBackend="herdr"), indent=2))
+# And the MIXED host: tmux primary, herdr opted in as a secondary. Run BOTH
+# `demo` and `herdr` first; the deck then shows both backends' tiles from one
+# connection (two exec channels per tick in state/sshd.log).
+(state / "seed-mixed.json").write_text(
+    json.dumps(dict(seed, secondaryBackends=["herdr"]), indent=2))
+print(
+    f"wrote {state / 'seed.json'} (+ seed-mosh.json, seed-mosh-v6.json, "
+    "seed-herdr.json, seed-mixed.json)")
 PY
 }
 
@@ -153,7 +180,192 @@ EOF
     echo "agent:cc parked on a permission dialog (NEEDS YOU); run '$0 turn' to clear"
 }
 
+# Seed the herdr-mode analog of `demo`: real herdr SESSIONS (the deck's
+# tiles — one tile per session, workspaces as its window lines) whose
+# agent states are reported through `pane report-agent`, herdr's own
+# integration door; each state also gets a visible `exec -a … cat` process
+# so the harness never claims an agent over a plain shell. Everything
+# lives in harness-owned sessions recorded in state/herdr-sessions so
+# `stop` retires exactly those (stop + delete) and never the developer's
+# own sessions — default and friends are never touched, though their
+# tiles will appear on the wall too (that IS the product behavior).
+#
+# Facts this leans on (herdr 0.7.5 / protocol 17, verified 2026-08-02):
+# `session attach <name>` auto-creates and auto-starts; without a TTY the
+# client dies AFTER the session server daemonizes (the same trick the
+# app's mint uses); every socket verb scopes with the global `--session`
+# flag; reportable states are idle|working|blocked|unknown; `done` is
+# derived server-side when an off-focus pane moves working → idle;
+# kinds canonicalize
+# (claude-code → claude); a fresh session labels its first workspace
+# after the attach cwd's directory name.
+herdr_demo() {
+    command -v herdr >/dev/null 2>&1 || {
+        echo "herdr not installed — brew install herdr" >&2; exit 1
+    }
+    mkdir -p "$STATE"
+
+    # The default session's server isn't required for the demo sessions,
+    # but a live default tile makes the wall honest — start it only if
+    # nothing runs, and remember the pid so stop() only stops our own.
+    if ! herdr status --json 2>/dev/null | grep -q '"running":true'; then
+        nohup herdr server > "$STATE/herdr-server.log" 2>&1 &
+        echo $! > "$STATE/herdr-server.pid"
+        for _ in $(seq 1 25); do
+            herdr status --json 2>/dev/null | grep -q '"running":true' && break
+            sleep 0.2
+        done
+        herdr status --json 2>/dev/null | grep -q '"running":true' || {
+            echo "herdr server failed to start — see $STATE/herdr-server.log" >&2
+            exit 1
+        }
+        echo "herdr server started (pid $(cat "$STATE/herdr-server.pid"))"
+    fi
+
+    # Re-runs recreate the demo topology from scratch.
+    if [ -f "$STATE/herdr-sessions" ]; then
+        while IFS= read -r sess; do
+            herdr session stop "$sess" --json >/dev/null 2>&1 || true
+            herdr session delete "$sess" --json >/dev/null 2>&1 || true
+        done < "$STATE/herdr-sessions"
+        : > "$STATE/herdr-sessions"
+    fi
+
+    # Three tiles, three attention states: mpx-demo RUNNING (claude
+    # working + extra workspaces on the spine), mpx-blocked NEEDS YOU
+    # (codex blocked), mpx-done with an off-focus derived done (pi
+    # working → idle). Ids inside a session are deterministic — a fresh
+    # session's first pane is always w1:p1.
+    python3 - "$STATE" <<'PY'
+import json, pathlib, shlex, subprocess, sys, time
+state = pathlib.Path(sys.argv[1])
+
+def herdr(session, *args, check=True, capture=False):
+    return subprocess.run(
+        ["herdr", "--session", session, *args],
+        capture_output=capture, text=True, check=check)
+
+def spawn(session):
+    # No TTY: the client dies after the session server daemonizes.
+    subprocess.run(
+        ["herdr", "session", "attach", session],
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL, check=False)
+    for _ in range(20):
+        probe = herdr(session, "api", "snapshot", check=False, capture=True)
+        if probe.returncode == 0:
+            return
+        time.sleep(0.3)
+    sys.exit(f"session {session} never answered its socket")
+
+def create(session, label, cwd):
+    out = herdr(session, "workspace", "create",
+                "--cwd", cwd, "--label", label, capture=True).stdout
+    result = json.loads(out)["result"]
+    return result["workspace"]["workspace_id"], result["root_pane"]["pane_id"]
+
+def report(session, pane, agent, status, extra=None):
+    herdr(session, "pane", "report-agent", pane,
+          "--source", "multiplex-harness", "--agent", agent,
+          "--state", status, *(extra or []))
+
+def foreground_argv0s(session, pane):
+    out = herdr(session, "pane", "process-info", "--pane", pane,
+                check=False, capture=True)
+    try:
+        info = json.loads(out.stdout)["result"]["process_info"]
+        processes = info["foreground_processes"]
+        return [str(process.get("argv0") or "") for process in processes]
+    except (KeyError, TypeError, ValueError):
+        return []
+
+def wait_for_shell(session, pane):
+    shells = {"sh", "bash", "zsh", "dash", "fish", "csh", "tcsh"}
+    for _ in range(30):
+        argv0s = foreground_argv0s(session, pane)
+        if len(argv0s) == 1:
+            name = pathlib.Path(argv0s[0].lstrip("-")).name
+            if name in shells:
+                return
+        time.sleep(0.2)
+
+def fake_agent(session, pane, argv0, title, screen):
+    # Keep the lifecycle fixture visually and structurally honest: the pane
+    # really has an agent-shaped foreground process, and its screen says so.
+    # `cat` makes it inert while `exec -a` gives herdr's own process detector
+    # the same argv[0] a real integration would own.
+    wait_for_shell(session, pane)
+    paint = "\\033[2J\\033[H\\033]0;" + title + "\\007" + screen + "\\n"
+    command = "printf '%b' " + shlex.quote(paint)
+    command += "; exec -a " + shlex.quote(argv0) + " cat"
+    herdr(session, "pane", "send-text", pane, command)
+    herdr(session, "pane", "send-keys", pane, "Enter")
+    # A login-shell update prompt can still steal one queued Enter after the
+    # process sweep looked quiet. Re-send only the key (the command remains in
+    # the editor), then require the foreground argv to prove the fake is live.
+    for attempt in range(20):
+        if argv0 in foreground_argv0s(session, pane):
+            return
+        if attempt == 5:
+            herdr(session, "pane", "send-keys", pane, "Enter")
+        time.sleep(0.2)
+    sys.exit(f"session {session} pane {pane} never launched fake {argv0}")
+
+sessions = ["mpx-demo", "mpx-blocked", "mpx-done"]
+# Record BEFORE creating: a failure mid-seed must still be retirable.
+(state / "herdr-sessions").write_text("\n".join(sessions) + "\n")
+for session in sessions:
+    spawn(session)
+
+fake_agent(
+    "mpx-demo", "w1:p1", "claude", "✳ Claude Code",
+    "✳ Claude Code — harness\\n\\nWorking on the Multiplex review…")
+report("mpx-demo", "w1:p1", "claude", "working")
+create("mpx-demo", "web", "/tmp")
+create("mpx-demo", "scratch", "/tmp")
+
+fake_agent(
+    "mpx-blocked", "w1:p1", "codex", "Action Required | Codex",
+    "OpenAI Codex — harness\\n\\nWaiting for approval…")
+report("mpx-blocked", "w1:p1", "codex", "blocked",
+       ["--message", "Allow command: npm run deploy?"])
+
+# herdr presents a settled foreground pane as idle; `done` is retained for
+# an agent that settles off-focus. Move focus to a second workspace first,
+# then the Pi working -> idle transition deterministically derives `done`.
+fake_agent(
+    "mpx-done", "w1:p1", "pi", "π - harness",
+    "Pi — harness\\n\\nTurn complete.")
+done_front, _ = create("mpx-done", "front", "/tmp")
+herdr("mpx-done", "workspace", "focus", done_front, capture=True)
+report("mpx-done", "w1:p1", "pi", "working")
+report("mpx-done", "w1:p1", "pi", "idle")
+
+print("herdr demo sessions:", ", ".join(sessions))
+PY
+    herdr session list
+    echo "point the app at state/seed-herdr.json (run '$0 start' if absent)"
+}
+
 stop() {
+    # Retire only the sessions this harness created; stop the server only
+    # if this harness started it. A developer's own herdr stays untouched.
+    if [ -f "$STATE/herdr-sessions" ]; then
+        while IFS= read -r sess; do
+            herdr session stop "$sess" --json >/dev/null 2>&1 || true
+            herdr session delete "$sess" --json >/dev/null 2>&1 || true
+        done < "$STATE/herdr-sessions"
+        rm -f "$STATE/herdr-sessions"
+    fi
+    if [ -f "$STATE/herdr-server.pid" ]; then
+        herdr server stop >/dev/null 2>&1 || true
+        kill "$(cat "$STATE/herdr-server.pid")" 2>/dev/null || true
+        rm -f "$STATE/herdr-server.pid"
+    fi
+    if [ -f "$STATE/bind.pid" ]; then
+        kill "$(cat "$STATE/bind.pid")" 2>/dev/null || true
+        rm -f "$STATE/bind.pid"
+    fi
     if [ -f "$STATE/sshd.pid" ]; then
         kill "$(cat "$STATE/sshd.pid")" 2>/dev/null || true
         rm -f "$STATE/sshd.pid"
@@ -174,11 +386,77 @@ stop() {
     done
 }
 
+# Run the real companion CLI against this harness sshd. It enrolls into the
+# harness's own authorized_keys (never ~/.ssh), announces on the LAN, and
+# takes a fixed token/PIN so a headless app launch can complete the bind:
+#
+#   MULTIPLEX_AUTO_BIND="$(./harness.sh bind --print-only)"   # QR/paste path
+#   MULTIPLEX_BIND_AUTOPIN=482163                             # discovery path
+#
+# The app ends up with a SECOND host (its own freshly enrolled key) beside
+# the seeded devbox — that separate record, and its key line in
+# state/authorized_keys, is the proof.
+bind() {
+    local CLI="${MPX_BIN:-$HOME/workspace2/multiplex-cli/target/debug/mpx}"
+    if [ ! -x "$CLI" ]; then
+        echo "no mpx binary at $CLI — build it: (cd ~/workspace2/multiplex-cli && cargo build)" >&2
+        exit 1
+    fi
+    [ -f "$STATE/authorized_keys" ] || { echo "run '$0 start' first" >&2; exit 1; }
+
+    # Fixed session material: the app side can then be launched with a known
+    # PIN, and the payload is reproducible across runs.
+    export MPX_BIND_TEST_TOKEN=33333333333333333333333333333333
+    export MPX_BIND_TEST_SESSION_SEED=1111111111111111111111111111111111111111111111111111111111111111
+    export MPX_BIND_TEST_PIN=${MPX_BIND_TEST_PIN:-482163}
+    export MPX_BIND_TEST_YES=1
+
+    local args=(
+        bind
+        --name harness-bind
+        --user "$USER"
+        --ssh-port "$PORT"
+        --authorized-keys "$STATE/authorized_keys"
+        --hostkeys-dir "$STATE"
+        --expires 600
+        # This sshd listens on loopback only, so advertise the address the
+        # app must actually dial — the simulator shares the Mac's stack, so
+        # 127.0.0.1 resolves to this machine from inside it.
+        --addr 127.0.0.1
+    )
+    # `--print-only` detaches the CLI (so the app can complete the handshake
+    # afterwards) and prints just the payload URL, ready for
+    # MULTIPLEX_AUTO_BIND. Its transcript lands in state/bind.log.
+    if [ "${1:-}" = "--print-only" ]; then
+        nohup "$CLI" "${args[@]}" --no-qr > "$STATE/bind.log" 2>&1 &
+        echo $! > "$STATE/bind.pid"
+        local url=""
+        for _ in $(seq 1 50); do
+            url=$(grep -m1 '^multiplex://b/' "$STATE/bind.log" 2>/dev/null || true)
+            [ -n "$url" ] && break
+            sleep 0.2
+        done
+        if [ -z "$url" ]; then
+            echo "mpx bind printed no payload — see $STATE/bind.log" >&2
+            exit 1
+        fi
+        echo "$url"
+        return
+    fi
+    echo "PIN is $MPX_BIND_TEST_PIN · enrolling into $STATE/authorized_keys"
+    # No --copy: the clipboard is opt-in, and a harness run has no
+    # business taking the developer's (or, via Universal Clipboard,
+    # their devices') clipboard.
+    "$CLI" "${args[@]}"
+}
+
 case "${1:-}" in
     start) start ;;
     demo) demo ;;
     turn) shift; turn "$@" ;;
     ask) ask ;;
+    herdr) herdr_demo ;;
+    bind) shift; bind "$@" ;;
     stop) stop ;;
-    *) echo "usage: $0 start|demo|turn [secs]|ask|stop" >&2; exit 1 ;;
+    *) echo "usage: $0 start|demo|turn [secs]|ask|herdr|bind [--print-only]|stop" >&2; exit 1 ;;
 esac

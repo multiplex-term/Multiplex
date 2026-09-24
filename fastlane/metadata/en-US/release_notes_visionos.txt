@@ -1,0 +1,7 @@
+Multiplex 1.4.2 — arrange the keys your way, connect to fish and csh hosts, and open remote web addresses more reliably.
+
+• Arrange Keys: open the terminal's three-dot menu, drag keys into your preferred order — including across to the other side of the title — then press DONE. RESET restores the shipped order. Your layout is remembered on this device and applies to every tab.
+• Hosts with fish or csh now work: Multiplex runs its remote commands through sh, so Test Connection, deck refresh, New Session and attach work without changing the host's login shell. If a probe still fails, the error includes shell diagnostics.
+• CTRL panels no longer stack: holding CTRL replaces an open C / B quick-key panel with Key Commands instead of leaving both open.
+• The viewport recognises IPv4-mapped IPv6 addresses in every spelling. A mapped localhost opens via the SSH host rather than connecting to this device, and local-network addresses get the right reach label.
+• Find Guide in the terminal's three-dot menu instead of the console row.

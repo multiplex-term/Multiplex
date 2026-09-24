@@ -1,39 +1,78 @@
-import SwiftUI
-import SwiftTerm
-#if DEBUG
 import os
-#endif
+import SwiftTerm
+import UIKit
 
-/// SwiftUI wrapper around SwiftTerm's UIKit `TerminalView`, themed for Multiplex
-/// and bound to a `TerminalSessionController` for SSH I/O.
-struct SwiftTermView: UIViewRepresentable {
-    let controller: TerminalSessionController
-    var fontSize: CGFloat
-    var theme: TerminalTheme
-    /// Space between terminal content and the iPad key rail for app chrome
-    /// such as the agent helper strip. The rail itself remains bottommost.
-    var bottomChromeHeight: CGFloat = 0
-    /// Side safe areas this pane spans. The pane's screen and the rail's
-    /// bezel paint through them; the grid and the keys keep clear, because a
-    /// landscape Dynamic Island sits mid-edge — squarely over text rows.
-    var contentSafeArea = EdgeInsets()
-    /// Whether this pane runs to the window's bottom edge, which makes the
-    /// rail rest there instead of on the safe-area boundary. Nothing else
-    /// derives that resting edge from the container's live frame: the helper
-    /// strip's clearance is measured from it, and would feed back.
-    var railOwnsBottomSafeArea = false
-    /// Only the window's active tab claims keyboard focus when it appears.
-    var isActive: Bool = true
-    /// A plain login shell has no tmux bindings to offer in the iPad rail.
-    var showsTmuxShortcuts = true
+/// The real terminal pane surface. UIKit callers can construct and update it
+/// directly. It owns the adopted `TerminalView`'s delegate, focus gesture,
+/// platform chrome, constraints, keyboard avoidance, and visionOS link
+/// overlay.
+@MainActor
+final class TerminalSurfaceView: UIView {
+    struct Configuration {
+        var fontSize: CGFloat
+        var theme: TerminalTheme
+        var bottomChromeHeight: CGFloat = 0
+        var contentSafeArea: UIEdgeInsets = .zero
+        var railOwnsBottomSafeArea = false
+        var isActive = true
+        /// Which multiplexer owns the rail's shortcut key (TMUX/HRDR); nil
+        /// drops the key — plain shells and auxiliary panes have no panel.
+        var shortcutBackend: Host.SessionBackend?
+        /// The tier's Key Commands cap and paywall route for the rail's
+        /// hold-CTRL panel.
+        var keyCommandPlan: KeyCommandPlan = .unrestricted
+    }
 
     private static let focusTapName = "multiplex.focus-tap"
     // Keep a compact gutter around the terminal grid, but let tmux's status
     // line meet the helper/key rail directly—any bottom inset reads as an
     // accidental black seam between the two surfaces.
-    private static let terminalInsets = UIEdgeInsets(top: 4, left: 6, bottom: 0, right: 6)
+    private static let terminalInsets = UIEdgeInsets(
+        top: 4,
+        left: 6,
+        bottom: 0,
+        right: 6
+    )
 
-    func makeUIView(context: Context) -> UIView {
+    let controller: TerminalSessionController
+    private let coordinator: Coordinator
+    private var configuration: Configuration
+
+    init(
+        controller: TerminalSessionController,
+        configuration: Configuration
+    ) {
+        self.controller = controller
+        self.configuration = configuration
+        coordinator = Coordinator(controller: controller)
+        super.init(frame: .zero)
+        // PROTOTYPE(GLASS): THIS wrapper carries the glass pane (theme
+        // background at `screenAlpha`) — it spans the whole silhouette, so
+        // the tint fills the compact gutter to the window border instead of
+        // leaving a bare-smoke band around the inset grid (user report
+        // 2026-08-02: "different border"). The grid's own layer goes clear.
+        backgroundColor = GlassPrototype.terminalGround(
+            themeBackground: UIColor(configuration.theme.background)
+        )
+        isOpaque = !GlassPrototype.enabled
+        installTerminal()
+        // PROTOTYPE(GLASS): a live GLASS⇄DARK switch re-applies the theme so
+        // the fork's model ground follows the selection, not just the layer.
+        registerForTraitChanges(
+            [GlassAppearanceTrait.self]
+        ) { (surface: TerminalSurfaceView, _: UITraitCollection) in
+            guard let view = surface.coordinator.terminalView,
+                  view.isDescendant(of: surface) else { return }
+            surface.apply(surface.configuration.theme, to: view)
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    private func installTerminal() {
         let view: TerminalView
         if let existing = controller.terminalView {
             // This tab moved here from another window (merge/split): adopt
@@ -45,9 +84,12 @@ struct SwiftTermView: UIViewRepresentable {
         } else {
             view = TerminalView(
                 frame: .zero,
-                font: .monospacedSystemFont(ofSize: fontSize, weight: .regular)
+                font: .monospacedSystemFont(
+                    ofSize: configuration.fontSize,
+                    weight: .regular
+                )
             )
-            view.changeScrollback(5000)
+            view.changeScrollback(controller.localScrollbackLines)
             // Use the standard keyboard so the user's selected language and
             // multistage IMEs remain available instead of forcing ASCII input.
             view.keyboardType = .default
@@ -67,13 +109,25 @@ struct SwiftTermView: UIViewRepresentable {
             view.inputAccessoryView = nil
             #endif
         }
-        view.renderUpdatesEnabled = isActive
-        apply(theme, to: view, coordinator: context.coordinator)
-        if view.font.pointSize != fontSize {
-            view.font = .monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        view.renderUpdatesEnabled = configuration.isActive
+        apply(configuration.theme, to: view)
+        if view.font.pointSize != configuration.fontSize {
+            view.font = .monospacedSystemFont(
+                ofSize: configuration.fontSize,
+                weight: .regular
+            )
         }
-        view.terminalDelegate = context.coordinator
-        context.coordinator.terminalView = view
+        view.terminalDelegate = coordinator
+        // Replace, never stack: an adopted view still carries the previous
+        // window's sampler. The fork calls this on the feed thread, so hop
+        // unconditionally — one path, and the sample is displayed at a ~5 s
+        // cadence anyway.
+        view.echoLatencySampleHandler = { [weak controller] milliseconds in
+            Task { @MainActor in
+                controller?.recordEchoSample(milliseconds: milliseconds)
+            }
+        }
+        coordinator.terminalView = view
 
         // Tapping the terminal claims app-wide keyboard focus (and re-summons
         // a dismissed keyboard) — without cancelling SwiftTerm's own
@@ -83,12 +137,12 @@ struct SwiftTermView: UIViewRepresentable {
             .filter { $0.name == Self.focusTapName }
             .forEach(view.removeGestureRecognizer)
         let tap = UITapGestureRecognizer(
-            target: context.coordinator,
+            target: coordinator,
             action: #selector(Coordinator.reclaimFocus(_:))
         )
         tap.name = Self.focusTapName
         tap.cancelsTouchesInView = false
-        tap.delegate = context.coordinator
+        tap.delegate = coordinator
         view.addGestureRecognizer(tap)
 
         // On iPad, the app-owned rail is a normal sibling below the terminal.
@@ -97,52 +151,85 @@ struct SwiftTermView: UIViewRepresentable {
         // never enter TextInputUI's custom-accessory path. On visionOS the
         // keyboard floats in its own panel and never overlaps the window.
         #if os(visionOS)
-        let container = UIView()
-        container.addSubview(view)
+        addSubview(view)
         view.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            view.topAnchor.constraint(equalTo: container.topAnchor, constant: Self.terminalInsets.top),
-            view.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: Self.terminalInsets.left),
-            view.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -Self.terminalInsets.right),
-            view.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -Self.terminalInsets.bottom),
+            view.topAnchor.constraint(
+                equalTo: topAnchor,
+                constant: Self.terminalInsets.top
+            ),
+            view.leadingAnchor.constraint(
+                equalTo: leadingAnchor,
+                constant: Self.terminalInsets.left
+            ),
+            view.trailingAnchor.constraint(
+                equalTo: trailingAnchor,
+                constant: -Self.terminalInsets.right
+            ),
+            view.bottomAnchor.constraint(
+                equalTo: bottomAnchor,
+                constant: -Self.terminalInsets.bottom
+            ),
         ])
+        // Gaze hover for links: the overlay is a subview of the terminal
+        // (its touches keep feeding the terminal's own pan recognizers) and
+        // survives merge/split with it — reuse the one already riding an
+        // adopted view rather than stacking another.
+        let overlay = view.subviews.compactMap { $0 as? TerminalLinkHoverOverlay }.first
+            ?? {
+                let created = TerminalLinkHoverOverlay(terminalView: view)
+                view.addSubview(created)
+                return created
+            }()
+        overlay.activate = { [weak controller] target in
+            _ = controller?.activateLink(target)
+        }
+        coordinator.linkHoverOverlay = overlay
+        controller.onOutputFlushed = { [weak overlay] in
+            overlay?.scheduleRefresh()
+        }
+        overlay.scheduleRefresh()
         #else
-        let container = KeyboardAvoidingContainer()
         let keyBar = TerminalKeyBar(
             terminal: view,
-            performTmuxShortcut: { [weak controller] shortcut in
-                controller?.performTmuxShortcut(shortcut)
+            controller: controller,
+            performShortcut: { [weak controller] item in
+                controller?.performPanelShortcut(item)
             },
             finishTmuxCopyMode: { [weak controller] in
                 controller?.finishTmuxCopyMode()
             },
-            showsTmuxShortcuts: showsTmuxShortcuts
+            shortcutBackend: configuration.shortcutBackend
         )
-        keyBar.contentSafeArea = contentSafeArea
-        context.coordinator.keyBar = keyBar
-        container.addSubview(view)
-        container.addSubview(keyBar)
+        keyBar.contentSafeArea = configuration.contentSafeArea
+        keyBar.spendsBottomStrip = configuration.railOwnsBottomSafeArea
+        keyBar.keyCommandPlan = configuration.keyCommandPlan
+        coordinator.keyBar = keyBar
+        addSubview(view)
+        addSubview(keyBar)
         view.translatesAutoresizingMaskIntoConstraints = false
         keyBar.translatesAutoresizingMaskIntoConstraints = false
         let terminalTop = view.topAnchor.constraint(
-            equalTo: container.topAnchor,
+            equalTo: topAnchor,
             constant: Self.terminalInsets.top
         )
-        let keyBarBottom = keyBar.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+        let keyBarBottom = keyBar.bottomAnchor.constraint(equalTo: bottomAnchor)
         let terminalBottom = view.bottomAnchor.constraint(
             equalTo: keyBar.topAnchor,
-            constant: -(Self.terminalInsets.bottom + bottomChromeHeight)
+            constant: -(
+                Self.terminalInsets.bottom + configuration.bottomChromeHeight
+            )
         )
         // The container spans whatever side safe areas the shell handed it,
         // and the pane's screen paints across them. The grid does not: it
         // rides these constants back inside the readable region.
         let terminalLeading = view.leadingAnchor.constraint(
-            equalTo: container.leadingAnchor,
-            constant: Self.terminalInsets.left + contentSafeArea.leading
+            equalTo: leadingAnchor,
+            constant: Self.terminalInsets.left + configuration.contentSafeArea.left
         )
         let terminalTrailing = view.trailingAnchor.constraint(
-            equalTo: container.trailingAnchor,
-            constant: -(Self.terminalInsets.right + contentSafeArea.trailing)
+            equalTo: trailingAnchor,
+            constant: -(Self.terminalInsets.right + configuration.contentSafeArea.right)
         )
         // A docked keyboard lifts the rail by the measured overlap, and the
         // strip it vacates otherwise shows the terminal theme — under a light
@@ -152,87 +239,140 @@ struct SwiftTermView: UIViewRepresentable {
         // always sits over appearance-correct hardware; its top rides the
         // rail's bottom anchor, so it is exactly the keyboard-covered band
         // and collapses to nothing when no keyboard docks.
+        let keyBarHeight = keyBar.heightAnchor.constraint(
+            equalToConstant: TerminalKeyBar.barHeight(
+                spendsBottomStrip: configuration.railOwnsBottomSafeArea
+            )
+        )
         let keyboardBackfill = UIView()
-        keyboardBackfill.backgroundColor = UIColor(Theme.bezel)
+        keyboardBackfill.backgroundColor = TallyPalette.bezel
         keyboardBackfill.isUserInteractionEnabled = false
-        container.insertSubview(keyboardBackfill, belowSubview: keyBar)
+        insertSubview(keyboardBackfill, belowSubview: keyBar)
         keyboardBackfill.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             terminalTop,
             terminalLeading,
             terminalTrailing,
             terminalBottom,
-            keyBar.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            keyBar.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            keyBar.heightAnchor.constraint(equalToConstant: TerminalKeyBar.barHeight),
+            keyBar.leadingAnchor.constraint(equalTo: leadingAnchor),
+            keyBar.trailingAnchor.constraint(equalTo: trailingAnchor),
+            keyBarHeight,
             keyBarBottom,
             keyboardBackfill.topAnchor.constraint(equalTo: keyBar.bottomAnchor),
-            keyboardBackfill.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            keyboardBackfill.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            keyboardBackfill.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            keyboardBackfill.leadingAnchor.constraint(equalTo: leadingAnchor),
+            keyboardBackfill.trailingAnchor.constraint(equalTo: trailingAnchor),
+            keyboardBackfill.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
-        context.coordinator.installKeyboardAvoidance(
-            container: container,
+        coordinator.installKeyboardAvoidance(
+            container: self,
             constraint: keyBarBottom,
             terminalTopConstraint: terminalTop,
             terminalBottomConstraint: terminalBottom,
             terminalLeadingConstraint: terminalLeading,
             terminalTrailingConstraint: terminalTrailing
         )
-        container.onLayout = { [weak coordinator = context.coordinator] in
-            coordinator?.containerDidLayout()
-        }
+        coordinator.keyBarHeightConstraint = keyBarHeight
+        coordinator.setRailOwnsBottomSafeArea(configuration.railOwnsBottomSafeArea)
         #endif
 
+        // Experimental Metal renderer (visionOS scale + glass fixes live in
+        // the fork): a Settings toggle, default off, with MULTIPLEX_METAL=1
+        // as the harness/scheme override. Applied at install so a changed
+        // setting reaches new terminal windows and re-hosted (merge/split)
+        // tabs; setUseMetal early-returns when the state already matches.
+        let wantsMetal = MetalRendererSetting.isEnabled
+        if wantsMetal != view.isUsingMetalRenderer {
+            let log = Logger(
+                subsystem: "app.multiplexterm.multiplex",
+                category: "render"
+            )
+            do {
+                try view.setUseMetal(wantsMetal)
+                log.info("Metal renderer \(wantsMetal ? "enabled" : "disabled")")
+            } catch {
+                log.error("setUseMetal(\(wantsMetal)) failed: \(error)")
+            }
+        }
+
         controller.bind(view)
-        if isActive {
+        if configuration.isActive {
             DispatchQueue.main.async {
                 TerminalFocusArbiter.claim(view)
             }
         }
-        return container
     }
 
-    func updateUIView(_ container: UIView, context: Context) {
+    func update(configuration: Configuration) {
+        self.configuration = configuration
+        backgroundColor = GlassPrototype.terminalGround(
+            themeBackground: UIColor(configuration.theme.background)
+        )
         // A moved tab's view may already belong to another window while this
-        // (about to be torn down) representable gets one last update.
-        guard let view = context.coordinator.terminalView,
-              view.isDescendant(of: container) else { return }
-        if view.renderUpdatesEnabled != isActive {
-            view.renderUpdatesEnabled = isActive
+        // (about to be torn down) surface gets one last update.
+        guard let view = coordinator.terminalView,
+              view.isDescendant(of: self) else { return }
+        if view.renderUpdatesEnabled != configuration.isActive {
+            view.renderUpdatesEnabled = configuration.isActive
         }
-        let fontChanged = view.font.pointSize != fontSize
+        #if os(visionOS)
+        // An obscured tab's links must not glow through the tab on screen.
+        if let overlay = coordinator.linkHoverOverlay {
+            if overlay.isHidden == configuration.isActive {
+                overlay.isHidden = !configuration.isActive
+                if configuration.isActive {
+                    overlay.scheduleRefresh()
+                } else {
+                    overlay.clearRegions()
+                }
+            }
+        }
+        #endif
+        let fontChanged = view.font.pointSize != configuration.fontSize
         if fontChanged {
-            view.font = .monospacedSystemFont(ofSize: fontSize, weight: .regular)
+            view.font = .monospacedSystemFont(
+                ofSize: configuration.fontSize,
+                weight: .regular
+            )
         }
-        if context.coordinator.appliedTheme != theme {
-            apply(theme, to: view, coordinator: context.coordinator)
+        if coordinator.appliedTheme != configuration.theme {
+            apply(configuration.theme, to: view)
+        } else if coordinator.appliedCaretVisible != (controller.status == .live) {
+            // The pane re-runs this update on every observed status change,
+            // which is where a connecting tab earns its caret back.
+            applyCaretColor(theme: configuration.theme, to: view)
         }
         #if !os(visionOS)
-        context.coordinator.updateBottomChromeHeight(
-            Self.terminalInsets.bottom + bottomChromeHeight
+        coordinator.updateBottomChromeHeight(
+            Self.terminalInsets.bottom + configuration.bottomChromeHeight
         )
-        context.coordinator.updateContentSafeArea(
-            leading: contentSafeArea.leading,
-            trailing: contentSafeArea.trailing
-        )
-        context.coordinator.railOwnsBottomSafeArea = railOwnsBottomSafeArea
+        coordinator.updateContentSafeArea(configuration.contentSafeArea)
+        coordinator.setRailOwnsBottomSafeArea(configuration.railOwnsBottomSafeArea)
+        coordinator.keyBar?.keyCommandPlan = configuration.keyCommandPlan
         if fontChanged {
-            context.coordinator.terminalMetricsDidChange()
+            coordinator.terminalMetricsDidChange()
         }
         #endif
     }
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(controller: controller)
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        #if !os(visionOS)
+        coordinator.containerDidLayout()
+        #endif
     }
 
     /// Colors change live — SwiftTerm's setters queue a full redraw, so an
     /// open session re-skins in place when the user switches themes.
-    private func apply(_ theme: TerminalTheme, to view: TerminalView, coordinator: Coordinator) {
-        view.nativeBackgroundColor = UIColor(theme.background)
+    private func apply(_ theme: TerminalTheme, to view: TerminalView) {
+        // PROTOTYPE(GLASS): keep the fork's own non-opaque invariant — cells
+        // stay transparent (`nativeBackgroundColor = .clear` is exactly what
+        // its setupOptions chose) and the pane ground lives on the view's
+        // layer below, at `screenAlpha`, tinted by the selected theme.
+        view.nativeBackgroundColor = GlassPrototype.terminalNativeGround(
+            themeBackground: UIColor(theme.background)
+        )
         view.nativeForegroundColor = UIColor(theme.foreground)
-        view.caretColor = UIColor(theme.cursor)
+        applyCaretColor(theme: theme, to: view)
         view.selectedTextBackgroundColor = UIColor(theme.cursor).withAlphaComponent(0.3)
         // SwiftTerm 1.15 adds an explicit selected-text foreground whose
         // upstream default is black. Preserve the theme's former text color,
@@ -247,7 +387,11 @@ struct SwiftTermView: UIViewRepresentable {
                 )
             })
         }
-        view.backgroundColor = UIColor(theme.background)
+        // PROTOTYPE(GLASS): the surface wrapper above carries the pane
+        // tint edge-to-edge; the grid's own layer stays clear over it.
+        view.backgroundColor = GlassPrototype.terminalWrapperGround(
+            themeBackground: UIColor(theme.background)
+        )
         // The keyboard belongs to the chassis, not the terminal surface:
         // `.default` follows the window's appearance (the Settings choice via
         // `overrideUserInterfaceStyle`), so a light terminal theme under dark
@@ -256,13 +400,32 @@ struct SwiftTermView: UIViewRepresentable {
         coordinator.appliedTheme = theme
     }
 
+    /// The caret carries the theme's cursor color — tally red in the house
+    /// themes — and SwiftTerm parks it at row 0 / column 0 while the screen is
+    /// still empty. Over the CONNECTING panel that lone red glyph reads as a
+    /// rendering fault, so the caret stays invisible until the tab's transport
+    /// is actually live.
+    private func applyCaretColor(theme: TerminalTheme, to view: TerminalView) {
+        let visible = controller.status == .live
+        view.caretColor = visible ? UIColor(theme.cursor) : .clear
+        coordinator.appliedCaretVisible = visible
+    }
+
     /// Forwards SwiftTerm delegate events to the session controller.
     /// SwiftTerm calls these on the main thread; `assumeIsolated` bridges
     /// into the controller's MainActor isolation.
     final class Coordinator: NSObject, TerminalViewDelegate, UIGestureRecognizerDelegate {
         let controller: TerminalSessionController
         weak var terminalView: TerminalView?
+        #if os(visionOS)
+        /// Gaze link regions — owned by the terminal view it floats over,
+        /// referenced here for visibility gating and scroll refreshes.
+        weak var linkHoverOverlay: TerminalLinkHoverOverlay?
+        #endif
         var appliedTheme: TerminalTheme?
+        /// Whether the last applied caret color was the theme's cursor (live)
+        /// or clear. `nil` until the first application.
+        var appliedCaretVisible: Bool?
 
         init(controller: TerminalSessionController) {
             self.controller = controller
@@ -270,7 +433,8 @@ struct SwiftTermView: UIViewRepresentable {
 
         #if !os(visionOS)
         weak var keyBar: TerminalKeyBar?
-        var railOwnsBottomSafeArea = false
+        private(set) var railOwnsBottomSafeArea = false
+        var keyBarHeightConstraint: NSLayoutConstraint?
         private weak var avoidingContainer: UIView?
         private var bottomConstraint: NSLayoutConstraint?
         private var terminalTopConstraint: NSLayoutConstraint?
@@ -337,6 +501,23 @@ struct SwiftTermView: UIViewRepresentable {
             }
         }
 
+        /// Whether this pane reaches the window's bottom edge instead of the
+        /// bottom safe area's. It moves with rotation on iPhone, and the rail
+        /// grows its own chassis when it does, so keep the fact, the bar, and
+        /// the height constraint in one place.
+        func setRailOwnsBottomSafeArea(_ owns: Bool) {
+            guard owns != railOwnsBottomSafeArea || keyBar?.spendsBottomStrip != owns
+            else { return }
+            railOwnsBottomSafeArea = owns
+            keyBar?.spendsBottomStrip = owns
+            let height = TerminalKeyBar.barHeight(spendsBottomStrip: owns)
+            guard let constraint = keyBarHeightConstraint,
+                  constraint.constant != height
+            else { return }
+            constraint.constant = height
+            avoidingContainer?.layoutIfNeeded()
+        }
+
         func updateBottomChromeHeight(_ height: CGFloat) {
             guard let constraint = terminalBottomConstraint,
                   constraint.constant != -height
@@ -348,15 +529,15 @@ struct SwiftTermView: UIViewRepresentable {
         /// Rotating a phone moves the Island's band from one long edge to the
         /// other, and hiding the deck rail hands the leading band to this
         /// pane. Both change the grid's clearance without rebuilding it.
-        func updateContentSafeArea(leading: CGFloat, trailing: CGFloat) {
-            keyBar?.contentSafeArea = EdgeInsets(
-                top: 0, leading: leading, bottom: 0, trailing: trailing
-            )
+        func updateContentSafeArea(_ safeArea: UIEdgeInsets) {
+            keyBar?.contentSafeArea = safeArea
             guard let leadingConstraint = terminalLeadingConstraint,
                   let trailingConstraint = terminalTrailingConstraint
             else { return }
-            let leadingConstant = SwiftTermView.terminalInsets.left + leading
-            let trailingConstant = -(SwiftTermView.terminalInsets.right + trailing)
+            let leadingConstant = TerminalSurfaceView.terminalInsets.left
+                + safeArea.left
+            let trailingConstant = -(TerminalSurfaceView.terminalInsets.right
+                + safeArea.right)
             guard leadingConstraint.constant != leadingConstant
                     || trailingConstraint.constant != trailingConstant
             else { return }
@@ -375,13 +556,13 @@ struct SwiftTermView: UIViewRepresentable {
         /// a tmux status line hugs the lower chrome. One physical pixel stays
         /// below the grid to keep the PTY safely in the same row-count bucket.
         private func alignTerminalGridTowardBottom() {
-            guard controller.route.sessionName != nil,
+            guard controller.route.usesTmux,
                   let view = terminalView,
                   let topConstraint = terminalTopConstraint,
                   view.bounds.height > 0
             else { return }
 
-            let baseTop = SwiftTermView.terminalInsets.top
+            let baseTop = TerminalSurfaceView.terminalInsets.top
             let appliedNudge = max(0, topConstraint.constant - baseTop)
             let rawHeight = view.bounds.height + appliedNudge
             let rows = view.getTerminal().rows
@@ -496,8 +677,8 @@ struct SwiftTermView: UIViewRepresentable {
 
         /// Recomputes rail clearance and `keyboardObstruction` from the last
         /// docked frame against the current window position. The helper value
-        /// is measured against the window so its SwiftUI padding cannot feed
-        /// back into the measurement.
+        /// is measured against the window so its own content insets cannot
+        /// feed back into the measurement.
         func reapplyKeyboardLayout() {
             guard let container = avoidingContainer,
                   let constraint = bottomConstraint,
@@ -542,7 +723,7 @@ struct SwiftTermView: UIViewRepresentable {
         #if DEBUG
         /// Diagnosis aid for keyboard-geometry bugs: dumps what the
         /// notification reported, what the classifier decided, and where
-        /// SwiftUI put the container — read with
+        /// UIKit put the container — read with
         /// `log show --predicate 'subsystem == "app.multiplexterm.multiplex"'`.
         private func logKeyboardDiagnostics(_ notification: Notification, container: UIView, window: UIWindow) {
             let endFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect ?? .null
@@ -597,19 +778,44 @@ struct SwiftTermView: UIViewRepresentable {
             }
         }
 
+        /// OSC 52 write. The remote naming the device clipboard is the
+        /// mechanism `mpx bind --copy` rides (and tmux's own `set-clipboard`),
+        /// so it stays — bounded, because the payload is remote bytes and a
+        /// clipboard entry nobody can read back is not worth a megabyte.
         func clipboardCopy(source: TerminalView, content: Data) {
-            if let text = String(data: content, encoding: .utf8) {
-                UIPasteboard.general.string = text
-            }
+            guard content.count <= Coordinator.maxClipboardWriteBytes,
+                  let text = String(data: content, encoding: .utf8)
+            else { return }
+            UIPasteboard.general.string = text
         }
 
+        /// OSC 52 read is deliberately unanswered. The query is pane output —
+        /// any remote process that can print can send it — and answering it
+        /// hands the device pasteboard (passwords, tokens, whatever was last
+        /// copied) back over the wire with nothing on screen to show for it.
+        /// Paste stays a user action: the key bar, the selection menu, and the
+        /// system paste control all still work.
         func clipboardRead(source: TerminalView) -> Data? {
-            UIPasteboard.general.string.map { Data($0.utf8) }
+            nil
         }
+
+        static let maxClipboardWriteBytes = 256 * 1024
 
         func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
-        func scrolled(source: TerminalView, position: Double) {}
-        func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {}
+        func scrolled(source: TerminalView, position: Double) {
+            #if os(visionOS)
+            // Scrollback browsing moves links under fixed regions — re-place
+            // them for the rows now visible.
+            linkHoverOverlay?.scheduleRefresh()
+            #endif
+        }
+        /// Only reached if the view's `linkActivationHandler` is ever absent —
+        /// `bind` installs one. Kept wired so the two routes can't disagree.
+        func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
+            MainActor.assumeIsolated {
+                _ = controller.activateLink(link)
+            }
+        }
 
         func bell(source: TerminalView) {
             MainActor.assumeIsolated {
@@ -621,18 +827,20 @@ struct SwiftTermView: UIViewRepresentable {
     }
 }
 
-#if !os(visionOS)
-/// Terminal wrapper that offers every layout pass to the coordinator. It
-/// aligns SwiftTerm's fractional grid remainder and re-measures docked
-/// keyboard geometry because Stage Manager, Split View, and rotation can move
-/// the terminal without a notification; unchanged/floating passes do no
-/// constraint work.
-private final class KeyboardAvoidingContainer: UIView {
-    var onLayout: (() -> Void)?
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        onLayout?()
+extension TerminalView {
+    /// True while the user is actively typing into this terminal — read from
+    /// the same send-path stamp the fork's immediate-display window uses, so
+    /// every input road (IME commits, the key rail, kitty-encoded hardware
+    /// keys, dictation chunks) counts, and none has to report separately.
+    /// Chrome uses it to defer work that has no business running between
+    /// keystrokes: the focused-pane agent probe and the gaze hover-region
+    /// rebuild both wait for a quiet gap instead.
+    func hasRecentUserInput(within window: Duration) -> Bool {
+        let last = lastUserInputUptimeNanoseconds
+        guard last > 0 else { return false }
+        let now = DispatchTime.now().uptimeNanoseconds
+        guard now >= last else { return false }
+        let windowNs = UInt64(window / .nanoseconds(1))
+        return now - last <= windowNs
     }
 }
-#endif

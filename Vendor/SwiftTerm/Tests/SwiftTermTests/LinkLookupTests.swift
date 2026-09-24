@@ -32,7 +32,7 @@ final class LinkLookupTests: TerminalDelegate {
         terminal.feed(text: "abc")
 
         let payload = "id;https://example.com"
-        let atom = TinyAtom.lookup(value: payload)!
+        let atom = terminal.makePayload(value: payload)!
         let line = terminal.displayBuffer.lines[0]
         var cd = line[1]
         cd.setPayload(atom: atom)
@@ -40,6 +40,72 @@ final class LinkLookupTests: TerminalDelegate {
 
         let link = terminal.link(at: .buffer(Position(col: 1, row: 0)), mode: .explicitOnly)
         #expect(link == "https://example.com")
+    }
+
+    @Test func testGarbageCollectionDoesNotReleaseAnotherTerminalsPayload() {
+        let first = Terminal(delegate: self, options: TerminalOptions(cols: 20, rows: 1))
+        let second = Terminal(delegate: self, options: TerminalOptions(cols: 20, rows: 1))
+
+        first.feed(text: "\u{1b}]8;;https://first.example\u{07}first\u{1b}]8;;\u{07}")
+        second.feed(text: "\u{1b}]8;;https://second.example\u{07}second\u{1b}]8;;\u{07}")
+
+        let firstAtom = first.displayBuffer.lines[0][0].payload
+        let secondAtom = second.displayBuffer.lines[0][0].payload
+        #expect(firstAtom.target != nil)
+        #expect(secondAtom.target != nil)
+
+        first.feed(text: "\u{1b}[2J")
+        first.garbageCollectPayload()
+
+        #expect(firstAtom.target == nil)
+        #expect(secondAtom.target != nil)
+    }
+
+    @Test func testTinyAtomConcurrentLookupAndRelease() async {
+        let allValuesMatched = await withTaskGroup(of: Bool.self, returning: Bool.self) { group in
+            for value in 0..<1_000 {
+                group.addTask {
+                    guard let atom = TinyAtom.lookup(value: value) else {
+                        return false
+                    }
+                    let matched = atom.target as? Int == value
+                    atom.release()
+                    return matched
+                }
+            }
+
+            var result = true
+            for await matched in group {
+                result = result && matched
+            }
+            return result
+        }
+
+        #expect(allValuesMatched)
+    }
+
+    @Test func testTerminalOwnedPayloadIsGarbageCollected() throws {
+        let terminal = Terminal(delegate: self, options: TerminalOptions(cols: 10, rows: 1))
+        terminal.feed(text: "abc")
+
+        let atom = try #require(terminal.makePayload(value: "https://example.com"))
+        let line = try #require(terminal.getLine(row: 0))
+        var cell = line[0]
+        cell.setPayload(atom: atom)
+        line[0] = cell
+
+        terminal.feed(text: "\u{1b}[2J")
+        terminal.garbageCollectPayload()
+
+        #expect(atom.target == nil)
+    }
+
+    @Test func testCallerOwnedPayloadCanBeReleased() throws {
+        let atom = try #require(TinyAtom.lookup(value: "https://example.com"))
+
+        atom.release()
+
+        #expect(atom.target == nil)
     }
 
     @Test func testImplicitUrlLookup() {
@@ -143,5 +209,51 @@ final class LinkLookupTests: TerminalDelegate {
 
         let link = terminal.link(at: .screen(Position(col: 10, row: 0)), mode: .explicitAndImplicit)
         #expect(link == "https://www.example.com")
+    }
+}
+
+// Multiplex patch: gaze link regions (visionOS) — the visible-screen
+// enumerator behind hover affordances.
+final class VisibleLinkMatchTests: TerminalDelegate {
+    func send(source: Terminal, data: ArraySlice<UInt8>) {
+    }
+
+    @Test func testEnumeratesEveryVisibleLink() {
+        let terminal = Terminal(delegate: self, options: TerminalOptions(cols: 60, rows: 6))
+        terminal.feed(text: "see https://example.com/docs now\r\n")
+        terminal.feed(text: "plain text row\r\n")
+        terminal.feed(text: "next http://192.168.1.68:5173/ here")
+
+        let matches = terminal.visibleLinkMatches()
+        let urls = matches.map(\.text)
+        #expect(urls.contains("https://example.com/docs"))
+        #expect(urls.contains("http://192.168.1.68:5173/"))
+
+        let first = matches.first { $0.text == "https://example.com/docs" }
+        #expect(first?.rowRanges.count == 1)
+        #expect(first?.rowRanges.first?.row == 0)
+        #expect(first?.rowRanges.first?.columns == 4..<28)
+    }
+
+    @Test func testMatchesAreReportedOnceAndProbeStrideCannotMissThem() {
+        let terminal = Terminal(delegate: self, options: TerminalOptions(cols: 40, rows: 4))
+        // Offset by 2 so the match straddles probe-stride boundaries.
+        terminal.feed(text: "ab http://a.io x http://b.io\r\n")
+
+        let matches = terminal.visibleLinkMatches()
+        #expect(matches.filter { $0.text == "http://a.io" }.count == 1)
+        #expect(matches.filter { $0.text == "http://b.io" }.count == 1)
+    }
+
+    @Test func testWrappedLinkReportsBothRowsOnce() {
+        let terminal = Terminal(delegate: self, options: TerminalOptions(cols: 20, rows: 4))
+        // 20-column terminal: the URL wraps onto the second row.
+        terminal.feed(text: "https://example.com/abcdefgh")
+
+        let matches = terminal.visibleLinkMatches()
+        #expect(matches.count == 1)
+        #expect(matches.first?.rowRanges.count == 2)
+        #expect(matches.first?.rowRanges.first?.row == 0)
+        #expect(matches.first?.rowRanges.last?.row == 1)
     }
 }

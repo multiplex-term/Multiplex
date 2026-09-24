@@ -1,5 +1,8 @@
 import Foundation
 import Observation
+#if DEBUG
+import notify
+#endif
 
 /// Hosts persisted as JSON in Application Support — a local cache of the
 /// cross-device truth. Secrets and a mirrored copy of each host record live
@@ -20,10 +23,17 @@ final class HostStore {
     /// this host". Device-local bookkeeping, so UserDefaults is fine.
     private var mirroredIDs: Set<UUID>
     private static let mirroredIDsKey = "MultiplexMirroredHostIDs"
-    /// Device-local deck preference: host ID → session names in display
-    /// order. tmux remains the source of truth for which sessions exist.
+    /// Host → the user's tile order as `SessionKey.storageKey` strings.
+    /// The backends remain the source of truth for which sessions exist.
+    /// Device-local presentation preference. Entries written before mixed
+    /// hosts are bare names, which `SessionKey(storageKey:)` reads as tmux
+    /// keys — exactly what they were — so the file needs no migration.
     private var sessionOrders: [UUID: [String]] = [:]
     private static let sessionOrdersKey = "MultiplexSessionOrders"
+    /// Host → the session the user last opened there — the widgets' "last
+    /// session". Device-local like the tile order, never synced.
+    private(set) var recentSessions: [UUID: SessionKey] = [:]
+    private static let recentSessionsKey = "MultiplexRecentSessions"
     private var isRefreshingFromCloud = false
 
     init(
@@ -43,8 +53,16 @@ final class HostStore {
         // An injected directory is a persistence test boundary; do not pull
         // unrelated device presentation preferences into that isolated store.
         sessionOrders = overrideDirectory == nil ? Self.loadSessionOrders() : [:]
+        recentSessions = overrideDirectory == nil ? Self.loadRecentSessions() : [:]
         load()
-        if overrideDirectory == nil { seedFromEnvironmentIfNeeded() }
+        if overrideDirectory == nil {
+            seedFromEnvironmentIfNeeded()
+            #if DEBUG
+            installDebugHostEnableHook()
+            installDebugHostKeepAliveHook()
+            installDebugBackendOfferHook()
+            #endif
+        }
     }
 
     func add(_ host: Host) {
@@ -73,6 +91,8 @@ final class HostStore {
         persistMirroredIDs()
         sessionOrders.removeValue(forKey: host.id)
         persistSessionOrders()
+        if recentSessions.removeValue(forKey: host.id) != nil { persistRecentSessions() }
+        BackendOfferPreferences().forget(hostID: host.id)
         save()
     }
 
@@ -101,6 +121,83 @@ final class HostStore {
         hosts.first { $0.id == id }
     }
 
+    /// The deck's per-host power switch. Off means the app never dials this
+    /// host on its own — the wall stops probing it and every automatic
+    /// connect path refuses it — while the record, its secrets, and its
+    /// order all survive. It rides the synced host record like any other
+    /// edit, so the choice follows the user to their other devices.
+    func setEnabled(_ enabled: Bool, for hostID: UUID) {
+        guard let host = host(id: hostID), host.isEnabled != enabled else { return }
+        var updated = host
+        updated.isEnabled = enabled
+        update(updated)
+    }
+
+    /// One-tap backend switch — the dead-tmux tile's herdr hint and the
+    /// settings bar both land here. The field participates in
+    /// `connectionModelConfiguration`, so the wall feed rebuilds the probe
+    /// on its own.
+    func setSessionBackend(_ backend: Host.SessionBackend, for hostID: UUID) {
+        guard let host = host(id: hostID), host.sessionBackend != backend else { return }
+        var updated = host
+        // `Host` retires the new primary as a secondary on the way in, so
+        // this cannot leave a backend listed twice.
+        updated.sessionBackend = backend
+        update(updated)
+    }
+
+    /// Start or stop showing another backend's sessions on this host's deck.
+    /// The one writer of `Host.secondaryBackends` — discovery never writes
+    /// it, only offers. Turning a backend ON also clears any device-local
+    /// dismissal of its offer, so the rail chip and Host Settings can't
+    /// contradict each other.
+    func setSecondaryBackend(
+        _ monitored: Bool, backend: Host.SessionBackend, for hostID: UUID
+    ) {
+        guard let host = host(id: hostID), backend != host.sessionBackend else { return }
+        var updated = host
+        if monitored {
+            updated.secondaryBackends.insert(backend)
+            BackendOfferPreferences().setDismissed(
+                false, backend: backend, for: hostID)
+        } else {
+            updated.secondaryBackends.remove(backend)
+        }
+        guard updated.secondaryBackends != host.secondaryBackends else { return }
+        update(updated)
+    }
+
+    // MARK: - Host key pins
+
+    /// Writes down a host key learned on first connect, so every later
+    /// connection to this host is checked against it.
+    ///
+    /// Additive and idempotent: a server that legitimately grows a second key
+    /// type keeps the first, and a repeat sighting of a key already recorded
+    /// isn't a record edit (which would bump `updatedAt` and churn the
+    /// Keychain mirror on every probe). Rides the synced record like any
+    /// other host edit, so a host verified on one device is verified on the
+    /// user's others.
+    func recordHostKeyPin(_ pin: HostKeyPin, for hostID: UUID) {
+        guard let host = host(id: hostID),
+              !host.pinnedHostKeys.contains(pin.storage)
+        else { return }
+        var updated = host
+        updated.pinnedHostKeys.append(pin.storage)
+        update(updated)
+    }
+
+    /// Drops every recorded key for a host, so the next connection trusts on
+    /// first use again. The recovery path for a server that was genuinely
+    /// rebuilt — and deliberately a user action, never something a failed
+    /// connection does for itself.
+    func forgetHostKeyPins(for hostID: UUID) {
+        guard let host = host(id: hostID), !host.pinnedHostKeys.isEmpty else { return }
+        var updated = host
+        updated.pinnedHostKeys = []
+        update(updated)
+    }
+
     func agentCommandConfiguration(for hostID: UUID) -> AgentCommandConfiguration {
         host(id: hostID)?.agentCommandConfiguration
             ?? AgentCommandConfiguration()
@@ -126,17 +223,44 @@ final class HostStore {
         update(updated)
     }
 
+    // MARK: - Last-opened session
+
+    func recordSessionAttach(hostID: UUID, session: SessionKey) {
+        guard recentSessions[hostID] != session else { return }
+        recentSessions[hostID] = session
+        persistRecentSessions()
+    }
+
+    private static func loadRecentSessions() -> [UUID: SessionKey] {
+        guard let raw = UserDefaults.standard.dictionary(forKey: recentSessionsKey) as? [String: String]
+        else { return [:] }
+        return Dictionary(uniqueKeysWithValues: raw.compactMap { key, value in
+            UUID(uuidString: key).map { ($0, SessionKey(storageKey: value)) }
+        })
+    }
+
+    private func persistRecentSessions() {
+        guard persistsDevicePreferences else { return }
+        UserDefaults.standard.set(
+            Dictionary(uniqueKeysWithValues: recentSessions.map { ($0.key.uuidString, $0.value.storageKey) }),
+            forKey: Self.recentSessionsKey
+        )
+    }
+
     // MARK: - Session presentation order
 
     func orderedSessions(_ sessions: [TmuxSession], for hostID: UUID) -> [TmuxSession] {
         SessionOrdering.ordered(sessions, saved: sessionOrders[hostID])
     }
 
+    /// Sources and destination are `SessionKey.storageKey` strings, not
+    /// bare names: on a mixed host the wall interleaves two backends whose
+    /// session names can collide.
     func moveSessions(
         _ sources: [String], before destination: String?, for hostID: UUID,
         available sessions: [TmuxSession]
     ) {
-        let current = orderedSessions(sessions, for: hostID).map(\.name)
+        let current = orderedSessions(sessions, for: hostID).map(\.id.storageKey)
         setSessionOrder(
             SessionOrdering.moving(sources, before: destination, in: current),
             for: hostID,
@@ -148,7 +272,7 @@ final class HostStore {
         _ source: String, to target: String, for hostID: UUID,
         available sessions: [TmuxSession]
     ) {
-        let current = orderedSessions(sessions, for: hostID).map(\.name)
+        let current = orderedSessions(sessions, for: hostID).map(\.id.storageKey)
         setSessionOrder(
             SessionOrdering.moving(source, to: target, in: current),
             for: hostID,
@@ -285,6 +409,21 @@ final class HostStore {
         // Absent mosh keys leave the host's current setting alone, so a
         // hand-trimmed seed doesn't silently flip transports.
         if let useMosh = seed.useMosh { host.useMosh = useMosh }
+        // Same rule for the session backend: seed-herdr.json flips devbox
+        // to herdr, seed.json (absent key) leaves it as it stands.
+        if let backend = seed.sessionBackend
+            .flatMap(Host.SessionBackend.init(rawValue:)) {
+            host.sessionBackend = backend
+        }
+        // A seeded `secondaryBackends: ["herdr"]` imports a MIXED host, so a
+        // headless run can prove two probes on one connection and both
+        // backends' tiles. Absent leaves the host single-backend, which is
+        // what every existing seed means.
+        if let secondaries = seed.secondaryBackends {
+            host.secondaryBackends = Set(
+                secondaries.compactMap(Host.SessionBackend.init(rawValue:))
+            )
+        }
         // Headless tailscale-seam checks flip the seeded host without
         // touching the shared seed.json (pairs with
         // MULTIPLEX_TAILSCALE_FAKE_DIAL).
@@ -302,6 +441,11 @@ final class HostStore {
         if let scripts = seed.sessionScripts {
             host.sessionScripts = SessionScript.normalized(scripts)
         }
+        // And for launch models — headless checks of the model pickers seed
+        // known per-agent lists; an absent key leaves the host's lists alone.
+        if let models = seed.agentLaunchModels {
+            host.agentLaunchModels = Host.normalizedLaunchModels(models)
+        }
         // And for the new-session tmux conf — headless checks seed option
         // lines and read them back host-side with show-options. An absent
         // key keeps the host's current conf (the default on first import);
@@ -309,7 +453,21 @@ final class HostStore {
         if let conf = seed.newSessionTmuxConf {
             host.newSessionTmuxConf = TmuxProbe.normalizedTmuxConf(conf) ?? ""
         }
+        // A seeded `enabled: false` starts the launch with the host switched
+        // off, which is how the never-dials-it promise is checked headlessly
+        // (the harness sshd log stays empty). Absent leaves it alone.
+        if let enabled = seed.enabled { host.isEnabled = enabled }
+        // A seeded `backgroundKeepAlive: true` starts the launch opted in, so
+        // the assertion path can be driven headlessly (nothing can tap the
+        // Host Settings switch). Absent leaves it off, as a real record is.
+        if let keepAlive = seed.backgroundKeepAlive { host.backgroundKeepAlive = keepAlive }
         if let key = seed.privateKey { KeychainStore.set(key, for: host.id, kind: .privateKey) }
+        // For headless proofs of the encrypted-key connect path: a seed can
+        // carry the key's passphrase so the probe connects without the
+        // unlock prompt (which nothing can tap in a headless run).
+        if let passphrase = seed.passphrase, !passphrase.isEmpty {
+            KeychainStore.set(passphrase, for: host.id, kind: .keyPassphrase)
+        }
         if let password = seed.password { KeychainStore.set(password, for: host.id, kind: .password) }
         if hosts.contains(where: { $0.id == host.id }) {
             update(host)
@@ -320,6 +478,68 @@ final class HostStore {
     }
 
     #if DEBUG
+    /// Headless-verification hook: the deck's Enable/Disable action can't be
+    /// tapped from the CLI, so
+    /// `xcrun simctl spawn <udid> notifyutil -p app.multiplexterm.multiplex.debug.hostenable`
+    /// flips the first host through the exact store mutation the menu and the
+    /// tile use — proving that switching off drops the probe and that
+    /// switching on brings the wall back.
+    private func installDebugHostEnableHook() {
+        var token: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.hostenable", &token, .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let host = self.hosts.first else { return }
+                self.setEnabled(!host.isEnabled, for: host.id)
+            }
+        }
+    }
+
+    /// Headless-verification hook for the other Monitoring switch: flips the
+    /// FIRST host's background keep-alive through the same record write the
+    /// Host Settings row performs, so one run can prove both postures — the
+    /// hold appearing in the `background` log category and the harness sshd
+    /// log staying busy, then neither.
+    private func installDebugHostKeepAliveHook() {
+        var token: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.hostkeepalive", &token, .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let host = self.hosts.first else { return }
+                var updated = host
+                updated.backgroundKeepAlive.toggle()
+                self.update(updated)
+            }
+        }
+    }
+
+    /// Headless-verification hook for the rail's backend offer: the chip
+    /// can't be tapped from the CLI (simctl has no tap route, and idb died
+    /// under Xcode 27), so
+    /// `xcrun simctl spawn <udid> notifyutil -p app.multiplexterm.multiplex.debug.backendoffer`
+    /// accepts it for the FIRST host through the exact store mutation the
+    /// chip's confirmation and Host Settings both perform. Toggles, so one
+    /// run can prove the escalation and the way back.
+    private func installDebugBackendOfferHook() {
+        var token: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.backendoffer", &token, .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let host = self.hosts.first else { return }
+                let other: Host.SessionBackend =
+                    host.sessionBackend == .herdr ? .tmux : .herdr
+                self.setSecondaryBackend(
+                    !host.secondaryBackends.contains(other),
+                    backend: other,
+                    for: host.id
+                )
+            }
+        }
+    }
+
     private struct SeedHost: Decodable {
         var name: String
         var hostname: String
@@ -327,12 +547,18 @@ final class HostStore {
         var username: String
         var password: String?
         var privateKey: String?
+        var passphrase: String?
+        var enabled: Bool?
+        var backgroundKeepAlive: Bool?
         var useMosh: Bool?
+        var sessionBackend: String?
+        var secondaryBackends: [String]?
         var moshServerPath: String?
         var moshPorts: String?
         var workingDirs: [String]?
         var sessionScripts: [SessionScript]?
         var newSessionTmuxConf: String?
+        var agentLaunchModels: [String: [String]]?
     }
     #endif
 }

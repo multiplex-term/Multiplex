@@ -5,22 +5,30 @@ final class WidgetStateBuilderTests: XCTestCase {
     private func session(
         name: String,
         created: TimeInterval = 0,
+        serverHost: String = "",
         windows: [TmuxWindow]
     ) -> TmuxSession {
-        TmuxSession(name: name, windows: windows, created: Date(timeIntervalSince1970: created))
+        TmuxSession(
+            name: name,
+            windows: windows,
+            created: Date(timeIntervalSince1970: created),
+            serverHost: serverHost
+        )
     }
 
     private func window(
-        _ index: Int, name: String, active: Bool = false, agent: AgentKind? = nil
+        _ index: Int, name: String, active: Bool = false, agent: AgentKind? = nil,
+        paneTitle: String = ""
     ) -> TmuxWindow {
         TmuxWindow(
             index: index, name: name, isActive: active,
-            hasBell: false, hasActivity: false, agent: agent
+            hasBell: false, hasActivity: false, agent: agent, paneTitle: paneTitle
         )
     }
 
     func testHostStateProjectsSessionsWindowsAndMiniatures() {
-        let host = Host(name: "devbox", hostname: "10.0.1.7", username: "jhen")
+        var host = Host(name: "devbox", hostname: "10.0.1.7", username: "demo")
+        host.agentLaunchModels = ["codex": ["gpt-5-codex"]]
         let sessions = [session(
             name: "main",
             created: 100,
@@ -34,14 +42,41 @@ final class WidgetStateBuilderTests: XCTestCase {
         let state = WidgetStateBuilder.hostState(
             host: host,
             sessions: sessions,
-            miniatures: ["main": ["$ pnpm build", "✓ done"]],
+            // Keyed by `SessionKey.storageKey`, matching the deck snapshot
+            // this is projected from — a bare name collides across backends.
+            miniatures: ["tmux:main": ["$ pnpm build", "✓ done"]],
             probedAt: probed
         )
 
         XCTAssertEqual(state.id, host.id)
         XCTAssertEqual(state.name, "devbox")
-        XCTAssertEqual(state.address, "jhen@10.0.1.7")
+        XCTAssertEqual(state.address, "demo@10.0.1.7")
         XCTAssertEqual(state.probedAt, probed)
+        // Configured launch models feed the widget's Model setting picker;
+        // a host with none stays nil so legacy-file shape and no-config
+        // shape read the same.
+        XCTAssertEqual(state.agentModels, ["codex": ["gpt-5-codex"]])
+        XCTAssertNil(WidgetStateBuilder.hostState(
+            host: Host(name: "b", hostname: "h", username: "u"),
+            sessions: [], miniatures: [:], probedAt: nil
+        ).agentModels)
+        // The backend rides the projection so the widget configuration's
+        // placement picker can speak the host's vocabulary.
+        XCTAssertEqual(state.backendRaw, "tmux")
+        var herdrHost = Host(name: "c", hostname: "h", username: "u")
+        herdrHost.sessionBackend = .herdr
+        XCTAssertEqual(WidgetStateBuilder.hostState(
+            host: herdrHost, sessions: [], miniatures: [:], probedAt: nil
+        ).backendRaw, "herdr")
+        // Configured working dirs feed the widget's directory picker; a
+        // host with none stays nil so legacy-file shape and no-config
+        // shape read the same (paths only — script names never ride).
+        XCTAssertNil(state.workingDirs)
+        var dirHost = Host(name: "d", hostname: "h", username: "u")
+        dirHost.workingDirs = ["~/srv", "/tmp"]
+        XCTAssertEqual(WidgetStateBuilder.hostState(
+            host: dirHost, sessions: [], miniatures: [:], probedAt: nil
+        ).workingDirs, ["~/srv", "/tmp"])
         XCTAssertEqual(state.sessions.count, 1)
         let main = state.sessions[0]
         XCTAssertEqual(main.name, "main")
@@ -50,6 +85,46 @@ final class WidgetStateBuilderTests: XCTestCase {
         XCTAssertEqual(main.activeWindowIndex, 1)
         XCTAssertEqual(main.miniatureLines, ["$ pnpm build", "✓ done"])
         XCTAssertEqual(main.createdAt, Date(timeIntervalSince1970: 100))
+    }
+
+    func testPaneTitlesAreFilteredBeforeTheyReachTheWidget() {
+        let sessions = [session(
+            name: "main",
+            serverHost: "Demo-MBPr14.local",
+            windows: [
+                window(0, name: "cc", paneTitle: "✳ Claude Code"),
+                // tmux's seed and a redundant repeat both project as "" so
+                // the widget process never has to know the rule.
+                window(1, name: "server", active: true, paneTitle: "Demo-MBPr14.local"),
+                window(2, name: "logs", paneTitle: "logs"),
+            ]
+        )]
+        let state = WidgetStateBuilder.hostState(
+            host: Host(name: "devbox", hostname: "10.0.1.7", username: "demo"),
+            sessions: sessions,
+            miniatures: [:],
+            probedAt: nil
+        )
+        let main = state.sessions[0]
+        XCTAssertEqual(main.windowPaneTitles, ["✳ Claude Code", "", ""])
+        // Parallel to windowNames, so activeWindowIndex indexes both.
+        XCTAssertEqual(main.windowPaneTitles.count, main.windowNames.count)
+        XCTAssertNil(main.activePaneTitle)
+    }
+
+    func testActivePaneTitleReadsTheActiveWindowAndSurvivesLegacyFiles() {
+        let titled = WidgetSessionState(
+            name: "main",
+            windowNames: ["cc", "server"],
+            windowPaneTitles: ["✳ Claude Code", "pnpm dev"],
+            activeWindowIndex: 1
+        )
+        XCTAssertEqual(titled.activePaneTitle, "pnpm dev")
+
+        // A file written before pane titles existed carries none at all.
+        let legacy = WidgetSessionState(
+            name: "main", windowNames: ["cc", "server"], activeWindowIndex: 1)
+        XCTAssertNil(legacy.activePaneTitle)
     }
 
     func testMiniatureLinesKeepOnlyTheTail() {
@@ -79,8 +154,27 @@ final class WidgetStateBuilderTests: XCTestCase {
         ])))
     }
 
+    func testLastAttachedRidesTheSnapshotQualifiedLikeRows() {
+        var host = Host(name: "devbox", hostname: "h", username: "u")
+        let key = SessionKey(backend: .herdr, name: "main")
+        // Single-backend host: rows carry no backend, and neither does the
+        // last-attached ref — same lenient match either way.
+        let single = WidgetStateBuilder.hostState(
+            host: host, sessions: [], miniatures: [:], probedAt: nil, lastAttached: key)
+        XCTAssertEqual(single.lastAttached, WidgetSessionRef(name: "main", backendRaw: nil))
+        // Mixed host: the ref names its namespace so the widget can pick the
+        // right namesake.
+        host.secondaryBackends = [.herdr]
+        let mixed = WidgetStateBuilder.hostState(
+            host: host, sessions: [], liveMiniatures: [:], probedAt: nil, lastAttached: key)
+        XCTAssertEqual(mixed.lastAttached, WidgetSessionRef(name: "main", backendRaw: "herdr"))
+        // Unknown stays nil (legacy-file shape).
+        XCTAssertNil(WidgetStateBuilder.hostState(
+            host: host, sessions: [], miniatures: [:], probedAt: nil).lastAttached)
+    }
+
     func testContentFingerprintIgnoresProbeDatesButNotContent() {
-        let host = Host(name: "devbox", hostname: "10.0.1.7", username: "jhen")
+        let host = Host(name: "devbox", hostname: "10.0.1.7", username: "demo")
         func fleet(probed: TimeInterval, sessionName: String) -> WidgetFleetState {
             WidgetFleetState(
                 hosts: [WidgetStateBuilder.hostState(

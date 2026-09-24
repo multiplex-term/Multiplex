@@ -108,6 +108,29 @@ final class SingleWindowShellPolicyTests: XCTestCase {
         ))
     }
 
+    func testLockedPhoneReturnKeyMovesTmuxUntilAirWidth() {
+        XCTAssertTrue(SingleWindowShellLayout.showsTopBarTmuxShortcut(
+            availableWidth: 390,
+            supportsTmuxShortcuts: true,
+            keyBarIncludesReturnKey: true
+        ))
+        XCTAssertTrue(SingleWindowShellLayout.showsTopBarTmuxShortcut(
+            availableWidth: 419.999,
+            supportsTmuxShortcuts: true,
+            keyBarIncludesReturnKey: true
+        ))
+        XCTAssertFalse(SingleWindowShellLayout.showsTopBarTmuxShortcut(
+            availableWidth: 420,
+            supportsTmuxShortcuts: true,
+            keyBarIncludesReturnKey: true
+        ))
+        XCTAssertFalse(SingleWindowShellLayout.showsTopBarTmuxShortcut(
+            availableWidth: 375,
+            supportsTmuxShortcuts: false,
+            keyBarIncludesReturnKey: true
+        ))
+    }
+
     func testBackSwipeBeginsOnlyForUnselectedRightwardHorizontalIntent() {
         XCTAssertTrue(SingleWindowShellBackSwipe.shouldBegin(
             horizontalVelocity: 300,
@@ -128,6 +151,24 @@ final class SingleWindowShellPolicyTests: XCTestCase {
             horizontalVelocity: 300,
             verticalVelocity: 100,
             hasActiveTextSelection: true
+        ))
+    }
+
+    func testBackSwipeAvailabilityDoesNotDependOnMotionPreference() {
+        XCTAssertTrue(SingleWindowShellBackSwipe.isAvailable(
+            idiom: .phone,
+            expanded: false,
+            compactShowsTerminal: true
+        ))
+        XCTAssertFalse(SingleWindowShellBackSwipe.isAvailable(
+            idiom: .phone,
+            expanded: true,
+            compactShowsTerminal: true
+        ))
+        XCTAssertFalse(SingleWindowShellBackSwipe.isAvailable(
+            idiom: .pad,
+            expanded: false,
+            compactShowsTerminal: true
         ))
     }
 

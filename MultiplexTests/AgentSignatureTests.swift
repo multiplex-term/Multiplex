@@ -3,8 +3,9 @@ import XCTest
 
 /// Pins the agent-detection rules to the experiment matrix recorded in
 /// local-plan/agent-harness-helpers.md §1.1 (Claude Code v2.1.206, Codex
-/// rust-v0.144.x, Pi v0.80.7, tmux 3.6a — 2026-07-10/15). When an agent
-/// changes its signature, this file is where the new truth lands.
+/// rust-v0.144.x, Pi v0.80.7, tmux 3.6a — 2026-07-10/15; Grok Build from
+/// the xai-org/grok-build source, 2026-08-16). When an agent changes its
+/// signature, this file is where the new truth lands.
 final class AgentSignatureTests: XCTestCase {
     // MARK: new-session launch commands
 
@@ -12,24 +13,41 @@ final class AgentSignatureTests: XCTestCase {
         let prompt = "Review the SSH path"
 
         XCTAssertEqual(
-            AgentKind.claudeCode.launchCommand(initialPrompt: prompt),
+            AgentKind.claudeCode.launchCommand(model: nil, initialPrompt: prompt),
             "claude 'Review the SSH path'"
         )
         XCTAssertEqual(
-            AgentKind.codex.launchCommand(initialPrompt: prompt),
+            AgentKind.codex.launchCommand(model: nil, initialPrompt: prompt),
             "codex 'Review the SSH path'"
         )
         XCTAssertEqual(
-            AgentKind.pi.launchCommand(initialPrompt: prompt),
+            AgentKind.pi.launchCommand(model: nil, initialPrompt: prompt),
             "pi 'Review the SSH path'"
         )
+        // Grok Build: `grok "fix the bug"` is its documented interactive shape.
+        XCTAssertEqual(
+            AgentKind.grok.launchCommand(model: nil, initialPrompt: prompt),
+            "grok 'Review the SSH path'"
+        )
+        // Antigravity CLI: `agy -i "fix it"` runs an initial prompt interactively.
+        XCTAssertEqual(
+            AgentKind.antigravity.launchCommand(model: nil, initialPrompt: prompt),
+            "agy -i 'Review the SSH path'"
+        )
+        // Hermes has no interactive-with-prompt flag: `-q` answers one prompt
+        // and exits, `--continue` resumes that session interactively.
+        XCTAssertEqual(
+            AgentKind.hermes.launchCommand(model: nil, initialPrompt: prompt),
+            "hermes -q 'Review the SSH path' && hermes --continue"
+        )
+        XCTAssertEqual(AgentKind.hermes.launchCommand(model: nil, initialPrompt: "  "), "hermes")
     }
 
     func testLaunchCommandKeepsPromptInOneShellArgument() {
         let prompt = "Don't run $(touch /tmp/pwned); `id`"
 
         XCTAssertEqual(
-            AgentKind.claudeCode.launchCommand(initialPrompt: prompt),
+            AgentKind.claudeCode.launchCommand(model: nil, initialPrompt: prompt),
             "claude 'Don'\\''t run $(touch /tmp/pwned); `id`'"
         )
     }
@@ -38,19 +56,95 @@ final class AgentSignatureTests: XCTestCase {
         let prompt = "First line\r\nSecond\tcolumn\\n literal"
 
         XCTAssertEqual(
-            AgentKind.pi.launchCommand(initialPrompt: prompt),
+            AgentKind.pi.launchCommand(model: nil, initialPrompt: prompt),
             #"pi "$(printf '%b' 'First line\nSecond\tcolumn\\n literal')""#
         )
     }
 
     func testLaunchCommandIgnoresBlankPromptAndStripsTerminalControls() {
         XCTAssertEqual(
-            AgentKind.codex.launchCommand(initialPrompt: " \r\n\t "),
+            AgentKind.codex.launchCommand(model: nil, initialPrompt: " \r\n\t "),
             "codex"
         )
         XCTAssertEqual(
-            AgentKind.codex.launchCommand(initialPrompt: "Fix\u{0003} this"),
+            AgentKind.codex.launchCommand(model: nil, initialPrompt: "Fix\u{0003} this"),
             "codex 'Fix this'"
+        )
+    }
+
+    // Every supported CLI spells the override `--model <value>` (verified
+    // 2026-07-27: Claude Code 2.1.220, Codex rust 0.145.0, Pi 0.81.1).
+    func testLaunchCommandCarriesModelBeforeThePromptForEveryAgent() {
+        XCTAssertEqual(
+            AgentKind.claudeCode.launchCommand(model: "opus", initialPrompt: ""),
+            "claude --model 'opus'"
+        )
+        XCTAssertEqual(
+            AgentKind.codex.launchCommand(model: "gpt-5-codex", initialPrompt: "go"),
+            "codex --model 'gpt-5-codex' 'go'"
+        )
+        // Pi models may be provider-scoped with a thinking suffix.
+        XCTAssertEqual(
+            AgentKind.pi.launchCommand(
+                model: "anthropic/claude-opus-4:high", initialPrompt: ""),
+            "pi --model 'anthropic/claude-opus-4:high'"
+        )
+        XCTAssertEqual(
+            AgentKind.grok.launchCommand(model: "grok-build", initialPrompt: "go"),
+            "grok --model 'grok-build' 'go'"
+        )
+        XCTAssertEqual(
+            AgentKind.antigravity.launchCommand(model: "gemini-3.7-flash", initialPrompt: "go"),
+            "agy --model 'gemini-3.7-flash' -i 'go'"
+        )
+        // The resume leg carries the model too — both processes must agree.
+        XCTAssertEqual(
+            AgentKind.hermes.launchCommand(model: "anthropic/claude-sonnet-4", initialPrompt: "go"),
+            "hermes --model 'anthropic/claude-sonnet-4' -q 'go' "
+                + "&& hermes --model 'anthropic/claude-sonnet-4' --continue"
+        )
+    }
+
+    func testLaunchCommandQuotesModelSoAliasBracketsCannotGlob() {
+        // `sonnet[1m]` is a real Claude Code alias; unquoted it is a zsh
+        // glob and a failed-match error instead of a launch.
+        XCTAssertEqual(
+            AgentKind.claudeCode.launchCommand(model: "sonnet[1m]", initialPrompt: ""),
+            "claude --model 'sonnet[1m]'"
+        )
+    }
+
+    func testNormalizedLaunchModelAcceptsRealIdentifierShapes() {
+        XCTAssertEqual(AgentKind.normalizedLaunchModel("  opus  "), "opus")
+        XCTAssertEqual(
+            AgentKind.normalizedLaunchModel("claude-sonnet-4-5-20250929"),
+            "claude-sonnet-4-5-20250929"
+        )
+        XCTAssertEqual(
+            AgentKind.normalizedLaunchModel("google/gemini-2.5-pro:minimal"),
+            "google/gemini-2.5-pro:minimal"
+        )
+    }
+
+    func testNormalizedLaunchModelRejectsNonTokenShapes() {
+        // Empty and whitespace-only mean "agent default".
+        XCTAssertNil(AgentKind.normalizedLaunchModel(""))
+        XCTAssertNil(AgentKind.normalizedLaunchModel("   "))
+        // Interior whitespace could smuggle a second shell word.
+        XCTAssertNil(AgentKind.normalizedLaunchModel(
+            "opus --dangerously-skip-permissions"))
+        // A leading dash must never read as another flag.
+        XCTAssertNil(AgentKind.normalizedLaunchModel("--help"))
+        // Control bytes strip first; what remains must still be a token.
+        XCTAssertEqual(AgentKind.normalizedLaunchModel("op\u{0003}us"), "opus")
+        XCTAssertNil(AgentKind.normalizedLaunchModel(String(repeating: "m", count: 65)))
+    }
+
+    func testLaunchCommandDropsRejectedModels() {
+        XCTAssertEqual(
+            AgentKind.claudeCode.launchCommand(
+                model: "opus extra-word", initialPrompt: "go"),
+            "claude 'go'"
         )
     }
 
@@ -60,6 +154,24 @@ final class AgentSignatureTests: XCTestCase {
         XCTAssertEqual(AgentSignature.classify(command: "claude", title: ""), .claudeCode)
         XCTAssertEqual(AgentSignature.classify(command: "codex", title: ""), .codex)
         XCTAssertEqual(AgentSignature.classify(command: "pi", title: ""), .pi)
+        // Official installs ship `grok`; the cargo artifact keeps its name.
+        XCTAssertEqual(AgentSignature.classify(command: "grok", title: ""), .grok)
+        XCTAssertEqual(AgentSignature.classify(command: "xai-grok-pager", title: ""), .grok)
+        // Antigravity CLI binary `agy` and alias `antigravity`.
+        XCTAssertEqual(AgentSignature.classify(command: "agy", title: ""), .antigravity)
+        XCTAssertEqual(AgentSignature.classify(command: "antigravity", title: ""), .antigravity)
+        // Hermes's launcher and pyproject console scripts.
+        XCTAssertEqual(AgentSignature.classify(command: "hermes", title: ""), .hermes)
+        XCTAssertEqual(AgentSignature.classify(command: "hermes-agent", title: ""), .hermes)
+        // Under the installer the pane's comm is the venv interpreter, which
+        // alone proves nothing — the ps walk decides.
+        XCTAssertNil(AgentSignature.classify(command: "python3.12", title: ""))
+        XCTAssertNil(AgentSignature.classify(command: "Python", title: ""))
+        // Live macOS 27 comm: the installer's versioned download target,
+        // clipped by the kernel.
+        XCTAssertEqual(AgentSignature.classify(command: "grok-1.0.4-maco", title: ""), .grok)
+        XCTAssertNil(AgentSignature.classify(command: "grok-notes", title: ""))
+        XCTAssertNil(AgentSignature.classify(command: "grok-1", title: ""))
         XCTAssertNil(AgentSignature.classify(command: "zsh", title: ""))
         // Interpreter comm alone must NOT classify — the tree walk decides.
         XCTAssertNil(AgentSignature.classify(command: "node", title: ""))
@@ -84,6 +196,12 @@ final class AgentSignatureTests: XCTestCase {
             AgentSignature.classify(command: "sleep", title: "✳ fixing the parser"), .claudeCode)
         XCTAssertEqual(
             AgentSignature.classify(command: "zsh", title: "some Claude Code session"), .claudeCode)
+        XCTAssertEqual(
+            AgentSignature.classify(command: "cat", title: "✦ Antigravity"), .antigravity)
+        XCTAssertEqual(
+            AgentSignature.classify(command: "sleep", title: "✦ fixing the parser"), .antigravity)
+        XCTAssertEqual(
+            AgentSignature.classify(command: "zsh", title: "some Antigravity session"), .antigravity)
         // npm Pi remains `node` to tmux and identifies the interactive UI
         // with a narrow OSC title.
         XCTAssertEqual(
@@ -98,6 +216,8 @@ final class AgentSignatureTests: XCTestCase {
         XCTAssertNil(AgentSignature.classify(command: "node", title: "pi project"))
         XCTAssertNil(AgentSignature.classify(command: "node", title: "π calculations"))
         XCTAssertNil(AgentSignature.classify(command: "node", title: "π"))
+        // No tmux title rule for Grok — only its process signals classify.
+        XCTAssertNil(AgentSignature.classify(command: "zsh", title: "fix parser - grok"))
     }
 
     func testStalePiTitleDoesNotClassifyReturnedShell() {
@@ -119,6 +239,12 @@ final class AgentSignatureTests: XCTestCase {
             AgentSignature.classify(command: "claude", title: "π - repo"), .claudeCode)
         XCTAssertEqual(
             AgentSignature.classify(command: "pi", title: "✳ Claude Code"), .pi)
+        XCTAssertEqual(
+            AgentSignature.classify(command: "grok", title: "✳ Claude Code"), .grok)
+        XCTAssertEqual(
+            AgentSignature.classify(command: "agy", title: "✳ Claude Code"), .antigravity)
+        XCTAssertEqual(
+            AgentSignature.classify(command: "hermes", title: "✳ Claude Code"), .hermes)
     }
 
     // MARK: argv matching — exact argv[0] basename + interpreter rule
@@ -128,9 +254,32 @@ final class AgentSignatureTests: XCTestCase {
         XCTAssertEqual(AgentSignature.match(argv: "/home/dev/.local/bin/codex"), .codex)
         XCTAssertEqual(AgentSignature.match(argv: "pi"), .pi)
         XCTAssertEqual(AgentSignature.match(argv: "/usr/local/bin/pi"), .pi)
+        XCTAssertEqual(AgentSignature.match(argv: "agy --model gemini-3.7-flash"), .antigravity)
+        XCTAssertEqual(AgentSignature.match(argv: "/Users/dev/.local/bin/agy"), .antigravity)
+        XCTAssertEqual(AgentSignature.match(argv: "/usr/local/bin/antigravity"), .antigravity)
+        // Hermes's installed launcher execs the venv interpreter on the
+        // checked-in entrypoint (install.sh, 2026-08-23); the bash wrapper
+        // itself is gone by then (exec), so argv[1] is the only name.
+        XCTAssertEqual(
+            AgentSignature.match(
+                argv: "/home/dev/.hermes/hermes-agent/venv/bin/python /home/dev/.hermes/hermes-agent/hermes"),
+            .hermes)
+        XCTAssertEqual(
+            AgentSignature.match(
+                argv: "/Users/dev/.hermes/hermes-agent/venv/bin/python3.12 "
+                    + "/Users/dev/.hermes/hermes-agent/hermes --model x"),
+            .hermes)
+        XCTAssertEqual(
+            AgentSignature.match(argv: "/opt/venv/bin/python3 /opt/venv/bin/hermes-agent"), .hermes)
+        // A bare interpreter, or one running something else, never matches.
+        XCTAssertNil(AgentSignature.match(argv: "python3"))
+        XCTAssertNil(AgentSignature.match(argv: "python3 /srv/app/manage.py runserver"))
+        XCTAssertNil(AgentSignature.match(argv: "python3 /home/dev/.hermes/tools/helper.py"))
         XCTAssertEqual(
             AgentSignature.match(argv: "node /usr/lib/node_modules/.bin/claude"), .claudeCode)
         XCTAssertEqual(AgentSignature.match(argv: "bun /x/bin/codex resume"), .codex)
+        XCTAssertEqual(AgentSignature.match(argv: "/Users/dev/.grok/bin/grok --cwd /repo"), .grok)
+        XCTAssertEqual(AgentSignature.match(argv: "target/release/xai-grok-pager"), .grok)
     }
 
     func testMatchArgvRejectsTheTraps() {
@@ -342,6 +491,20 @@ final class AgentSignatureTests: XCTestCase {
             isAlternateScreen: false,
             previous: nil
         ))
+        // Grok's composed " - grok" suffix is live; the bare word is its
+        // stale post-exit title.
+        XCTAssertEqual(AgentSignature.classifyTerminal(
+            title: "⠋ - Thinking - fix the parser - grok",
+            visibleLines: [],
+            isAlternateScreen: true,
+            previous: nil
+        ), .grok)
+        XCTAssertNil(AgentSignature.classifyTerminal(
+            title: "grok",
+            visibleLines: [],
+            isAlternateScreen: false,
+            previous: nil
+        ))
         XCTAssertNil(AgentSignature.classifyTerminal(
             title: "ordinary shell",
             visibleLines: ["the docs mention OpenAI Codex without a version masthead"],
@@ -353,10 +516,10 @@ final class AgentSignatureTests: XCTestCase {
     // MARK: command payloads
 
     func testKeyPayloads() {
-        XCTAssertEqual(AgentCommand.stop.payload, Data([0x1B]))                 // Esc
         XCTAssertEqual(AgentCommand.mode.payload, Data([0x1B, 0x5B, 0x5A]))     // CSI Z
         XCTAssertEqual(AgentCommand.think.payload, Data([0x1B, 0x5B, 0x5A]))    // CSI Z
         XCTAssertEqual(AgentCommand.transcript.payload, Data([0x14]))           // Ctrl+T
+        XCTAssertEqual(AgentCommand.todos.payload, Data([0x14]))                // Ctrl+T
         XCTAssertEqual(AgentCommand.tools.payload, Data([0x0F]))                // Ctrl+O
         XCTAssertEqual(AgentCommand.thinking.payload, Data([0x14]))             // Ctrl+T
         XCTAssertEqual(AgentCommand.pageUp.payload, Data([0x1B, 0x5B, 0x35, 0x7E]))   // CSI 5~
@@ -367,8 +530,6 @@ final class AgentSignatureTests: XCTestCase {
         XCTAssertEqual(AgentCommand.slash("clear").payload, Data("/clear".utf8))
         XCTAssertTrue(AgentCommand.slash("clear").submitsAfterPause)
         XCTAssertTrue(AgentCommand.slash("clear").consumesSlashChipTaste)
-        XCTAssertFalse(AgentCommand.stop.submitsAfterPause)
-        XCTAssertFalse(AgentCommand.stop.consumesSlashChipTaste)
         XCTAssertFalse(AgentCommand.mode.submitsAfterPause)
         XCTAssertFalse(AgentCommand.mode.consumesSlashChipTaste)
         XCTAssertFalse(AgentCommand.think.submitsAfterPause)
@@ -383,6 +544,23 @@ final class AgentSignatureTests: XCTestCase {
         XCTAssertFalse(AgentCommand.pageUp.consumesSlashChipTaste)
         XCTAssertFalse(AgentCommand.pageDown.submitsAfterPause)
         XCTAssertFalse(AgentCommand.pageDown.consumesSlashChipTaste)
+    }
+
+    /// No built-in chip types a bare Escape. The STOP chip did, and it was
+    /// withdrawn: Escape is the one byte that interrupts a running turn, every
+    /// platform already carries a real ESC key beside the terminal (the
+    /// iPad/iPhone key rail, visionOS's ornament cluster), and a chip that
+    /// sits a thumb's width from /clear is the wrong place to keep it.
+    func testNoBuiltInChipTypesABareEscape() {
+        for kind in AgentKind.allCases {
+            for command in AgentCommandSet.all(for: kind) {
+                XCTAssertNotEqual(
+                    command.payload,
+                    Data([0x1B]),
+                    "\(kind) ships \(command.label) as a bare Escape"
+                )
+            }
+        }
     }
 
     func testCommandSetMembership() {
@@ -420,13 +598,53 @@ final class AgentSignatureTests: XCTestCase {
         let piOverflow = AgentCommandSet.overflow(for: .pi)
         XCTAssertEqual(
             pi,
-            [.stop, .slash("new"), .slash("resume"), .slash("compact"),
+            [.slash("new"), .slash("resume"), .slash("compact"),
              .slash("model"), .slash("tree"), .think, .tools]
         )
         XCTAssertTrue(piOverflow.contains(.thinking))
         XCTAssertTrue(piOverflow.contains(.slash("copy")))
         XCTAssertFalse(pi.contains(.mode))
         XCTAssertFalse(pi.contains(.transcript))
+
+        // Grok Build: Shift+Tab cycles Normal → Plan → Always-approve, so
+        // MODE applies; Ctrl+T is its todos pane, not a transcript.
+        let grok = AgentCommandSet.primary(for: .grok)
+        let grokOverflow = AgentCommandSet.overflow(for: .grok)
+        XCTAssertEqual(
+            grok,
+            [.slash("new"), .slash("resume"), .slash("compact"),
+             .slash("rewind"), .slash("model"), .slash("effort"), .mode]
+        )
+        XCTAssertTrue(grokOverflow.contains(.todos))
+        XCTAssertTrue(grokOverflow.contains(.slash("plan")))
+        XCTAssertFalse(grok.contains(.transcript))
+        XCTAssertFalse(grokOverflow.contains(.transcript))
+
+        let antigravity = AgentCommandSet.primary(for: .antigravity)
+        let antigravityOverflow = AgentCommandSet.overflow(for: .antigravity)
+        XCTAssertEqual(
+            antigravity,
+            [.slash("clear"), .slash("resume"), .slash("diff"),
+             .slash("model"), .slash("permissions"), .slash("agents"),
+             .slash("skills")]
+        )
+        XCTAssertTrue(antigravityOverflow.contains(.slash("planning")))
+        XCTAssertTrue(antigravityOverflow.contains(.slash("usage")))
+        XCTAssertTrue(antigravityOverflow.contains(.slash("mcp")))
+
+        let hermes = AgentCommandSet.primary(for: .hermes)
+        let hermesOverflow = AgentCommandSet.overflow(for: .hermes)
+        XCTAssertEqual(
+            hermes,
+            [.slash("new"), .slash("compress"), .slash("undo"),
+             .slash("model"), .slash("approvals"), .slash("diff"),
+             .slash("status")]
+        )
+        // `/resume` needs an id argument in Hermes — never a chip.
+        XCTAssertFalse(AgentCommandSet.all(for: .hermes).contains(.slash("resume")))
+        XCTAssertTrue(hermesOverflow.contains(.slash("context")))
+        XCTAssertTrue(hermesOverflow.contains(.slash("yolo")))
+        XCTAssertFalse(hermes.contains(.mode))
     }
 
     func testBuiltInPlacementOverridesMoveCommandsWithoutChangingDefaults() {

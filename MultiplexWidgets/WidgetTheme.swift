@@ -265,7 +265,7 @@ struct SpineRow: View {
 struct ActionKey: View {
     let glyph: String
     let caption: String
-    var sub: String? = nil
+    var sub: String?
     var glyphSize: CGFloat = 14
 
     @Environment(\.tallyPalette) private var palette
@@ -306,12 +306,12 @@ struct SeenStamp: View {
         Group {
             if let date {
                 HStack(spacing: 3) {
-                    Text("SEEN")
+                    Text(verbatim: "SEEN")
                     Text(date, style: .relative)
                         .lineLimit(1)
                 }
             } else {
-                Text("NEVER SEEN")
+                Text(verbatim: "NEVER SEEN")
             }
         }
         .font(.widgetMono(fontSize))
@@ -327,8 +327,8 @@ struct AwaitingDataView: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            HatchScreen(caption: "Awaiting data")
-            WidgetLabel("Open Multiplex once", size: 8.5, color: palette.signal2)
+            HatchScreen(caption: String(localized: "Awaiting data"))
+            WidgetLabel(String(localized: "Open Multiplex once"), size: 8.5, color: palette.signal2)
         }
     }
 }

@@ -23,6 +23,13 @@
 // sRGB detour would gamut-clip the tally red and band the specular
 // gradients — it measurably breaks the recomposite).
 
+// A developer script, run by hand and never linked into a shipping target:
+// its inputs are `AppIcon.icon` and Icon Composer's own renderer, both of
+// which are either present and well-formed or the bake is meaningless. Trapping
+// on the spot with a stack trace is the intended failure mode — recovering
+// would only produce a wrong icon quietly.
+// swiftlint:disable force_try force_cast
+
 import Foundation
 import CoreGraphics
 import ImageIO
@@ -355,3 +362,5 @@ print(String(format: "restack vs ictool full render: max %.2f/255 inside r%.0f "
              maxInside * 255, rimStart, maxRim * 255, meanDiff * 255))
 if maxInside > 2.5 / 255.0 { fail("restacked layers drifted from the reference render") }
 print("ok")
+
+// swiftlint:enable force_try force_cast

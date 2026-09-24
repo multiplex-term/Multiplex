@@ -2,12 +2,19 @@
 # Multiplex build / test / verify helper.
 #
 #   ./Tools/build.sh gen                 regenerate the Xcode project (XcodeGen)
-#   ./Tools/build.sh build [vos|ipad]    build for a platform (default: vos)
-#   ./Tools/build.sh test  [vos|ipad]    run unit tests (default: vos)
+#   ./Tools/build.sh lint [--fix]        SwiftLint over the app + tests + tools
+#   ./Tools/build.sh build [vos|ipad] [xcodebuild args...]
+#                                        build for a platform (default: vos)
+#   ./Tools/build.sh test  [vos|ipad] [xcodebuild args...]
+#                                        run unit tests (default: vos)
 #   ./Tools/build.sh verify [vos|ipad]   build + install + drive end-to-end
 #                                        against the local sshd/tmux harness
+#   ./Tools/build.sh uitest [vos|ipad]   XCUITest real-touch runs (the Arrange
+#                                        Keys press-and-drag) against the harness
 #   ./Tools/build.sh interop             round-trip against real mosh-server
-#   ./Tools/build.sh all                 gen + build both + test
+#   ./Tools/build.sh strings             sync the String Catalogs from the
+#                                        last visionOS build's .stringsdata
+#   ./Tools/build.sh all                 gen + lint + build both + test
 #
 # Single source of truth for destinations, the shared DerivedData path, and the
 # headless verification recipe. Keep flags here, not scattered across callers.
@@ -28,16 +35,25 @@ SEED="$ROOT/Tools/dev-sshd/state/seed.json"
 # xcodebuild destinations are ambiguous the moment several runtimes carry an
 # "Apple Vision Pro" — prefer a booted device (what the user is looking at),
 # else the newest runtime (simctl lists runtimes ascending).
+#
+# Each platform names its preferred device first and then falls back: a CI
+# runner's Xcode ships whatever iPad generation it ships, and the device set
+# a laptop accumulated is not the one a fresh image creates. `iPad` last
+# matches any of them, so the build never dies on a model name.
 sim_udid() {
-    local name list
+    local candidates name list
     case "$1" in
-        vos|visionos|xr) name="Apple Vision Pro" ;;
-        ipad|ios)        name="iPad Pro 13-inch (M5)" ;;
+        vos|visionos|xr) candidates="Apple Vision Pro" ;;
+        ipad|ios)        candidates="iPad Pro 13-inch (M5)|iPad Pro 13-inch|iPad Pro|iPad Air|iPad" ;;
         *) echo "unknown platform '$1' (use vos|ipad)" >&2; exit 2 ;;
     esac
-    list="$(xcrun simctl list devices available | grep -F "$name (")"
-    { echo "$list" | grep -F '(Booted)' | head -1; echo "$list" | tail -1; } \
-        | grep -oE '[0-9A-F-]{36}' | head -1
+    while IFS= read -r name; do
+        list="$(xcrun simctl list devices available | grep -F "$name")"
+        [ -n "$list" ] || continue
+        { echo "$list" | grep -F '(Booted)' | head -1; echo "$list" | tail -1; } \
+            | grep -oE '[0-9A-F-]{36}' | head -1
+        return
+    done < <(echo "$candidates" | tr '|' '\n')
 }
 
 require_udid() {
@@ -52,18 +68,55 @@ gen() {
     xcodegen generate
 }
 
+# Deliberately NOT an Xcode build phase: ENABLE_USER_SCRIPT_SANDBOXING is on,
+# and a phase that reads the whole source tree would need an input file list
+# regenerated on every added file. Keeping it here also means a contributor
+# without SwiftLint installed can still build and ship.
+lint() {
+    command -v swiftlint >/dev/null || {
+        echo "install swiftlint: brew install swiftlint" >&2
+        exit 1
+    }
+    # `--strict` promotes warnings to errors: the tree is clean, so anything
+    # new should fail the command rather than scroll past.
+    swiftlint lint --strict "$@"
+}
+
+# String Catalog sync. `xcodebuild` emits per-file .stringsdata (every
+# `String(localized:)` / SwiftUI `Text` literal) but only the Xcode IDE folds
+# them back into the .xcstrings; this is the same `xcstringstool sync` the IDE
+# runs. Run after `build vos`; commit the catalog diff. Keys that vanish from
+# source are marked stale (Xcode's behaviour), never silently deleted.
+strings() {
+    local inter="$DERIVED/Build/Intermediates.noindex/Multiplex.build/Debug-xrsimulator"
+    [ -d "$inter" ] || { echo "run ./Tools/build.sh build vos first" >&2; exit 1; }
+    local target catalog
+    for pair in "Multiplex:Multiplex/Localizable.xcstrings" \
+                "MultiplexWidgets:MultiplexWidgets/Localizable.xcstrings"; do
+        target="${pair%%:*}"; catalog="${pair#*:}"
+        # shellcheck disable=SC2046
+        xcrun xcstringstool sync "$catalog" --stringsdata \
+            $(find "$inter/$target.build/Objects-normal" -name '*.stringsdata')
+        echo "synced $catalog"
+    done
+}
+
+# Trailing arguments go straight to xcodebuild, so a caller (CI) can add
+# settings or flags without a second, drifting invocation of its own.
 build() {
     local plat="${1:-vos}"
+    shift || true
     xcodebuild -project "$PROJECT" -scheme "$SCHEME" \
         -destination "id=$(require_udid "$plat")" \
-        -derivedDataPath "$DERIVED" build
+        -derivedDataPath "$DERIVED" build "$@"
 }
 
 run_tests() {
     local plat="${1:-vos}"
+    shift || true
     xcodebuild -project "$PROJECT" -scheme "$TEST_SCHEME" \
         -destination "id=$(require_udid "$plat")" \
-        -derivedDataPath "$DERIVED" test
+        -derivedDataPath "$DERIVED" test "$@"
 }
 
 verify() {
@@ -109,6 +162,22 @@ verify() {
     echo "verify OK — inspect the screenshot to confirm output rendered."
 }
 
+# Real touches through XCUITest — the one headless route that drives a
+# gesture recognizer on an Xcode 27 simulator (simctl has no tap/drag, idb is
+# dead). Seeds the host through the runner's environment (xcodebuild forwards
+# TEST_RUNNER_* variables to the runner, which hands them to the app).
+uitest() {
+    local plat="${1:-vos}"
+    shift || true
+    echo "== starting harness =="
+    "$HARNESS" start
+    "$HARNESS" demo
+    TEST_RUNNER_MULTIPLEX_SEED_HOST="$SEED" \
+        xcodebuild -project "$PROJECT" -scheme MultiplexUITests \
+        -destination "id=$(require_udid "$plat")" \
+        -derivedDataPath "$DERIVED" test "$@"
+}
+
 interop() {
     command -v swiftc >/dev/null || { echo "swiftc not found" >&2; exit 1; }
     command -v mosh-server >/dev/null || {
@@ -134,10 +203,13 @@ interop() {
 
 case "${1:-}" in
     gen) gen ;;
-    build) build "${2:-vos}" ;;
-    test) run_tests "${2:-vos}" ;;
+    lint) shift; lint "$@" ;;
+    build) shift; build "$@" ;;
+    test) shift; run_tests "$@" ;;
     verify) verify "${2:-vos}" ;;
+    uitest) shift; uitest "$@" ;;
     interop) interop ;;
-    all) gen; build vos; build ipad; run_tests vos ;;
-    *) sed -n '2,17p' "$0"; exit 1 ;;
+    strings) strings ;;
+    all) gen; lint; build vos; build ipad; run_tests vos ;;
+    *) sed -n '2,18p' "$0"; exit 1 ;;
 esac

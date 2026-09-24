@@ -1,5 +1,25 @@
 import Foundation
 import Observation
+import UIKit
+
+/// What every auxiliary (non-terminal) pane controller owes the window
+/// system: a live tab label and a teardown. Construction stays per-type —
+/// a viewport takes an admitted offer, a file viewer a start directory —
+/// but lookup, label, and close dispatch through this one seam, so
+/// `syncTabs`' restored-corpse strip, the tab strip's titles, and
+/// `closeTab` don't grow per-type branches when the next auxiliary pane
+/// type arrives (missing the strip branch would leave an invisible zombie
+/// tab; missing close would leak the pane's resources).
+@MainActor
+protocol AuxiliaryPaneController: AnyObject {
+    /// The live tab-cell/UMD label (mark + subject) — follows what the pane
+    /// is showing NOW, where the route only knows the summons.
+    var tabLabel: String { get }
+    /// The route a tab would carry for what the pane shows now — minted when
+    /// ↗ TAB moves a live side panel into a tab.
+    var routeMode: TerminalRoute.Mode { get }
+    func shutdown()
+}
 
 /// App-wide terminal state that outlives any single window scene:
 ///
@@ -21,8 +41,46 @@ final class TerminalWorkspace {
     /// bells. Weak both ways — the center holds this workspace weakly too.
     private weak var attention: AttentionCenter?
 
+    /// Suspension repair (`SessionResumePolicy`) is observed once, app-wide,
+    /// and fanned out to every tab: the app is suspended as a whole, and a
+    /// tab whose window is not currently mounted must be repaired too.
+    /// Rides UIApplication rather than a scene phase for the same reason.
+    private nonisolated(unsafe) var backgroundObserver: NSObjectProtocol?
+    private nonisolated(unsafe) var foregroundObserver: NSObjectProtocol?
+
     init(attention: AttentionCenter? = nil) {
         self.attention = attention
+        backgroundObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.forEachController { $0.applicationDidEnterBackground() }
+            }
+        }
+        foregroundObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.willEnterForegroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.forEachController { $0.applicationWillEnterForeground() }
+            }
+        }
+    }
+
+    deinit {
+        if let backgroundObserver {
+            NotificationCenter.default.removeObserver(backgroundObserver)
+        }
+        if let foregroundObserver {
+            NotificationCenter.default.removeObserver(foregroundObserver)
+        }
+    }
+
+    private func forEachController(_ body: (TerminalSessionController) -> Void) {
+        for controller in controllers.values { body(controller) }
     }
 
     /// Get-or-create the controller for a tab, starting its connection on
@@ -40,10 +98,114 @@ final class TerminalWorkspace {
         controllers[tabID]
     }
 
-    /// Close a tab for real: detach the SSH channel and drop the controller
-    /// (and with it the terminal view). Never called when a tab merely moves.
+    // MARK: Auxiliary controllers (one per ⌗ / ▤ tab)
+
+    /// Transport-less controllers for auxiliary tabs, keyed like terminal
+    /// controllers so merge/split re-parent the live pane the same way.
+    /// Deliberately in-memory only — this dictionary *is* the auxiliary
+    /// no-persistence rule: `TerminalWindowRoot.syncTabs` strips any
+    /// auxiliary tab it cannot find here, which is exactly a tab restored
+    /// from a dead process. Summoned, not restored.
+    private var auxiliaryControllers: [UUID: any AuxiliaryPaneController] = [:]
+
+    /// Register the controller BEFORE the tab enters any route — the strip
+    /// above runs on every tabs change, and an auxiliary tab that arrives
+    /// without its controller is indistinguishable from a restored corpse.
+    func openViewport(tab: TerminalRoute, offer: ViewportOffer, host: Host) {
+        guard tab.isViewport, auxiliaryControllers[tab.id] == nil else { return }
+        auxiliaryControllers[tab.id] = ViewportController(tabID: tab.id, offer: offer, host: host)
+    }
+
+    func openFileViewer(
+        tab: TerminalRoute,
+        host: Host,
+        startDirectory: String?,
+        anchorSession: SessionKey?,
+        anchorCell: (col: Int, row: Int)? = nil,
+        target: TerminalPathTarget?,
+        targetPresentation: FileViewerController.FilePresentation = .source
+    ) {
+        guard tab.isFileViewer, auxiliaryControllers[tab.id] == nil else { return }
+        auxiliaryControllers[tab.id] = FileViewerController(
+            tabID: tab.id,
+            host: host,
+            startDirectory: startDirectory,
+            anchorSession: anchorSession,
+            anchorCell: anchorCell,
+            target: target,
+            targetPresentation: targetPresentation
+        )
+    }
+
+    /// The general question — "does this auxiliary tab have a live pane,
+    /// and what does it call itself" — for the strip and the tab titles.
+    func auxiliaryController(for tabID: UUID) -> (any AuxiliaryPaneController)? {
+        auxiliaryControllers[tabID]
+    }
+
+    func viewportController(for tabID: UUID) -> ViewportController? {
+        auxiliaryControllers[tabID] as? ViewportController
+    }
+
+    func fileViewerController(for tabID: UUID) -> FileViewerController? {
+        auxiliaryControllers[tabID] as? FileViewerController
+    }
+
+    /// Registers a controller already alive under a freshly minted auxiliary
+    /// tab id. Call before adding that tab to a route, or `syncTabs` will
+    /// correctly mistake it for a restored corpse.
+    func adoptAuxiliary(_ controller: any AuxiliaryPaneController, tabID: UUID) {
+        if let replaced = auxiliaryControllers[tabID], replaced !== controller {
+            replaced.shutdown()
+        }
+        auxiliaryControllers[tabID] = controller
+    }
+
+    // MARK: Side panels (one per host terminal tab)
+
+    /// Side panels are keyed by the terminal tab that summoned them. That
+    /// host id survives merge/split, while the controller remains live here.
+    private var sidePanels: [UUID: any AuxiliaryPaneController] = [:]
+
+    func openSidePanel(
+        hostTabID: UUID,
+        controller: any AuxiliaryPaneController
+    ) {
+        if let previous = sidePanels[hostTabID], previous !== controller {
+            previous.shutdown()
+        }
+        sidePanels[hostTabID] = controller
+    }
+
+    func sidePanel(for hostTabID: UUID) -> (any AuxiliaryPaneController)? {
+        sidePanels[hostTabID]
+    }
+
+    func closeSidePanel(hostTabID: UUID) {
+        sidePanels.removeValue(forKey: hostTabID)?.shutdown()
+    }
+
+    /// Removes a panel without teardown so ↗ TAB can re-parent its live pane.
+    func detachSidePanel(hostTabID: UUID) -> (any AuxiliaryPaneController)? {
+        sidePanels.removeValue(forKey: hostTabID)
+    }
+
+    /// Close a tab for real: detach the SSH channel (or shut the auxiliary
+    /// pane down) and drop the controller. A terminal tab owns its side panel,
+    /// so closing the host releases that viewer too. Never called on a move.
     func closeTab(_ tabID: UUID) {
         controllers.removeValue(forKey: tabID)?.detach()
+        auxiliaryControllers.removeValue(forKey: tabID)?.shutdown()
+        closeSidePanel(hostTabID: tabID)
+    }
+
+    /// Hosts with at least one live transport right now, whichever window
+    /// holds the tab. `BackgroundActivityPolicy` asks as the app leaves: a
+    /// keep-alive host with a live tab is worth an assertion even when the
+    /// deck would never dial it (a *disabled* host's open windows keep
+    /// running — disabling only stops the app dialling on its own).
+    var hostIDsWithLiveSessions: Set<UUID> {
+        Set(controllers.values.filter { $0.status == .live }.map(\.host.id))
     }
 
     func resumeConnectionsWaitingForKeyPassphrase(hostID: UUID) {
@@ -64,6 +226,10 @@ final class TerminalWorkspace {
         var surrender: @MainActor () -> [TerminalRoute]
         /// Appends tabs to the window — the receiving half of a merge.
         var adopt: @MainActor ([TerminalRoute]) -> Void
+        /// External file actions may use the active terminal as their anchor
+        /// when it is on the given host; auxiliary-active windows decline so a
+        /// document never gets evicted.
+        var openFileViewer: @MainActor (_ hostID: UUID, TerminalPathTarget) -> Bool = { _, _ in false }
     }
 
     private(set) var windows: [WindowEntry] = []
@@ -85,29 +251,66 @@ final class TerminalWorkspace {
         windows.filter { $0.id != windowID && !$0.tabs.isEmpty }
     }
 
-    /// True when an open terminal window already has a tab bound to this
-    /// tmux session — pressing that session's deck tile focuses it.
-    func hasTab(hostID: UUID, sessionName: String) -> Bool {
-        openTab(hostID: hostID, sessionName: sessionName) != nil
+    /// Widget/deep-link file summons prefer an already open terminal for the
+    /// target host. The window runs its ordinary panel admission policy; an
+    /// auxiliary active tab declines and the caller opens today's fresh tab.
+    func openFileViewer(
+        _ target: TerminalPathTarget,
+        onActiveTerminalForHost hostID: UUID
+    ) -> Bool {
+        windows.contains { $0.openFileViewer(hostID, target) }
     }
 
-    /// Bring the window already attached to (host, session) forward and make
-    /// that tab active — the deck tile's press. False when no open window
-    /// has such a tab (the deck then attaches in a new window).
+    /// True when an open terminal window already has a tab bound to this
+    /// backend's session — pressing that session's deck tile focuses it.
+    func hasTab(
+        hostID: UUID, sessionName: String,
+        backend: Host.SessionBackend
+    ) -> Bool {
+        openTab(hostID: hostID, sessionName: sessionName, backend: backend) != nil
+    }
+
+    /// Bring the window already attached to (host, backend, session) forward
+    /// and make that tab active — the deck tile's press. Backend is part of
+    /// identity because an open tmux tab survives a host being switched to
+    /// herdr, and both namespaces may legally contain `main`.
     @discardableResult
-    func focusTab(hostID: UUID, sessionName: String) -> Bool {
-        guard let (entry, tabID) = openTab(hostID: hostID, sessionName: sessionName)
+    func focusTab(
+        hostID: UUID, sessionName: String,
+        backend: Host.SessionBackend
+    ) -> Bool {
+        guard let (entry, tabID) = openTab(
+            hostID: hostID, sessionName: sessionName, backend: backend)
         else { return false }
         entry.reveal(tabID)
         return true
     }
 
+    /// Bring the window holding this exact tab forward and make it active —
+    /// a notification tap's route back to a tab-scoped alert (a plain shell
+    /// has no session identity for `focusTab(hostID:sessionName:backend:)`
+    /// to match).
+    @discardableResult
+    func focusTab(id tabID: UUID) -> Bool {
+        guard let entry = windows.first(where: { entry in
+            entry.tabs.contains { $0.id == tabID }
+        }) else { return false }
+        entry.reveal(tabID)
+        return true
+    }
+
     /// First-registered window holding a tab for this session — attach and
-    /// create tabs alike; plain shells have no session name and never match.
-    private func openTab(hostID: UUID, sessionName: String) -> (WindowEntry, UUID)? {
+    /// create tabs alike; plain shells have no session name/backend and never
+    /// match.
+    private func openTab(
+        hostID: UUID, sessionName: String,
+        backend: Host.SessionBackend
+    ) -> (WindowEntry, UUID)? {
         for entry in windows {
             if let tab = entry.tabs.first(where: {
-                $0.hostID == hostID && $0.sessionName == sessionName
+                $0.hostID == hostID
+                    && $0.sessionName == sessionName
+                    && $0.sessionBackend == backend
             }) {
                 return (entry, tab.id)
             }

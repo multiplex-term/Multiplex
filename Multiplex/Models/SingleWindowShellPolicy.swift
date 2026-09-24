@@ -40,10 +40,13 @@ enum ShellModeDecision {
 enum SingleWindowShellLayout {
     static let expandedThreshold: CGFloat = 620
     static let deckRailWidth: CGFloat = 316
-    /// The compact key rail retains its TMUX key at 390 points. Below this,
-    /// its essentials-only tier takes over and the shell's top bar becomes
-    /// the shortcut entry point instead.
+    /// An unlocked compact key rail retains TMUX at 390 points. Keyboard lock
+    /// adds RET on iPhone; its slightly tighter Air tier keeps both controls at
+    /// 420 points, while narrower locked phones move TMUX to the top bar.
+    /// "TMUX" names the shortcut-key slot — herdr tabs fill it with HRDR at
+    /// the same four-character width, so both cutoffs hold for both backends.
     static let keyBarTmuxMinimumWidth: CGFloat = 390
+    static let keyBarTmuxWithReturnMinimumWidth: CGFloat = 420
 
     static func isExpanded(width: CGFloat) -> Bool {
         width >= expandedThreshold
@@ -51,9 +54,13 @@ enum SingleWindowShellLayout {
 
     static func showsTopBarTmuxShortcut(
         availableWidth: CGFloat,
-        supportsTmuxShortcuts: Bool
+        supportsTmuxShortcuts: Bool,
+        keyBarIncludesReturnKey: Bool = false
     ) -> Bool {
-        supportsTmuxShortcuts && availableWidth < keyBarTmuxMinimumWidth
+        let minimumWidth = keyBarIncludesReturnKey
+            ? keyBarTmuxWithReturnMinimumWidth
+            : keyBarTmuxMinimumWidth
+        return supportsTmuxShortcuts && availableWidth < minimumWidth
     }
 }
 
@@ -64,6 +71,17 @@ enum SingleWindowShellBackSwipe {
     private static let projectionDuration: CGFloat = 0.2
     private static let minimumFlickDistance: CGFloat = 16
     private static let decisiveReverseVelocity: CGFloat = -100
+
+    /// The compact phone keeps edge-back as a navigation shortcut even when
+    /// Reduce Motion is enabled. Motion preference changes the interactive
+    /// travel, not whether the route back to the deck exists.
+    static func isAvailable(
+        idiom: ShellModeDecision.Idiom,
+        expanded: Bool,
+        compactShowsTerminal: Bool
+    ) -> Bool {
+        idiom == .phone && !expanded && compactShowsTerminal
+    }
 
     /// Local text-selection drags always stay with the terminal. Otherwise,
     /// only unambiguously rightward horizontal intent starts navigation.

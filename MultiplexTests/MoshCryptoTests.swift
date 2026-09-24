@@ -18,6 +18,8 @@ final class MoshCryptoTests: XCTestCase {
             // (multi-block plaintext, no associated data).
             ("BBAA9988776655443322110F", "",
              "000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F2021222324252627",
+             // Kept whole so it can be diffed against RFC 7253 Appendix A by eye.
+             // swiftlint:disable:next line_length
              "4412923493C57D5DE0D700F753CCE0D1D2D95060122E9F15A5DDBFC5787E50B5CC55EE507BCB084E479AD363AC366B95A98CA5F3000B1479"),
         ]
         for (n, a, p, c) in vectors {

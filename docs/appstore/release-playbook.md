@@ -1,9 +1,10 @@
 # Release playbook — TestFlight & App Store
 
 How a commit on `main` becomes a TestFlight build and, eventually, an App
-Store release. Store copy lives in `fastlane/metadata/` (uploaded verbatim to
-both platform versions by `fastlane store_metadata`); screenshot design in
-`docs/appstore/screenshots-plan.md`; one-time account setup in
+Store release. Store copy lives in `fastlane/metadata/`; `fastlane
+store_metadata` sends shared fields to both platform versions and selects each
+locale's matching iOS or visionOS description and release notes. Screenshot
+design lives in `docs/appstore/screenshots-plan.md`; one-time account setup in
 `fastlane/SETUP.md`.
 
 ```
@@ -31,20 +32,50 @@ Universal purchase is automatic — one bundle id, buy once, both devices.
 
 ## TestFlight cadence
 
-**Internal group ("Core")** — you + up to 100 App Store Connect users. No
+**Internal group ("Internal")** — you + up to 100 App Store Connect users. No
 review, available minutes after processing. `bundle exec fastlane beta` at
 whatever cadence is useful; write `fastlane/testflight-whats-new.txt` first
 (it becomes the build's What to Test).
 
-**External group ("Multiplex Beta")** — real testers via public link.
+**External group ("Public Beta")** — real testers, **invitation only**: the
+group is created with no public link, so a seat is an emailed invite and
+cannot be forwarded on. `bundle exec fastlane testflight_group` creates it
+(and takes a public link away again if one ever appears); `beta external:true`
+calls the same helper first, because pilot *silently skips* a group name App
+Store Connect does not know.
+
 The **first** external build (and later ones with significant changes) goes
-through Beta App Review (~1 day). It needs the demo host below and the review
-notes already in `fastlane/metadata/review_information/notes.txt` — the
-`beta` lane sends both with `external:true`:
+through Beta App Review (~1 day). Beta App Review gets the **same record as
+App Store review** — one hash in the Fastfile feeds deliver and pilot both,
+sourced from `fastlane/metadata/review_information/` with `.env` covering the
+two files kept out of git. So the demo host below and
+`review_information/notes.txt` are all it needs — and that file must stay under
+**4000 characters** (the Fastfile checks it before archiving; App Store Connect
+otherwise rejects it mid-upload with `An attribute value is too long. -
+/data/attributes/notes`):
+
+External testing additionally needs **Test Information** — the app-level
+description testers read, in
+`fastlane/metadata/<locale>/beta_app_description.txt`. `beta external:true`
+pushes it (with the review contact as the feedback address and the listing's
+marketing/privacy URLs) before it archives anything; `bundle exec fastlane
+testflight_info` pushes it alone. It is not optional: an unset record uploads
+and joins the group fine, then fails the submission call with
+`Beta App Description is missing`.
 
 ```sh
-bundle exec fastlane beta external:true
+bundle exec fastlane beta external:true                     # add + submit for review
+bundle exec fastlane beta external:true submit_review:false # add, submit later
 ```
+
+Adding a build to the group and submitting it for Beta App Review are two
+separate calls, so `submit_review:false` takes only the first: the build lands
+in Public Beta and the review submission waits for the App Store Connect UI
+(or a later run). Use it to stage a build before committing it to a ~1-day
+review queue. Apple still gates external testers on that review — until it
+passes, the staged build sits in the group untestable. The Beta App Review
+record (contact, demo host, notes) is written either way, so a later
+submission already has everything.
 
 What-to-Test template (keep it a test script, not marketing):
 
@@ -60,7 +91,7 @@ PLEASE TRY
 
 KNOWN
 • <current sharp edges>
-Feedback: screenshot in TestFlight, or iainst0409@gmail.com
+Feedback: screenshot in TestFlight
 ```
 
 Builds expire after 90 days — ship something monthly or testers go dark.
@@ -128,7 +159,7 @@ The non-consumable IAP `app.multiplexterm.multiplex.pro` is configured with
 display name **Multiplex Pro**, a $19.99 USA-base/equalized price, all-territory
 availability, and review notes. App Store Connect reports it
 `READY_TO_SUBMIT`; its 2026-07-13 paywall screenshot is processed, while the
-refreshed 2026-07-16 asset (`docs/appstore/iap-review-screenshot.jpg`, updated
+refreshed 2026-07-16 asset (`local-plan/iap-review-screenshot.jpg`, untracked, updated
 for the Pro prompt-history copy; full-screen capture, not the earlier Stage
 Manager staging) still needs upload + processing before submission. Submit the
 IAP together with the first app version.
@@ -144,7 +175,8 @@ no reachable host is an empty screen → near-certain "we were unable to
 assess" rejection. Providing a host also removes their incentive to type
 random credentials at your error paths.
 
-The runbook is code: **`Tools/review-host/`** — a Dockerfile + compose file
+The runbook is code: **`Tools/review-host/`** (untracked — the live box's
+coordinates stay on the release machine) — a Dockerfile + compose file
 run the whole box as a container on any US-West VPS (Hetzner Hillsboro
 recommended, ~$5/mo, left running permanently; **rebuild the image** to pick
 up security updates — host keys persist in a volume, so the SSH identity is
@@ -152,7 +184,9 @@ stable). A cloud-init variant covers Docker-less VMs, and `verify.sh` is the
 pre-submission check either way. What it provisions: password auth
 for `review` only with every SSH forwarding surface disabled, no sudo,
 tmux + mosh-server, boot/nightly-reseeded demo sessions (including the
-disclosed agent stub that makes the Pro strip demonstrable), and a
+disclosed agent stub that makes the Pro strip demonstrable), a pinned
+herdr with its own seeded sessions so the HERDR backend the store
+description promises is demoable on the same box, and a
 zero-egress firewall stance (host `DOCKER-USER` rules / in-VM ufw — the box
 can't relay spam or proxy traffic).
 
@@ -183,14 +217,6 @@ The same host and credentials serve Beta App Review (TestFlight external) —
 
 ## Ship-blockers — do these BEFORE external beta / submission
 
-| # | Blocker | Why | Where |
-| --- | --- | --- | --- |
-| 1 | **Host-key TOFU pinning** | `.acceptAnything()` is fine for the sim, indefensible for real users' credentials; also the one security claim reviewers/users will test. | Citadel `.custom` validator; README "Known limits" |
-| 2 | **Re-upload the refreshed Pro IAP review screenshot** | The 2026-07-13 image is processed and IAP `6790252556` is `READY_TO_SUBMIT`, but the 2026-07-15 local asset reflects the current two-host free-tier wording and still needs upload + processing. | ASC IAP `app.multiplexterm.multiplex.pro` |
-| ~~3~~ | ~~**Ship all free-tier gates and the IAP together**~~ **Code complete 2026-07-13; host allowance raised 2026-07-15**: two-host add-intent cap, grandfathering mosh toggle, 10/day agent-command meter (built-in or custom), custom-theme mutation gate, and alert scheduling gate all ship with the StoreKit surface. Commerce policy has deterministic lifecycle tests; a live visionOS run proved 11 tap intents produce only 10 command sends and then the passive reset pill. | Never un-free a feature post-launch (`local-plan/pricing-strategy.md` §7). | pricing-strategy.md |
-| 4 | **Privacy policy live** at `multiplexterm.dev/privacy` | URL is required metadata; draft ready in `docs/appstore/privacy-policy.md`. | — |
-| 5 | **Support URL live** at `multiplexterm.dev` | Required; a page with the app name + contact email is enough. | — |
-| 6 | **France excluded or French encryption declaration filed** | Apple requires the French declaration for standard app-provided crypto only when distributing in France. | ASC availability / App Encryption Documentation |
-| ~~7~~ | ~~App name check~~ **Done 2026-07-12**: record created as "Multiplex — SSH tmux Terminal", bundle id `app.multiplexterm.multiplex`, Apple ID `6790074057`. | — | ASC |
-| 8 | **Run the signed Pro transaction sign-off above** | Simulator StoreKit proves the catalog but Xcode 27 beta cannot verify its local JWS; TestFlight/Sandbox is the authoritative buy-once/cross-device proof. | iPad + Vision Pro, same sandbox Apple ID |
-| 9 | **Confirm the app itself is Free and review storefront coverage** | The current API key receives 403 for app-level price/availability reads even though the IAP itself is `READY_TO_SUBMIT`. | ASC Pricing and Availability |
+The dated blocker table (ASC account state, IAP submission status, API-key
+access notes) is release-ops state, not product documentation — it lives in
+`local-plan/asc-account-state.md` (untracked).

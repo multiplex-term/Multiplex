@@ -664,7 +664,11 @@ private extension SSHChildChannel {
     /// Delivers all pending flushed writes to the parent channel.
     private func deliverPendingWrites() {
         while self.pendingWritesFromChannel.hasMark, self.writabilityManager.windowSpaceOnNetwork > 0, var write = self.pendingWritesFromChannel.first {
+            // Multiplex patch: belt-and-braces against a zero-length write
+            // budget — the loop below only makes progress while it can move
+            // at least one byte.
             let maxWriteLength = min(self.writabilityManager.windowSpaceOnNetwork, Int(self.peerMaxMessageSize))
+            guard maxWriteLength > 0 else { break }
             let (actualWrite, excess) = write.0.trim(maxLength: maxWriteLength)
             write.0 = actualWrite
 
@@ -741,6 +745,13 @@ extension SSHChildChannel {
         // Window size starts at zero, so we treat this as an increment. However, we disregard whether this changed
         // the writability value, as we lie about writability until we're active anyway.
         _ = try self.writabilityManager.outboundWindowIncremented(message.initialWindowSize)
+        // Multiplex patch: a peer that confirms the channel with a zero
+        // maximum packet size would trim every outbound write to nothing and
+        // requeue it forever, spinning the event loop. Zero is not a usable
+        // packet size, so the channel is refused instead.
+        guard message.maximumPacketSize > 0 else {
+            throw NIOSSHError.invalidPacketFormat
+        }
         self.peerMaxMessageSize = message.maximumPacketSize
 
         // If we got through the state machine, this is a channel opening maneuver. We can

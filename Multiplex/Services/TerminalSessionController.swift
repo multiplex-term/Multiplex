@@ -29,6 +29,10 @@ final class TerminalSessionController {
     private weak var attention: AttentionCenter?
 
     private(set) var status: Status = .connecting
+    /// True while this tab is re-attaching itself after the app was
+    /// suspended, rather than connecting for the first time — the pane says
+    /// so, because the session on the host was never lost.
+    private(set) var isResuming = false
     private(set) var remoteTitle: String = ""
     /// A user-opened terminal may ask immediately for an encrypted key's
     /// missing/corrected passphrase. Cancelling leaves the challenge here so
@@ -51,6 +55,29 @@ final class TerminalSessionController {
     /// iPadOS's native text selection and copies into the local pasteboard.
     /// The terminal HUD provides the explicit exit path tmux itself lacks.
     private(set) var tmuxCopyModeUIActive = false
+
+    /// The copy-mode HUD's backend-agnostic sibling: the same tap ownership
+    /// flip (mouse reporting off, so hold/double-tap run native selection
+    /// over the visible screen and copy to the device pasteboard) without
+    /// entering any remote mode — herdr has no copy mode to enter, and on
+    /// tmux nothing needs to touch the server just to select. Pans are
+    /// suppressed rather than translated: no remote view answers cursor
+    /// keys here, and the alternate screen has no local scrollback. Entry
+    /// is the selection block's SELECT / SELECT ALL; exit is the floating
+    /// block's DONE, its COPY (the grab finishes the mode), or a keyboard
+    /// Escape (consumed — see `sendInput`).
+    private(set) var selectTextModeUIActive = false
+    /// Drops a stale focused-pane-rect answer when the mode ends or a
+    /// resize refetches before the previous exec came home.
+    private var selectTextClampGeneration = 0
+    private var selectTextClampTask: Task<Void, Never>?
+
+    /// Local scrollback for this tab's terminal view; nil disables it.
+    /// A transport capability, so it lives beside the transport choice:
+    /// mosh syncs ONE live screen and anything archived above it is junk
+    /// (stale frames from scroll-op diffs, resync resets, and resizes) —
+    /// full record in docs/agents/mosh.md.
+    var localScrollbackLines: Int? { host.useMosh ? nil : 5000 }
 
     /// The HISTORY surface: user prompts read from the agent's own session
     /// file on the host (see `AgentSessionHistory`). Present while the panel
@@ -77,7 +104,7 @@ final class TerminalSessionController {
     }
     private(set) var historyJump: HistoryJumpPhase?
     private var historyJumpTask: Task<Void, Never>?
-    private var historyJumpSessionID: String?
+    private var historyJumpTarget: AgentSessionHistory.JumpTarget?
     /// Transient status pill ("AGENT IS BUSY", "NOT IN THE VISIBLE
     /// TRANSCRIPT") — jump failures are outcomes, not errors.
     private(set) var historyNotice: String?
@@ -126,6 +153,19 @@ final class TerminalSessionController {
     private var lastRows = 24
     private var started = false
     private var transportGeneration = 0
+    /// Session-volume counters drained by the stats pump. Written on the
+    /// MainActor by the two byte funnels (`feed`, `sendInput`).
+    private var statsBytesIn = 0
+    private var statsBytesOut = 0
+    /// Pairs live/ended pushes exactly once per transport run, so the
+    /// center's live-tab bookkeeping can't drift on paths that end a
+    /// transport that never went live (or end one twice).
+    private var statsReportedLive = false
+    /// Times this tab actually went live — the 2nd+ are RELINKS. Counted at
+    /// the state machine that owns liveness, never at attempts: a host that
+    /// is simply down must not climb the stability row while retries fail.
+    private var statsLiveRuns = 0
+    private var statsTask: Task<Void, Never>?
     private var runTask: Task<Void, Never>?
     private var inputTask: Task<Void, Never>?
     private var inputContinuation: AsyncStream<Data>.Continuation?
@@ -145,10 +185,61 @@ final class TerminalSessionController {
     private var terminalAgentHint: AgentKind?
     private var lastTerminalTitleProcessedForAgentHint: String?
     private var directShellAttentionAgent: AgentKind?
-    private var directShellAttentionTracker = AttentionTracker()
+    /// Keyed by this tab's own UUID: a direct shell has no session record,
+    /// so there is nothing else to key an edge baseline by.
+    private var directShellAttentionTracker = AttentionTracker<String>()
     private(set) var dropState: DropState?
     private var dropTask: Task<Void, Never>?
     private var dropClearTask: Task<Void, Never>?
+    /// The target the user activated in this pane, awaiting confirmation.
+    /// The pane never opens one straight from the gesture: the target is
+    /// remote output, so the destination is shown first (see `TerminalLink`
+    /// / `TerminalPathTarget`). ONE slot for both kinds — the link sheet and
+    /// the path sheet structurally cannot contend for the same press.
+    private enum PendingActivation {
+        case link(TerminalLink)
+        case path(TerminalPathTarget)
+    }
+    private var pendingActivation: PendingActivation?
+
+    var pendingLink: TerminalLink? {
+        if case .link(let link) = pendingActivation { return link }
+        return nil
+    }
+
+    var pendingPath: TerminalPathTarget? {
+        if case .path(let path) = pendingActivation { return path }
+        return nil
+    }
+
+    /// The screen cell of the last path press — which PANE the path was
+    /// printed in, so a relative path resolves against that pane's cwd
+    /// rather than the active one's. Overwritten by the next path press,
+    /// never cleared with the sheet: the ▤ VIEW confirmation reads it
+    /// after the sheet dismisses. nil for non-gesture summons (the debug
+    /// hooks, Shortcuts) and scrollback presses, which keep the
+    /// active-pane fallback.
+    private(set) var pathPressScreenCell: (col: Int, row: Int)?
+
+    #if !os(visionOS)
+    /// The terminal's app-owned dictation controls, from the pane's side:
+    /// LISTENING while the microphone is open, or a short failure the user
+    /// can act on. Settled words are already in the session, so the payload
+    /// is only what has been heard and not yet typed.
+    enum DictationState: Equatable {
+        case listening(String)
+        case failed(String)
+    }
+    private(set) var dictation: DictationState?
+    private var dictationSession: DictationSession?
+    private var dictationClearTask: Task<Void, Never>?
+    /// The key has been pressed and a dictation is in flight — which starts
+    /// before `dictation` does, because the first press waits on the system's
+    /// microphone and speech-recognition alerts. Whichever mic control was
+    /// pressed latches on this; the pane's LISTENING bar waits for the
+    /// microphone itself.
+    private var dictationRequested = false
+    #endif
 
     init(route: TerminalRoute, host: Host, attention: AttentionCenter? = nil) {
         self.route = route
@@ -169,8 +260,35 @@ final class TerminalSessionController {
 
     func bind(_ view: TerminalView) {
         terminalView = view
-        view.allowMouseReporting = !tmuxCopyModeUIActive
-        view.forceRemoteCursorScroll = tmuxCopyModeUIActive
+        applyTouchInteractionModes()
+        // Touch never hovers, so SwiftTerm's pointer-gated activation can
+        // never fire here; this pane decides instead. The view owns the
+        // closure and this controller owns the view — capture weakly.
+        view.linkActivationIgnoresHighlight = true
+        view.linkActivationHandler = { [weak self, weak view] target, _, rowTexts, position in
+            guard let self else { return false }
+            // Buffer row → visible-screen cell: pane rectangles live in
+            // screen coordinates, and a press up in scrollback names no
+            // pane (the composite screen is the only pane-mapped surface).
+            var cell: (col: Int, row: Int)?
+            if let terminal = view?.getTerminal() {
+                let screenRow = position.row - terminal.buffer.yDisp
+                if screenRow >= 0 && screenRow < terminal.rows {
+                    cell = (col: position.col, row: screenRow)
+                }
+            }
+            return self.activateLink(target, rowFragments: rowTexts, pressedAt: cell)
+        }
+        // herdr resizes its pane splits by mouse drag, so a long press on a
+        // border cell becomes a remote press-drag-release. herdr tabs only:
+        // the same drag under tmux starts a copy-mode selection, and the
+        // fork's filter is consulted only while the client requested button
+        // tracking, so a plain shell never loses its long press.
+        if route.sessionBackend == .herdr {
+            view.longPressMouseDragFilter = { _, content in
+                HerdrPaneBorder.isBorderCell(content)
+            }
+        }
         if !pendingOutput.isEmpty {
             view.feed(byteArray: pendingOutput[...])
             pendingOutput.removeAll()
@@ -229,9 +347,41 @@ final class TerminalSessionController {
         TerminalFocusArbiter.toggle(terminalView)
     }
 
+    #if !os(visionOS)
+    /// The keyboard lock as a named menu action. The rail key's hold gesture
+    /// stays the fast path, but nothing on screen announced it — a held key
+    /// is unfindable, so the same lock/unlock lives in the terminal's actions
+    /// menu. Lock hides while a hardware keyboard makes it redundant; an
+    /// already-held lock keeps Unlock available. Unlocking asks for the
+    /// keyboard back, exactly like the padlock's short press.
+    func toggleKeyboardLock() {
+        guard let terminalView else { return }
+        if KeyboardLock.shared.isLocked {
+            TerminalFocusArbiter.unlock(terminalView)
+        } else {
+            TerminalFocusArbiter.lock(terminalView)
+        }
+    }
+
+    #endif
+
+    /// Arrange Keys — the key rail's / cluster's reorder mode, per tab like
+    /// the message box and never persisted (the ORDER is, in
+    /// `KeyBarOrderStore`).
+    private(set) var keyBarArranging = false
+
+    func setKeyBarArranging(_ arranging: Bool) {
+        guard keyBarArranging != arranging else { return }
+        keyBarArranging = arranging
+    }
+
+    func toggleKeyBarArranging() {
+        setKeyBarArranging(!keyBarArranging)
+    }
+
     /// Scene became active again: re-assert focus only if this terminal is
-    /// (or nothing is) the app-wide owner — every window's scene activates
-    /// at once on foreground, and they must not steal from each other.
+    /// already the app-wide owner — every window's scene activates at once
+    /// on foreground, and notification order must not elect a new owner.
     func restoreFocusIfOwner(allowed: Bool = true) {
         guard let terminalView else { return }
         TerminalFocusArbiter.restore(terminalView, allowed: allowed)
@@ -326,7 +476,7 @@ final class TerminalSessionController {
                 return
             }
             startTransportPumps(for: connection, openedAt: openedSize)
-            status = .live
+            markLive()
             startDirectShellMonitoring()
         } catch {
             await connection.close()
@@ -335,12 +485,13 @@ final class TerminalSessionController {
             else { return }
             captureKeyPassphraseChallenge(from: error)
             let message = (error as? SSHConnectionError)?.userMessage(host: host)
-                ?? "Couldn't reach \(host.name). \(error.localizedDescription)"
+                ?? String(localized: "Couldn't reach \(host.name). \(error.localizedDescription)")
             status = .ended(message)
             self.connection = nil
             transport = nil
             outputCoalescer = nil
             handoffWatch = nil
+            considerAutomaticResume()
         }
     }
 
@@ -400,7 +551,7 @@ final class TerminalSessionController {
                 return
             }
             startTransportPumps(for: session, openedAt: openedSize)
-            status = .live
+            markLive()
             startDirectShellMonitoring()
         } catch {
             let session = moshSession
@@ -412,21 +563,34 @@ final class TerminalSessionController {
             let message = (error as? MoshBootstrapError)?.userMessage(host: host)
                 ?? (error as? MoshSession.Failure)?.userMessage(host: host)
                 ?? (error as? SSHConnectionError)?.userMessage(host: host)
-                ?? "Couldn't reach \(host.name) over mosh. \(error.localizedDescription)"
+                ?? String(
+                    localized: """
+                        Couldn't reach \(host.name) over mosh. \
+                        \(error.localizedDescription)
+                        """
+                )
             status = .ended(message)
             moshSession = nil
             transport = nil
             outputCoalescer = nil
+            considerAutomaticResume()
         }
     }
 
+    /// Pinged after every coalesced output flush reaches the terminal —
+    /// visionOS's gaze link-hover overlay debounces its region rebuild
+    /// behind this, so affordances follow the screen without polling.
+    var onOutputFlushed: (() -> Void)?
+
     private func feed(_ bytes: [UInt8]) {
+        statsBytesIn += bytes.count
         scanForSwallowedHandoff(bytes)
         guard let terminalView else {
             pendingOutput.append(contentsOf: bytes)
             return
         }
         terminalView.feed(byteArray: bytes[...])
+        onOutputFlushed?()
     }
 
     /// Modern oh-my-zsh drains all buffered stdin before blocking on its
@@ -444,7 +608,8 @@ final class TerminalSessionController {
             handoffWatch = nil
         case .promptDetected:
             handoffWatch = nil
-            let payload = Data(ShellHandoff.payload(for: command).utf8)
+            let handoff = RemoteShellEnvelope.handoff(command)
+            let payload = Data(ShellHandoff.payload(for: handoff).utf8)
             // The ordered input pump keeps the re-type serialized with any
             // keystrokes; before the pump exists (output can arrive while
             // runSSH is still between openShell and startTransportPumps),
@@ -492,7 +657,9 @@ final class TerminalSessionController {
         else { return }
         stopTransportPumps()
         stopDirectShellMonitoring()
+        endStatsRun(reason: reason)
         setTmuxCopyModeUIActive(false)
+        setSelectTextModeUIActive(false)
         resetHistoryState()
         handoffWatch = nil
         status = .ended(reason)
@@ -503,6 +670,7 @@ final class TerminalSessionController {
         moshSession = nil
         outputCoalescer = nil
         Task { await endedTransport?.close() }
+        considerAutomaticResume()
     }
 
     // MARK: Plain-shell agent monitoring
@@ -516,12 +684,12 @@ final class TerminalSessionController {
         directShellMonitorTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
-                // Same active-state gate as the wall feed and the terminal
-                // window's probes: iOS suspension is what normally parks
-                // this loop, but if anything keeps the process alive in the
-                // background (an extension, a brief transition), a hidden
-                // app must not keep issuing SSH exec probes.
-                if UIApplication.shared.applicationState == .active {
+                // Same gate as the wall feed and the terminal window's
+                // probes: iOS suspension is what normally parks this loop,
+                // and a hidden app must not keep issuing SSH exec probes —
+                // unless this tab's host bought background time, which is
+                // exactly so a shell agent's turn-end can still be seen.
+                if BackgroundActivity.shared.permitsWork(for: self.host) {
                     await self.refreshDirectShellAgent(ifStaleFor: 4)
                 }
                 try? await Task.sleep(for: Self.directShellProbeInterval)
@@ -723,8 +891,17 @@ final class TerminalSessionController {
             // Typing (or Escape) returns Claude Code's pager to the live
             // tail on its own; drop the app-side state with it.
             historyJump = nil
-            historyJumpSessionID = nil
+            historyJumpTarget = nil
         }
+        // Escape is the select-text HUD's exit key and the mode is app-local,
+        // so the byte must not leak to the remote (it could interrupt a
+        // running agent). When tmux copy mode is also active the byte keeps
+        // riding below — tmux needs it to leave its own mode.
+        if selectTextModeUIActive, data == Data([0x1B]) {
+            setSelectTextModeUIActive(false)
+            if !tmuxCopyModeUIActive { return }
+        }
+        statsBytesOut += data.count
         inputContinuation?.yield(data)
         // Both the app-owned DONE action and a hardware/software Escape key
         // travel through this same delegate path. Restore normal tmux mouse
@@ -734,17 +911,172 @@ final class TerminalSessionController {
         }
     }
 
-    /// Run one command from the shared tmux panel. Ordinary shortcuts enter
-    /// through SwiftTerm exactly like keyboard input. Destructive shortcuts
-    /// were already confirmed by the panel's second press and use an SSH exec
-    /// channel, which avoids the timing-sensitive tmux `:` prompt entirely.
-    func performTmuxShortcut(_ shortcut: TmuxShortcut) {
-        guard status == .live, let sessionName = route.sessionName else { return }
+    /// One entry point for the shared shortcut panel: dispatch by the row's
+    /// own payload. A payload mismatched to this tab's backend fails closed
+    /// on the per-backend route guards below.
+    func performPanelShortcut(_ item: ShortcutPanelItem) {
+        switch item.payload {
+        case .tmux(let shortcut): performTmuxShortcut(shortcut)
+        case .herdr(let shortcut): performHerdrShortcut(shortcut)
+        }
+    }
+
+    /// Apply the panel's native rename field: the stock `,` binding opens a
+    /// client-side tmux prompt an exec can neither target (several clients)
+    /// nor drive — command-prompt blocks the exec until answered — so the
+    /// panel collects the name and this renames the active window directly.
+    func performPanelRename(_ item: ShortcutPanelItem, to name: String) {
+        guard case .tmux(let shortcut) = item.payload,
+              shortcut.promptsForWindowName,
+              status == .live, route.usesTmux,
+              let sessionName = route.sessionName
+        else { return }
+        if case .finding = historyJump { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        Task {
+            await executeControlCommand(TmuxProbe.renameWindowCommand(
+                sessionName: sessionName, newName: trimmed
+            ))
+        }
+    }
+
+    /// A held resize row: the same active-pane command at tmux's own coarse
+    /// step. Only resize rows hold, so anything else fails closed.
+    func performPanelShortcutCoarse(_ item: ShortcutPanelItem) {
+        guard case .tmux(let shortcut) = item.payload,
+              shortcut.resizeDirection != nil
+        else { return }
+        performTmuxShortcut(shortcut, resizeCells: TmuxShortcut.coarseResizeCells)
+    }
+
+    /// Hand the visible screen to native selection on any session-backed
+    /// tab. Entered from the selection block's SELECT/SELECT ALL, which carry
+    /// the gesture's cell so selection targets that pane — and the backend's
+    /// focus follows it, the switch a tap would have made had the mode not
+    /// kept taps local. No position (the DEBUG
+    /// hook) targets the focused pane.
+    func beginSelectTextMode(atScreenPosition point: (col: Int, row: Int)? = nil) {
+        guard status == .live else { return }
+        if case .finding = historyJump { return }
+        setSelectTextModeUIActive(true)
+        refreshSelectTextClamp(targeting: point)
+    }
+
+    /// The block's DONE. Local state only — the remote never entered a mode.
+    func finishSelectTextMode() {
+        setSelectTextModeUIActive(false)
+    }
+
+    /// Ask the backend for the visible panes' screen rectangles and clamp
+    /// local selection into the target pane — the pressed one when a
+    /// position rides along, the focused one otherwise. A selection must
+    /// not bleed across a pane border, and Select All should mean the pane,
+    /// not the screen (which on herdr would also sweep the sidebar and tab
+    /// bar). When the target is not the focused pane, focus follows: tmux
+    /// by pane id; herdr's only focus verb is directional, so one step
+    /// fires and only in a two-pane layout, where a single step is exact.
+    /// Fail-soft throughout: no answer leaves the whole-screen behavior.
+    ///
+    /// The geometry applies only once two consecutive answers agree
+    /// (`PaneClampSettle`): with a second client of another size attached,
+    /// the backend sizes its one shared viewport to the last client that
+    /// typed — and the entry gesture is itself such input — so the first
+    /// answer can still describe the other client's geometry (reported
+    /// 2026-08-09 as a mispositioned selection block on iPhone beside a
+    /// terminal `herdr attach`; the ~200 ms viewport-move lag is measured).
+    private func refreshSelectTextClamp(targeting point: (col: Int, row: Int)? = nil) {
+        guard selectTextModeUIActive,
+              let backend = route.sessionBackend,
+              let sessionName = route.sessionName
+        else { return }
+        selectTextClampGeneration &+= 1
+        let generation = selectTextClampGeneration
+        let command = switch backend {
+        case .tmux: TmuxProbe.paneRectsCommand(sessionName: sessionName)
+        case .herdr: HerdrProbe.snapshotCommand(sessionName: sessionName)
+        }
+        // Cancellation ends a superseded fetch at its next sleep — resize
+        // re-enters here on every keyboard show/hide, and the generation
+        // check alone would let each stale task finish its execs first.
+        selectTextClampTask?.cancel()
+        selectTextClampTask = Task {
+            // All rounds share one control connection: on mosh the closure
+            // is a fresh SSH handshake, so per-round connections would pay
+            // it twice per Select Text entry.
+            let settled = (try? await withControlConnection { control -> [PaneScreenRectEntry]? in
+                var settle = PaneClampSettle()
+                for attempt in 0..<PaneClampSettle.maxRounds {
+                    if attempt > 0 {
+                        try await Task.sleep(
+                            for: .milliseconds(PaneClampSettle.retryDelayMilliseconds)
+                        )
+                    }
+                    guard generation == selectTextClampGeneration,
+                          selectTextModeUIActive
+                    else { return nil }
+                    let output = try await control.exec(command)
+                    guard generation == selectTextClampGeneration,
+                          selectTextModeUIActive
+                    else { return nil }
+                    let round = switch backend {
+                    case .tmux: TmuxProbe.parsePaneRects(output)
+                    case .herdr: HerdrProbe.parsePaneScreenRects(output)
+                    }
+                    // No answer keeps the current no-clamp behavior;
+                    // retrying could not distinguish a host without the
+                    // verb from noise.
+                    guard !round.isEmpty else { return nil }
+                    if let panes = settle.offer(round) { return panes }
+                }
+                return nil
+            }) ?? nil
+            guard let panes = settled else { return }
+            let focused = panes.first(where: \.isFocused)
+            guard let target = point.flatMap({ p in
+                panes.first(where: { $0.rect.contains(col: p.col, row: p.row) })
+            }) ?? focused ?? panes.first
+            else { return }
+            terminalView?.selectionClampRect = (target.rect.columns, target.rect.rows)
+            guard !target.isFocused else { return }
+            switch backend {
+            case .tmux:
+                await executeControlCommand(
+                    TmuxProbe.focusPaneCommand(paneID: target.id)
+                )
+            case .herdr:
+                guard panes.count == 2, let focused,
+                      let direction = PaneScreenRect.direction(
+                        from: focused.rect, to: target.rect
+                      )
+                else { return }
+                await executeControlCommand(HerdrProbe.focusPaneDirectionCommand(
+                    sessionName: sessionName, direction: direction
+                ))
+            }
+        }
+    }
+
+    /// Run one command from the shared tmux panel. Split rows use the SSH
+    /// control plane on every transport: on iPad a stock Ctrl-B + shifted `%`
+    /// burst can intermittently reach tmux without its prefix and type `%`
+    /// into the pane, including on an SSH tab. Other ordinary rows enter
+    /// through SwiftTerm exactly like keyboard input. Confirmed destructive
+    /// rows already use the control path to avoid tmux's prompt.
+    func performTmuxShortcut(_ shortcut: TmuxShortcut, resizeCells: Int = 1) {
+        guard status == .live, route.usesTmux,
+              let sessionName = route.sessionName
+        else { return }
         // The jump search owns the pane while it pages; a shortcut now would
         // either be dropped by the input lock (leaving copy-mode UI stuck
         // half-armed) or race the remote script.
         if case .finding = historyJump { return }
-        if let input = shortcut.bindingInput {
+        switch TmuxProbe.shortcutDelivery(
+            shortcut, sessionName: sessionName, resizeCells: resizeCells
+        ) {
+        case .controlCommand(let command):
+            Task { await executeControlCommand(command) }
+        case .terminalInput(let input):
             guard let terminalView else { return }
             if shortcut == .copyMode {
                 // Copy mode freezes the remote pane for navigation, but its
@@ -754,12 +1086,112 @@ final class TerminalSessionController {
                 setTmuxCopyModeUIActive(true)
             }
             terminalView.send(input)
+        case nil:
             return
         }
-        guard let command = TmuxProbe.directShortcutCommand(
-            shortcut, sessionName: sessionName
+    }
+
+    /// Run one command from the herdr panel (HRDR) — `performTmuxShortcut`'s
+    /// herdr-backend sibling. Non-destructive rows send herdr's stock ⌃B
+    /// binding through SwiftTerm; the confirmed closes resolve the focused
+    /// target from one snapshot exec and close it by id, so they follow the
+    /// server's truth rather than a rebindable key.
+    func performHerdrShortcut(_ shortcut: HerdrShortcut) {
+        guard status == .live, route.sessionBackend == .herdr,
+              let sessionName = route.sessionName
+        else { return }
+        if case .finding = historyJump { return }
+        if let input = shortcut.bindingInput {
+            terminalView?.send(input)
+            return
+        }
+        guard let scope = shortcut.closeScope else { return }
+        Task { await closeHerdrFocusedTarget(scope, sessionName: sessionName) }
+    }
+
+    /// Snapshot → focused id → close, two control execs. An unreadable
+    /// snapshot or an unnamed focus declines silently — the tmux closes'
+    /// `[ -n "$target" ]` posture: a close must never guess its target.
+    private func closeHerdrFocusedTarget(
+        _ scope: HerdrShortcut.CloseScope, sessionName: String
+    ) async {
+        let snapshot = HerdrProbe.snapshotCommand(sessionName: sessionName)
+        guard let output = try? await withControlConnection({
+            try await $0.exec(snapshot)
+        }),
+            let target = HerdrProbe.parseFocusedCloseTarget(output, scope: scope),
+            let close = HerdrProbe.closeShortcutCommand(
+                sessionName: sessionName, scope: scope, targetID: target
+            )
+        else { return }
+        await executeControlCommand(close)
+    }
+
+    /// The shortcut panel's switch list — tmux windows or herdr workspaces,
+    /// decided by this tab's backend so the panel never learns one.
+    func loadShortcutSwitchChoices() async -> [TmuxWindowChoice]? {
+        switch route.sessionBackend {
+        case .tmux: await loadTmuxWindowList()
+        case .herdr: await loadHerdrWorkspaceList()
+        case nil: nil
+        }
+    }
+
+    func selectShortcutSwitchChoice(_ choice: TmuxWindowChoice) {
+        switch route.sessionBackend {
+        case .tmux: selectTmuxWindow(choice)
+        case .herdr: selectHerdrWorkspace(choice)
+        case nil: break
+        }
+    }
+
+    /// The shortcut panel's window list, read through the control path so
+    /// SSH and mosh tabs answer alike. A failure returns nil and the panel
+    /// simply shows no window section — the shortcut grid stays useful.
+    func loadTmuxWindowList() async -> [TmuxWindowChoice]? {
+        guard status == .live, route.usesTmux,
+              let sessionName = route.sessionName
+        else { return nil }
+        let command = TmuxProbe.windowListCommand(sessionName: sessionName)
+        guard let output = try? await withControlConnection({
+            try await $0.exec(command)
+        }) else { return nil }
+        return TmuxProbe.parseWindowList(output)
+    }
+
+    /// Switch the attached session to one of its windows. Direct control
+    /// path like the confirmed close actions: no terminal input, no `:`
+    /// prompt, and the attached client follows tmux's own state change.
+    func selectTmuxWindow(_ window: TmuxWindowChoice) {
+        guard status == .live, route.usesTmux else { return }
+        if case .finding = historyJump { return }
+        let command = TmuxProbe.selectWindowCommand(windowID: window.tmuxID)
+        Task { await executeControlCommand(command) }
+    }
+
+    /// The herdr panel's workspace rows, through the same control path.
+    func loadHerdrWorkspaceList() async -> [TmuxWindowChoice]? {
+        guard status == .live, route.sessionBackend == .herdr,
+              let sessionName = route.sessionName
+        else { return nil }
+        let command = HerdrProbe.workspaceListCommand(sessionName: sessionName)
+        guard let output = try? await withControlConnection({
+            try await $0.exec(command)
+        }) else { return nil }
+        return HerdrProbe.parseWorkspaceChoices(output)
+    }
+
+    /// Focus one workspace of the attached herdr session — the session's ONE
+    /// global focus moves, and the attached client follows on its own.
+    func selectHerdrWorkspace(_ choice: TmuxWindowChoice) {
+        guard status == .live, route.sessionBackend == .herdr,
+              let sessionName = route.sessionName
+        else { return }
+        if case .finding = historyJump { return }
+        guard let command = HerdrProbe.focusWorkspaceCommand(
+            sessionName: sessionName, workspaceID: choice.tmuxID
         ) else { return }
-        Task { await executeTmuxControlCommand(command) }
+        Task { await executeControlCommand(command) }
     }
 
     /// Leave the contextual copy UI and tmux copy mode together. Escape is
@@ -774,17 +1206,157 @@ final class TerminalSessionController {
         terminalView.send(EscapeSequences.cmdEsc)
     }
 
+    #if !os(visionOS)
+    /// What either mic control shows: engaged from the press, not from the
+    /// microphone, so a permission alert never leaves the action looking
+    /// untouched.
+    var isDictating: Bool { dictationRequested }
+
+    /// One dictation action shared by the physical-keyboard rail slot and the
+    /// software-keyboard lock tip. Neither path reaches the system keyboard's
+    /// own microphone, so both run the same app-owned recognition session.
+    func toggleDictation() {
+        if dictationRequested {
+            stopDictation()
+        } else {
+            startDictation()
+        }
+    }
+
+    /// Finish and type the tail. Most of the dictation is already in the
+    /// session — this is the last words the hold rules were still sitting on,
+    /// and the recognizer gets a moment to make its final pass over them
+    /// first. A press that has not reached the microphone yet has nothing to
+    /// type, so it simply abandons the attempt.
+    func stopDictation() {
+        guard let dictationSession else { return }
+        if dictationSession.isListening {
+            dictationSession.stop()
+        } else {
+            dictationSession.cancel()
+        }
+    }
+
+    /// Leave without typing the rest. Words that already settled are in the
+    /// session and stay there — a terminal has no undo, so this abandons the
+    /// queue, not the dictation's past.
+    func cancelDictation() {
+        dictationSession?.cancel()
+    }
+
+    /// The LISTENING bar's language chip: persist the pick, and when a take
+    /// is live restart it in the new language — the recognizer heard the old
+    /// one, and "applies next time" from a control pressed mid-take would
+    /// read as the pick not working. The restart abandons only the unsettled
+    /// queue; words already typed stay, like any cancel. A full restart, not
+    /// an in-place engine swap: a recognition task created while the daemon
+    /// tears its predecessor down comes back dead (the session's whole
+    /// restart-backoff ladder exists for that), and the well-worn start path
+    /// costs one bar blink.
+    func selectDictationLanguage(_ choice: DictationLanguageChoice) {
+        DictationLanguageSetting.setChosen(choice.id)
+        guard dictationRequested else { return }
+        dictationSession?.cancel()
+        startDictation()
+    }
+
+    private func startDictation() {
+        guard status == .live else { return }
+        // The jump search owns the pane's input while it pages the remote
+        // transcript; dictated text would interleave with its PgUp stream.
+        if case .finding = historyJump { return }
+        dictationClearTask?.cancel()
+        dictation = nil
+        dictationRequested = true
+        let session = dictationSession ?? DictationSession()
+        dictationSession = session
+        session.start(
+            locale: DictationLanguageSetting.chosenLocale(),
+            onStart: { [weak self] in
+                guard let self, dictationRequested else { return }
+                dictation = .listening("")
+            },
+            onText: { [weak self] settled in
+                self?.typeDictated(settled)
+            },
+            onPending: { [weak self] pending in
+                guard let self, dictationRequested else { return }
+                dictation = .listening(DictationText.preview(pending))
+            },
+            onFinish: { [weak self] outcome in
+                self?.finishDictation(outcome)
+            }
+        )
+    }
+
+    /// One chunk of settled speech, typed exactly like a rail key or a
+    /// dropped file's path — through SwiftTerm and the ordered input pump,
+    /// never submitted. The stream already sanitized it and owns the spacing
+    /// between chunks, so it goes out verbatim.
+    private func typeDictated(_ text: String) {
+        guard dictationRequested else { return }
+        guard status == .live, let terminalView else {
+            // The session being spoken into is gone. Stop rather than aim the
+            // rest of the sentence at whatever takes its place.
+            dictationSession?.cancel()
+            return
+        }
+        terminalView.send(txt: text)
+    }
+
+    private func finishDictation(_ outcome: DictationSession.Outcome) {
+        dictationRequested = false
+        dictation = nil
+        switch outcome {
+        case .ended, .cancelled:
+            // Everything that settled was typed as it landed; there is no
+            // trailing text left to deliver here.
+            break
+        case .failure(let message):
+            dictation = .failed(message)
+            dictationClearTask?.cancel()
+            dictationClearTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(4))
+                guard !Task.isCancelled else { return }
+                if case .failed = self?.dictation { self?.dictation = nil }
+            }
+        }
+    }
+    #endif
+
     private func setTmuxCopyModeUIActive(_ active: Bool) {
         guard tmuxCopyModeUIActive != active else { return }
         tmuxCopyModeUIActive = active
-        terminalView?.allowMouseReporting = !active
-        terminalView?.forceRemoteCursorScroll = active
+        applyTouchInteractionModes()
+    }
+
+    private func setSelectTextModeUIActive(_ active: Bool) {
+        guard selectTextModeUIActive != active else { return }
+        selectTextModeUIActive = active
+        applyTouchInteractionModes()
+        if !active {
+            selectTextClampGeneration &+= 1
+            terminalView?.selectionClampRect = nil
+        }
+    }
+
+    /// The one writer for the view flags the two app-owned interaction modes
+    /// share. Copy mode keeps pans alive as cursor keys (tmux copy mode
+    /// answers them); select-text has no remote listener, so its pans are
+    /// suppressed outright — unless copy mode is active too and wins.
+    private func applyTouchInteractionModes() {
+        guard let terminalView else { return }
+        terminalView.allowMouseReporting =
+            !(tmuxCopyModeUIActive || selectTextModeUIActive)
+        terminalView.forceRemoteCursorScroll = tmuxCopyModeUIActive
+        terminalView.suppressRemotePanScroll =
+            selectTextModeUIActive && !tmuxCopyModeUIActive
     }
 
     /// SSH tabs already own an exec-capable connection next to their PTY.
     /// Mosh tabs deliberately do not, so a destructive user action opens a
     /// short-lived SSH control connection and closes it after the command.
-    private func executeTmuxControlCommand(_ command: String) async {
+    private func executeControlCommand(_ command: String) async {
         if let connection {
             _ = try? await connection.exec(command)
             return
@@ -838,7 +1410,13 @@ final class TerminalSessionController {
     /// its own exec surface (direct mosh shells have neither).
     var canOfferAgentHistory: Bool {
         guard status == .live else { return false }
-        if route.sessionName != nil { return true }
+        if route.usesTmux { return true }
+        // herdr resolves the same transcript identity through its own
+        // surfaces: focused-pane cwd from a snapshot, the registry walk
+        // rooted at `pane process-info`'s shell_pid (verified 0.7.5).
+        if route.sessionBackend == .herdr { return true }
+        // Only a true plain shell may use its own process-discovered cwd.
+        guard route.sessionName == nil else { return false }
         return connection != nil && directShellWorkingDirectory != nil
     }
 
@@ -847,7 +1425,7 @@ final class TerminalSessionController {
     /// bounded tail read is cheap. Claude Code only: the session-file
     /// surface concentrates on the one agent whose pager jump is exact.
     func openAgentHistory(for agent: AgentKind) {
-        guard status == .live, agent == .claudeCode else { return }
+        guard canOfferAgentHistory, agent == .claudeCode else { return }
         historyLoadTask?.cancel()
         agentHistory = .loading
         historyLoadTask = Task { [weak self] in
@@ -869,13 +1447,24 @@ final class TerminalSessionController {
                     let cwd: String?
                     let preferredSessionID: String?
                     let configDir: String?
-                    if let sessionName = route.sessionName {
+                    if route.usesTmux, let sessionName = route.sessionName {
                         let output = try await connection.exec(
                             AgentSessionHistory.paneContextCommand(
                                 sessionName: sessionName
                             )
                         )
                         let context = AgentSessionHistory.parsePaneContext(output)
+                        cwd = context?.cwd
+                        preferredSessionID = context?.agentSessionID
+                        configDir = context?.configDir
+                    } else if route.sessionBackend == .herdr,
+                              let sessionName = route.sessionName {
+                        let output = try await connection.exec(
+                            AgentSessionHistory.herdrPaneContextCommand(
+                                sessionName: sessionName
+                            )
+                        )
+                        let context = AgentSessionHistory.parseHerdrPaneContext(output)
                         cwd = context?.cwd
                         preferredSessionID = context?.agentSessionID
                         configDir = context?.configDir
@@ -896,26 +1485,27 @@ final class TerminalSessionController {
                 }
             guard !Task.isCancelled, agentHistory != nil else { return }
             guard let result else {
-                agentHistory = .unavailable("NO WORKING DIRECTORY")
+                agentHistory = .unavailable(String(localized: "NO WORKING DIRECTORY"))
                 return
             }
             guard result.filePath != nil else {
-                agentHistory = .unavailable("NO SESSION FILE")
+                agentHistory = .unavailable(String(localized: "NO SESSION FILE"))
                 return
             }
             agentHistory = .loaded(
                 agent: agent,
                 messages: result.messages,
-                jumpAvailable: route.sessionName != nil && agent == .claudeCode
+                jumpAvailable: (route.usesTmux || route.sessionBackend == .herdr)
+                    && agent == .claudeCode
             )
         } catch {
             guard !Task.isCancelled, agentHistory != nil else { return }
-            agentHistory = .unavailable("HISTORY UNAVAILABLE")
+            agentHistory = .unavailable(String(localized: "HISTORY UNAVAILABLE"))
         }
     }
 
     private enum HistoryJumpOutcome {
-        case found(sessionID: String, pages: Int)
+        case found(target: AgentSessionHistory.JumpTarget, pages: Int)
         case failed(String)
     }
 
@@ -927,6 +1517,7 @@ final class TerminalSessionController {
     /// pager shows is matched against it, so each step is directed.
     func startHistoryJump(to message: AgentUserMessage) {
         guard status == .live,
+              route.usesTmux || route.sessionBackend == .herdr,
               let sessionName = route.sessionName,
               !tmuxCopyModeUIActive,
               case .loaded(let agent, let messages, true) = agentHistory,
@@ -937,7 +1528,12 @@ final class TerminalSessionController {
         // state is superseded directly — the find script normalizes to live
         // first, so chaining jumps needs no manual BACK TO LIVE.
         if case .finding = historyJump { return }
-        historyJumpSessionID = nil
+        #if !os(visionOS)
+        // The search is about to lock the input pump, which would swallow
+        // dictated words without a trace. Close the microphone instead.
+        cancelDictation()
+        #endif
+        historyJumpTarget = nil
         let preview = String(message.firstLine.prefix(24))
         historyJump = .finding(preview: preview)
         historyJumpTask = Task { [weak self] in
@@ -957,25 +1553,40 @@ final class TerminalSessionController {
         preview: String
     ) async {
         let outcome: HistoryJumpOutcome
+        let isHerdr = route.sessionBackend == .herdr
         do {
             outcome = try await withControlConnection { connection in
                 let prologueOutput = try await connection.exec(
-                    AgentSessionHistory.jumpPrologueCommand(sessionName: sessionName)
+                    isHerdr
+                        ? AgentSessionHistory.herdrJumpPrologueCommand(
+                            sessionName: sessionName
+                        )
+                        : AgentSessionHistory.jumpPrologueCommand(
+                            sessionName: sessionName
+                        )
                 )
-                guard let prologue = AgentSessionHistory.parseJumpPrologue(prologueOutput)
-                else { return .failed("SESSION NOT FOUND") }
+                guard let prologue = isHerdr
+                    ? AgentSessionHistory.parseHerdrJumpPrologue(prologueOutput)
+                    : AgentSessionHistory.parseJumpPrologue(prologueOutput)
+                else { return .failed(String(localized: "SESSION NOT FOUND")) }
+                // The walk's coordinate: tmux aims at the session (its
+                // active pane answers); herdr aims at the prologue's
+                // bake-vetted focused pane.
+                let target: AgentSessionHistory.JumpTarget = isHerdr
+                    ? .herdr(sessionName: sessionName, paneID: prologue.sessionID)
+                    : .tmux(sessionID: prologue.sessionID)
                 switch AgentAttention.classify(
                     title: prologue.paneTitle, tail: prologue.capture
                 ) {
-                case .busy: return .failed("AGENT IS BUSY")
-                case .needsYou: return .failed("ANSWER THE AGENT FIRST")
+                case .busy: return .failed(String(localized: "AGENT IS BUSY"))
+                case .needsYou: return .failed(String(localized: "ANSWER THE AGENT FIRST"))
                 case .idle: break
                 }
                 let targetNeedles = AgentSessionHistory.needles(
                     for: message, paneColumns: prologue.paneWidth
                 )
                 guard let targetPrimary = targetNeedles.first else {
-                    return .failed("MESSAGE TOO SHORT TO FIND")
+                    return .failed(String(localized: "MESSAGE TOO SHORT TO FIND"))
                 }
                 let entries = AgentSessionHistory.needleEntries(
                     for: allMessages, paneColumns: prologue.paneWidth
@@ -999,7 +1610,7 @@ final class TerminalSessionController {
                 }
                 let findOutput = try await connection.exec(
                     AgentSessionHistory.jumpFindCommand(
-                        sessionID: prologue.sessionID,
+                        target: target,
                         needles: entries,
                         targetIndex: message.ordinal,
                         targetNeedles: targetNeedles,
@@ -1024,7 +1635,7 @@ final class TerminalSessionController {
                     // the message's flattened row (a rebuilt transcript
                     // omits long multiline prompt bodies). From the user's
                     // seat that is the jump destination.
-                    return .found(sessionID: prologue.sessionID, pages: pages)
+                    return .found(target: target, pages: pages)
                 case .top, .exhausted:
                     // The remote script already restored the live view. A
                     // second differently-sized client can invalidate the
@@ -1032,34 +1643,34 @@ final class TerminalSessionController {
                     // the needles were built against), so name it.
                     return .failed(
                         prologue.clientSizeCount > 1
-                            ? "ANOTHER CLIENT RESIZES THIS SESSION"
-                            : "NOT IN THE VISIBLE TRANSCRIPT"
+                            ? String(localized: "ANOTHER CLIENT RESIZES THIS SESSION")
+                            : String(localized: "NOT IN THE VISIBLE TRANSCRIPT")
                     )
                 case .short:
-                    return .failed("TERMINAL TOO SHORT TO JUMP")
+                    return .failed(String(localized: "TERMINAL TOO SHORT TO JUMP"))
                 case .resized:
                     return .failed(
                         prologue.clientSizeCount > 1
-                            ? "ANOTHER CLIENT RESIZES THIS SESSION"
-                            : "RESIZED MID-JUMP — TRY AGAIN"
+                            ? String(localized: "ANOTHER CLIENT RESIZES THIS SESSION")
+                            : String(localized: "RESIZED MID-JUMP — TRY AGAIN")
                     )
                 case nil:
-                    return .failed("SEARCH FAILED")
+                    return .failed(String(localized: "SEARCH FAILED"))
                 }
             }
         } catch {
-            outcome = .failed("SEARCH FAILED")
+            outcome = .failed(String(localized: "SEARCH FAILED"))
         }
 
         switch outcome {
-        case .found(let sessionID, let pages):
+        case .found(let target, let pages):
             if Task.isCancelled || historyJump == nil {
                 // Cancelled mid-find but the search landed: put the pane
                 // back rather than leaving it silently paged.
-                returnTranscriptToLive(sessionID: sessionID, pages: pages)
+                returnTranscriptToLive(target: target, pages: pages)
                 return
             }
-            historyJumpSessionID = sessionID
+            historyJumpTarget = target
             historyJump = .jumped(preview: preview, pages: pages)
         case .failed(let reason):
             guard !Task.isCancelled, historyJump != nil else { return }
@@ -1081,19 +1692,21 @@ final class TerminalSessionController {
     /// never Esc — a turn may have started since the search verified idle.
     func finishHistoryJump() {
         guard case .jumped(_, let pages) = historyJump else { return }
-        let sessionID = historyJumpSessionID
+        let target = historyJumpTarget
         historyJump = nil
-        historyJumpSessionID = nil
-        guard let sessionID else { return }
-        returnTranscriptToLive(sessionID: sessionID, pages: pages)
+        historyJumpTarget = nil
+        guard let target else { return }
+        returnTranscriptToLive(target: target, pages: pages)
     }
 
-    private func returnTranscriptToLive(sessionID: String, pages: Int) {
+    private func returnTranscriptToLive(
+        target: AgentSessionHistory.JumpTarget, pages: Int
+    ) {
         Task { [weak self] in
             _ = try? await self?.withControlConnection { connection in
                 try await connection.exec(
                     AgentSessionHistory.jumpReturnCommand(
-                        sessionID: sessionID, pages: pages
+                        target: target, pages: pages
                     )
                 )
             }
@@ -1117,7 +1730,7 @@ final class TerminalSessionController {
         historyJumpTask?.cancel()
         historyJumpTask = nil
         historyJump = nil
-        historyJumpSessionID = nil
+        historyJumpTarget = nil
         historyNoticeClearTask?.cancel()
         historyNoticeClearTask = nil
         historyNotice = nil
@@ -1130,7 +1743,7 @@ final class TerminalSessionController {
     @discardableResult
     func debugSendTmuxShortcutThroughTerminal(_ shortcut: TmuxShortcut) -> Bool {
         guard status == .live,
-              route.sessionName != nil,
+              route.usesTmux,
               shortcut.bindingInput != nil,
               terminalView != nil
         else { return false }
@@ -1145,6 +1758,10 @@ final class TerminalSessionController {
         lastRows = rows
         guard status == .live else { return }
         resizeContinuation?.yield(TerminalSize(cols: cols, rows: rows))
+        // A resize relayouts the multiplexer's panes, so a select-text clamp
+        // fetched for the old geometry is wrong — refetch (the generation
+        // counter drops the stale answer if resizes storm).
+        if selectTextModeUIActive { refreshSelectTextClamp() }
     }
 
     /// Scene became active again: a mosh transport heartbeats immediately
@@ -1161,17 +1778,26 @@ final class TerminalSessionController {
     /// upload each into the active pane's working directory over this tab's
     /// own connection, then type the resulting paths through the input pump
     /// — no Enter, the user finishes the prompt. One batch at a time.
+    /// Whether this tab can take a file: an SSH-backed session tab. Mosh has
+    /// no SFTP channel, and a plain shell has no multiplexer pane whose
+    /// foreground cwd could be resolved. The chrome's FILE rule and the
+    /// Talkback paperclip both read this.
+    var canUploadFiles: Bool {
+        !host.useMosh && route.sessionBackend != nil
+    }
+
+    static let uploadUnavailableMessage =
+        String(localized: "File upload requires tmux or herdr over SSH")
+
     func deliverDrop(_ files: [DroppedFile]) {
         // The jump search owns the pane's input while it pages; the FINDING
         // veil is visible over the drop target for its few seconds.
         if case .finding = historyJump { return }
-        if (host.useMosh || route.sessionName == nil),
-           status == .live, dropTask == nil, !files.isEmpty {
-            // Mosh has no SFTP channel, while a plain shell has no tmux pane
-            // whose foreground cwd can be resolved. Say so instead of
-            // silently discarding the user's attach/drop intent.
+        if !canUploadFiles, status == .live, dropTask == nil, !files.isEmpty {
+            // Say so instead of silently discarding the user's attach/drop
+            // intent.
             dropClearTask?.cancel()
-            dropState = .failed("File upload requires tmux over SSH")
+            dropState = .failed(Self.uploadUnavailableMessage)
             dropClearTask = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(5))
                 guard !Task.isCancelled else { return }
@@ -1190,44 +1816,23 @@ final class TerminalSessionController {
 
     private func performDrop(_ files: [DroppedFile], over connection: SSHConnection) async {
         do {
-            let destination = try await dropDestination(over: connection)
-            let uploads = try files.map { file -> SSHUpload in
-                guard file.data.count <= DropText.maxBytes else {
-                    throw DropError(message: "\(file.name) is over 64 MB")
-                }
-                return SSHUpload(
-                    data: file.data,
-                    preferredName: DropText.sanitizedName(file.name)
-                )
-            }
             let displayNames = files.map(\.name)
             dropState = .uploading(name: files[0].name, fraction: 0)
-            let finalNames = try await connection.uploadFiles(
-                uploads,
-                toDirectory: destination.directory,
-                prepareGitIgnoredDirectory: destination.prepareGitIgnoredDirectory,
-                onProgress: { [weak self] index, fraction in
-                    Task { @MainActor [weak self] in
-                        guard case .uploading = self?.dropState else { return }
-                        self?.dropState = .uploading(
-                            name: displayNames[index],
-                            fraction: fraction
-                        )
-                    }
+            let typedPaths = try await uploadForTypedPaths(files, over: connection) { [weak self] index, fraction in
+                Task { @MainActor [weak self] in
+                    guard case .uploading = self?.dropState else { return }
+                    self?.dropState = .uploading(
+                        name: displayNames[index],
+                        fraction: fraction
+                    )
                 }
-            )
-            let typedPaths = finalNames.map { finalName in
-                // Relative names read best in a prompt, but only when the
-                // file verifiably sits under the pane's cwd.
-                destination.typedPrefix.map { $0 + finalName }
-                    ?? destination.directory + "/" + finalName
             }
             dropState = nil
             sendInput(Data(DropText.typedPaths(typedPaths).utf8))
         } catch is CancellationError {
             dropState = nil
         } catch {
-            dropState = .failed((error as? DropError)?.message ?? "Upload failed")
+            dropState = .failed((error as? DropError)?.message ?? String(localized: "Upload failed"))
             dropClearTask = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(5))
                 guard !Task.isCancelled else { return }
@@ -1236,43 +1841,84 @@ final class TerminalSessionController {
         }
     }
 
+    /// The one upload for both roads — the pane's drop path and the Talkback
+    /// draft: the destination resolved once per batch, names sanitized, the
+    /// 64 MB cap applied, and the paths as they will be typed handed back.
+    /// Progress arrives per file index; failure throws (`DropError` carries
+    /// the user-facing words).
+    private func uploadForTypedPaths(
+        _ files: [DroppedFile],
+        over connection: SSHConnection,
+        onProgress: @escaping @Sendable (_ index: Int, _ fraction: Double) -> Void
+    ) async throws -> [String] {
+        try await upload(
+            files,
+            to: dropDestination(over: connection),
+            over: connection,
+            onProgress: onProgress
+        )
+    }
+
+    private func upload(
+        _ files: [DroppedFile],
+        to destination: DropDestination,
+        over connection: SSHConnection,
+        onProgress: @escaping @Sendable (_ index: Int, _ fraction: Double) -> Void
+    ) async throws -> [String] {
+        let uploads = try files.map { file -> SSHUpload in
+            guard file.data.count <= DropText.maxBytes else {
+                throw DropError(message: String(localized: "\(file.name) is over 64 MB"))
+            }
+            return SSHUpload(
+                data: file.data,
+                preferredName: DropText.sanitizedName(file.name)
+            )
+        }
+        let finalNames = try await connection.uploadFiles(
+            uploads,
+            toDirectory: destination.directory,
+            prepareGitIgnoredDirectory: destination.prepareGitIgnoredDirectory,
+            onProgress: onProgress
+        )
+        return finalNames.map(destination.typedPath(for:))
+    }
+
     private struct DropDestination {
         var directory: String
         /// Prefix for typed relative paths ("" = bare name,
         /// ".multiplex-drops/" inside git worktrees); nil types absolute.
         var typedPrefix: String?
         var prepareGitIgnoredDirectory: Bool
+
+        /// Relative names read best in a prompt, but only when the file
+        /// verifiably sits under the pane's cwd.
+        func typedPath(for finalName: String) -> String {
+            typedPrefix.map { $0 + finalName } ?? directory + "/" + finalName
+        }
     }
 
-    /// The pane's cwd when tmux can tell us (it follows the foreground
-    /// process, i.e. the agent's own cwd) — corralled into a self-ignoring
-    /// `.multiplex-drops/` when that cwd is inside a git worktree, so drops
-    /// never clutter `git status`. Otherwise $HOME with absolute typed
-    /// paths. The query's first `/`-prefixed line is the path; a
-    /// MULTIPLEX_GIT line marks a worktree.
+    /// The pane's cwd when the session backend can tell us (both follow
+    /// the foreground process, i.e. the agent's own cwd) — corralled into
+    /// a self-ignoring `.multiplex-drops/` when that cwd is inside a git
+    /// worktree, so drops never clutter `git status`. Otherwise $HOME with
+    /// absolute typed paths.
     private func dropDestination(
         over connection: SSHConnection
     ) async throws -> DropDestination {
-        if let sessionName = route.sessionName {
-            let output = (try? await connection.exec(
-                TmuxProbe.dropDestinationCommand(sessionName: sessionName)
-            )) ?? ""
-            let lines = output.split(separator: "\n")
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-            if let path = lines.first(where: { $0.hasPrefix("/") }) {
-                if lines.contains("MULTIPLEX_GIT") {
-                    return DropDestination(
-                        directory: path + "/" + DropText.dropsDirectoryName,
-                        typedPrefix: DropText.dropsDirectoryName + "/",
-                        prepareGitIgnoredDirectory: true
-                    )
-                }
+        let anchor = await paneDropAnchor(over: connection)
+        if let path = anchor.cwd {
+            if anchor.insideGitWorktree {
                 return DropDestination(
-                    directory: path,
-                    typedPrefix: "",
-                    prepareGitIgnoredDirectory: false
+                    directory: path + "/" + DropText.dropsDirectoryName,
+                    typedPrefix: DropText.dropsDirectoryName + "/",
+                    prepareGitIgnoredDirectory: true
                 )
             }
+            return DropDestination(
+                directory: path,
+                typedPrefix: "",
+                prepareGitIgnoredDirectory: false
+            )
         }
         return DropDestination(
             directory: try await connection.remoteHomeDirectory(),
@@ -1281,12 +1927,380 @@ final class TerminalSessionController {
         )
     }
 
+    /// The backend-dispatched cwd + git-worktree answer behind a drop.
+    /// tmux resolves both in one exec (the cwd stays in a shell variable
+    /// for the git check). herdr's cwd comes home in snapshot JSON —
+    /// strictly the focused pane, where this tab's typed paths land — so
+    /// the corral check is its own exec with the app-resolved path
+    /// respliced; both print the marker `TmuxProbe.parseDropDestination`
+    /// reads. Any failure is (nil, false): the $HOME fallback, never an
+    /// error.
+    private func paneDropAnchor(
+        over connection: SSHConnection
+    ) async -> (cwd: String?, insideGitWorktree: Bool) {
+        guard let sessionName = route.sessionName else { return (nil, false) }
+        switch route.sessionBackend {
+        case .tmux:
+            let output = (try? await connection.exec(
+                TmuxProbe.dropDestinationCommand(sessionName: sessionName)
+            )) ?? ""
+            return TmuxProbe.parseDropDestination(output)
+        case .herdr:
+            let snapshot = (try? await connection.exec(
+                HerdrProbe.snapshotCommand(sessionName: sessionName)
+            )) ?? ""
+            guard let cwd = HerdrProbe.parseFocusedPaneWorkingDirectory(snapshot)
+            else { return (nil, false) }
+            let check = (try? await connection.exec(
+                TmuxProbe.gitWorktreeCheckCommand(directory: cwd)
+            )) ?? ""
+            return (cwd, TmuxProbe.parseDropDestination(check).insideGitWorktree)
+        case nil:
+            return (nil, false)
+        }
+    }
+
+    // MARK: Talkback
+
+    /// The chat-style message box under this tab's pane. `talkbackOpen` is
+    /// what the window, the rail and the cluster watch (it flips on the talk
+    /// key); `talkback` is the draft only the composer renders — text and
+    /// attachments — so a keystroke never re-renders a window. Both follow
+    /// the tab across windows and die with it; never persisted. SEND is
+    /// `sendTalkback`. Design record: `local-plan/talkback-bakeoff/`.
+    private(set) var talkbackOpen = false
+    private(set) var talkback = TalkbackDraft()
+    /// The picked bytes behind each attachment, kept until the message is
+    /// sent or the chip removed, so a failed upload retries without another
+    /// trip through the picker.
+    @ObservationIgnored private var talkbackFiles: [UUID: DroppedFile] = [:]
+    /// Each queued chip remembers its pick: the drop destination is resolved
+    /// once per pick (one exec, like a drop's batch), not once per file — a
+    /// later pick re-resolves, the pane's cwd may have moved between picks.
+    @ObservationIgnored private var talkbackUploadQueue: [(id: UUID, pick: Int)] = []
+    @ObservationIgnored private var talkbackPicks = 0
+    @ObservationIgnored private var talkbackPickDestination: (pick: Int, destination: DropDestination)?
+    @ObservationIgnored private var talkbackUploadTask: Task<Void, Never>?
+    /// The last focus request the composer consumed — per tab, so a tab
+    /// switch back to an open box never re-takes the keyboard.
+    @ObservationIgnored private var talkbackFocusHandled = 0
+
+    /// The SEND face with this tab's own input rules folded in: nothing goes
+    /// while the tab isn't live or the history jump owns the pane.
+    var talkbackSendState: TalkbackDraft.SendState {
+        guard status == .live else { return .disabled }
+        if case .finding = historyJump { return .disabled }
+        return talkback.sendState
+    }
+
+    /// The talk key. Opening asks the composer to take the keyboard; a key
+    /// pressed on an already-open box asks again (the box may have lost the
+    /// keyboard to the pane).
+    func setTalkbackOpen(_ open: Bool) {
+        if open { talkback.focusRequest &+= 1 }
+        if talkbackOpen != open { talkbackOpen = open }
+    }
+
+    func toggleTalkback() {
+        setTalkbackOpen(!talkbackOpen)
+    }
+
+    /// True exactly once per open/keypress: the composer focuses its field
+    /// on it and never on a mere re-render.
+    func consumeTalkbackFocusRequest() -> Bool {
+        guard talkback.focusRequest != talkbackFocusHandled else { return false }
+        talkbackFocusHandled = talkback.focusRequest
+        return true
+    }
+
+    /// The field's edits — the composer is the writer, this is the record.
+    func setTalkbackText(_ text: String) {
+        guard talkback.text != text else { return }
+        talkback.text = text
+    }
+
+    /// Files picked through the composer's paperclip: each becomes an
+    /// uploading chip and joins one serial upload queue (the drop path's
+    /// SFTP, into the pane's cwd). Tabs that can't upload fail the chips
+    /// with the drop path's own words instead of dropping the intent
+    /// silently.
+    func attachTalkbackFiles(_ files: [DroppedFile]) {
+        talkbackPicks &+= 1
+        for file in files {
+            let kind = TalkbackAttachment.kind(forName: file.name)
+            let attachment = TalkbackAttachment(
+                name: file.name,
+                byteCount: file.data.count,
+                kind: kind
+            )
+            talkbackFiles[attachment.id] = file
+            talkback.attachments.append(attachment)
+            enqueueTalkbackUpload(attachment.id, pick: talkbackPicks)
+            guard kind == .image else { continue }
+            // Decoding a camera-sized photo is tens of milliseconds; the chip
+            // shows its ring first and its picture a beat later.
+            let id = attachment.id
+            let data = file.data
+            Task.detached(priority: .userInitiated) { [weak self] in
+                let preview = TalkbackThumbnail.jpeg(from: data)
+                await MainActor.run { [weak self] in
+                    self?.talkback.update(id) { $0.preview = preview }
+                }
+            }
+        }
+    }
+
+    /// The drain loop skips an id no longer attached, so removal needs no
+    /// queue surgery.
+    func removeTalkbackAttachment(_ id: UUID) {
+        talkback.attachments.removeAll { $0.id == id }
+        talkbackFiles[id] = nil
+    }
+
+    /// A failed chip's tap: back to uploading, back in the queue as a pick
+    /// of its own (the destination is resolved afresh — it may be what
+    /// failed).
+    func retryTalkbackAttachment(_ id: UUID) {
+        guard talkbackFiles[id] != nil,
+              talkback.attachments.first(where: { $0.id == id })?.isFailed == true
+        else { return }
+        talkback.update(id) { $0.state = .uploading(fraction: 0) }
+        talkbackPicks &+= 1
+        enqueueTalkbackUpload(id, pick: talkbackPicks)
+    }
+
+    /// SEND (`submit`) or a long-press SEND (type only): one paste through
+    /// the ordered pump — the landed paths first, then the body, wrapped in
+    /// the bracketed-paste markers when the pane has mode 2004 on — and, for
+    /// SEND, a CR as its own write ~160 ms later (the slash chips' shape).
+    /// Clears the draft; the box stays open. False when nothing went.
+    @discardableResult
+    func sendTalkback(submit: Bool) -> Bool {
+        guard talkbackSendState == .ready else { return false }
+        let bracketed = terminalView?.getTerminal().bracketedPasteMode == true
+        let payload = TalkbackMessage.payload(
+            body: talkback.text,
+            paths: talkback.readyPaths,
+            bracketed: bracketed
+        )
+        guard !payload.isEmpty else { return false }
+        typeTalkback(payload)
+        if submit {
+            Task { [weak self] in
+                try? await Task.sleep(for: TalkbackMessage.submitDelay)
+                self?.typeTalkback(TalkbackMessage.submit)
+            }
+        }
+        // `.ready` means nothing is uploading or queued, so the kept bytes
+        // are exactly the attachments that just went.
+        talkbackFiles.removeAll()
+        talkback.clearAfterSend()
+        return true
+    }
+
+    /// The view's send path when it exists (it stamps the typing-quiet
+    /// clock and keeps the caret in view), the pump directly otherwise.
+    private func typeTalkback(_ data: Data) {
+        if let terminalView {
+            terminalView.send(data: [UInt8](data)[...])
+        } else {
+            sendInput(data)
+        }
+    }
+
+    private func enqueueTalkbackUpload(_ id: UUID, pick: Int) {
+        talkbackUploadQueue.append((id, pick))
+        guard talkbackUploadTask == nil else { return }
+        talkbackUploadTask = Task { [weak self] in
+            await self?.drainTalkbackUploads()
+            self?.talkbackUploadTask = nil
+        }
+    }
+
+    private func drainTalkbackUploads() async {
+        while !talkbackUploadQueue.isEmpty {
+            let entry = talkbackUploadQueue.removeFirst()
+            guard let file = talkbackFiles[entry.id],
+                  talkback.attachments.contains(where: { $0.id == entry.id })
+            else { continue }
+            await uploadTalkbackAttachment(entry.id, file: file, pick: entry.pick)
+        }
+    }
+
+    /// The drop path's upload, one file at a time so a failure marks only
+    /// its own chip, into the destination resolved for this chip's pick.
+    private func uploadTalkbackAttachment(_ id: UUID, file: DroppedFile, pick: Int) async {
+        guard canUploadFiles else {
+            failTalkbackAttachment(id, Self.uploadUnavailableMessage)
+            return
+        }
+        guard status == .live, let connection else {
+            failTalkbackAttachment(id, String(localized: "Not connected"))
+            return
+        }
+        do {
+            let destination: DropDestination
+            if let memo = talkbackPickDestination, memo.pick == pick {
+                destination = memo.destination
+            } else {
+                destination = try await dropDestination(over: connection)
+                talkbackPickDestination = (pick, destination)
+            }
+            let paths = try await upload([file], to: destination, over: connection) { [weak self] _, fraction in
+                Task { @MainActor [weak self] in
+                    self?.talkback.update(id) { attachment in
+                        guard attachment.isUploading else { return }
+                        attachment.state = .uploading(fraction: fraction)
+                    }
+                }
+            }
+            guard let path = paths.first else {
+                throw DropError(message: String(localized: "Upload failed"))
+            }
+            talkback.update(id) { $0.state = .ready(path: path) }
+        } catch is CancellationError {
+            failTalkbackAttachment(id, String(localized: "Cancelled"))
+        } catch {
+            failTalkbackAttachment(
+                id, (error as? DropError)?.message ?? String(localized: "Upload failed")
+            )
+        }
+    }
+
+    private func failTalkbackAttachment(_ id: UUID, _ message: String) {
+        talkback.update(id) { $0.state = .failed(message) }
+    }
+
+    // MARK: Links
+
+    /// A link the terminal resolved under a tap or long press. Returns
+    /// whether this pane claims the gesture. URLs confirm through the link
+    /// sheet; path-shaped text (implicit detection matches those too) now
+    /// confirms through the file-viewer sheet instead of falling to
+    /// selection; only what neither resolver accepts ($VAR/…, colon prose)
+    /// still declines into text selection.
+    ///
+    /// `rowFragments` is the match split at its hard-wrap seams (empty when
+    /// it fit one row, or from callers without seam info — the debug hook,
+    /// gaze regions): a prose word butting a seam means the rows below start
+    /// their own target (`and`⏎`local-plan/x` is not one path), so the cut
+    /// suffix resolves first and the join stays the fallback.
+    func activateLink(
+        _ target: String,
+        rowFragments: [String] = [],
+        pressedAt cell: (col: Int, row: Int)? = nil
+    ) -> Bool {
+        // The jump search owns the pane's input while it pages and its veil
+        // covers the text being pressed — same rule as a drop.
+        if case .finding = historyJump { return false }
+        if let cut = WrappedRowGlue.cutTarget(fragments: rowFragments),
+           claimResolved(cut, pressedAt: cell) {
+            return true
+        }
+        return claimResolved(target, pressedAt: cell)
+    }
+
+    private func claimResolved(_ target: String, pressedAt cell: (col: Int, row: Int)?) -> Bool {
+        // `file:` is URI-shaped, but in a remote pane it names a file on the
+        // SSH host, never this device. Give the strict local-authority file
+        // parser first refusal so it reaches the viewer; malformed/non-local
+        // file URIs then fall through to TerminalLink's blocked, copy-only
+        // confirmation. Ordinary links must still precede ordinary paths — a
+        // schemeless domain such as example.com/docs is legal path syntax too.
+        if let file = TerminalPathTarget.resolveFileURL(target) {
+            pendingActivation = .path(file)
+            pathPressScreenCell = cell
+            return true
+        }
+        if let link = TerminalLink.resolve(target) {
+            pendingActivation = .link(link)
+            return true
+        }
+        if let path = TerminalPathTarget.resolve(target) {
+            pendingActivation = .path(path)
+            pathPressScreenCell = cell
+            return true
+        }
+        return false
+    }
+
+    /// Hands the confirmed target to the system. Only an allowlisted scheme
+    /// ever reaches here — `TerminalLink` decided that, and the sheet only
+    /// offers OPEN for `.openable`.
+    func openPendingLink() {
+        guard let url = pendingLink?.openableURL else { return }
+        pendingActivation = nil
+        UIApplication.shared.open(url)
+    }
+
+    /// Hands over the link the *sheet* holds, which is not always the one
+    /// that was pressed: detection reads rendered rows, so a wrapped line
+    /// can hand over a sentence's tail glued to an address, and the sheet's
+    /// target is editable. The allowlist still decides — the field's text
+    /// went back through `TerminalLink.resolve`, and only `.openable`
+    /// reaches here.
+    func openConfirmedLink(_ link: TerminalLink) {
+        guard let url = link.openableURL else { return }
+        pendingActivation = nil
+        UIApplication.shared.open(url)
+    }
+
+    /// Copy is the answer for everything Multiplex will not open: a blocked
+    /// scheme, a malformed target, or a link the user wants elsewhere. What
+    /// lands on the pasteboard is what the sheet shows, edits included.
+    func copyConfirmedTarget(_ text: String) {
+        UIPasteboard.general.string = text
+        pendingActivation = nil
+    }
+
+    func dismissPendingLink() {
+        if case .link = pendingActivation { pendingActivation = nil }
+    }
+
+    func dismissPendingPath() {
+        if case .path = pendingActivation { pendingActivation = nil }
+    }
+
+    /// The pane's cwd for the file viewer's anchor — the pressed pane's
+    /// when a cell rides along (a split's panes routinely sit in different
+    /// directories), the active/focused pane's otherwise (the git-worktree
+    /// question is not asked here). nil when no pane can answer: a plain
+    /// shell, a mosh tab (no exec surface), or a dead transport.
+    func paneWorkingDirectory(pressedAt cell: (col: Int, row: Int)? = nil) async -> String? {
+        guard let sessionName = route.sessionName, let connection
+        else { return nil }
+        switch route.sessionBackend {
+        case .tmux:
+            let output = (try? await connection.exec(
+                TmuxProbe.pathAnchorCommand(sessionName: sessionName)
+            )) ?? ""
+            return TmuxProbe.parsePathAnchorDirectory(output, atScreenCell: cell)
+        case .herdr:
+            let output = (try? await connection.exec(
+                HerdrProbe.snapshotCommand(sessionName: sessionName)
+            )) ?? ""
+            return HerdrProbe.parsePaneWorkingDirectory(output, atScreenCell: cell)
+        case nil:
+            return nil
+        }
+    }
+
     // MARK: Actions
 
     /// Closing the transport detaches the tmux client; tmux keeps the
     /// session. (SSH: channel teardown does it. mosh: the shutdown
     /// handshake ends mosh-server, which HUPs its tmux client.)
     func detach() {
+        cancelPendingResume()
+        #if !os(visionOS)
+        // The tab is going away — release the microphone rather than typing
+        // into a session that no longer exists.
+        dictationClearTask?.cancel()
+        dictationSession?.cancel()
+        dictationSession = nil
+        dictationRequested = false
+        dictation = nil
+        #endif
         dropTask?.cancel()
         dropTask = nil
         dropClearTask?.cancel()
@@ -1298,7 +2312,9 @@ final class TerminalSessionController {
         outputCoalescer = nil
         stopTransportPumps()
         stopDirectShellMonitoring()
+        endStatsRun(reason: nil)
         setTmuxCopyModeUIActive(false)
+        setSelectTextModeUIActive(false)
         resetHistoryState()
         status = .ended(nil)
         keyPassphraseChallenge = nil
@@ -1310,7 +2326,15 @@ final class TerminalSessionController {
         Task { await transport?.close() }
     }
 
+    /// The RECONNECT chip. The user is driving now, so their attempt also
+    /// re-arms automatic recovery for the next suspension.
     func reconnect() {
+        resumePolicy.userReconnected()
+        cancelPendingResume()
+        performReconnect()
+    }
+
+    private func performReconnect() {
         guard case .ended = status else { return }
         if let challenge = keyPassphraseChallenge {
             let revision = SSHKeyPassphraseSession.snapshot(for: host.id).revision
@@ -1321,9 +2345,170 @@ final class TerminalSessionController {
             keyPassphraseChallenge = nil
         }
         setTmuxCopyModeUIActive(false)
+        setSelectTextModeUIActive(false)
         resetHistoryState()
         status = .connecting
         beginTransportRun()
+    }
+
+    // MARK: Automatic resume after suspension
+
+    /// A backgrounded app is suspended and its sockets die with it, while
+    /// the tmux session on the host carries on. `SessionResumePolicy` holds
+    /// the (pure) decision of when a dead transport is that damage rather
+    /// than a session the user deliberately ended.
+    private var resumePolicy = SessionResumePolicy()
+    private var resumeTask: Task<Void, Never>?
+
+    private static let resumeLogger = Logger(
+        subsystem: "app.multiplexterm.multiplex",
+        category: "resume"
+    )
+
+    /// The app went away; note whether this tab had a live transport to lose.
+    func applicationDidEnterBackground() {
+        resumePolicy.appMovedToBackground(isLive: status == .live)
+    }
+
+    /// The app is back: repair a transport that died while it was away, and
+    /// arm the grace window for a close still in flight from the wake.
+    func applicationWillEnterForeground() {
+        guard let delay = resumePolicy.appReturnedToForeground(
+            now: .now,
+            isLive: status == .live
+        ) else { return }
+        scheduleAutomaticResume(after: delay, trigger: "foreground")
+    }
+
+    /// Every path that ends a transport on its own asks here; the user
+    /// closing the tab (`detach`) deliberately does not.
+    private func considerAutomaticResume() {
+        // An encrypted key needs its passphrase from a person, and retrying
+        // the same rejected secret only burns attempts.
+        let delay = keyPassphraseChallenge == nil
+            ? resumePolicy.transportEnded(
+                now: .now,
+                isForeground: UIApplication.shared.applicationState != .background
+            )
+            : nil
+        guard let delay else {
+            // Nothing further is owed: whatever the panel says next, it is
+            // not "Reattaching".
+            isResuming = false
+            return
+        }
+        scheduleAutomaticResume(after: delay, trigger: "transport-ended")
+    }
+
+    private func scheduleAutomaticResume(after delay: TimeInterval, trigger: String) {
+        guard case .ended = status else { return }
+        Self.resumeLogger.debug(
+            "auto-resume \(self.route.displayName, privacy: .public) host=\(self.host.name, privacy: .public) trigger=\(trigger, privacy: .public) attempt=\(self.resumePolicy.attempts, privacy: .public) delay=\(delay, privacy: .public)"
+        )
+        resumeTask?.cancel()
+        isResuming = true
+        resumeTask = Task { [weak self] in
+            if delay > 0 { try? await Task.sleep(for: .seconds(delay)) }
+            guard !Task.isCancelled, let self else { return }
+            self.resumeTask = nil
+            guard case .ended = self.status else { return }
+            self.performReconnect()
+        }
+    }
+
+    private func cancelPendingResume() {
+        resumeTask?.cancel()
+        resumeTask = nil
+        isResuming = false
+    }
+
+    private func markLive() {
+        status = .live
+        resumePolicy.sessionBecameLive()
+        isResuming = false
+        beginStatsRun()
+    }
+
+    // MARK: Connection stats
+
+    /// Passive-tap pushes into the app-wide stats center. Everything here is
+    /// bookkeeping the tab already does — byte counts from the two funnels,
+    /// a mosh session's own transport counters — pushed on a coarse cadence.
+    /// No network cost anywhere.
+    private static let statsPushInterval: Duration = .seconds(5)
+    /// Idle cadence while collection is off — the loop stays armed so a
+    /// mid-session re-enable resumes without a reattach, but wakes rarely.
+    private static let statsDisabledInterval: Duration = .seconds(30)
+
+    /// The one setup pairing (the teardown twin is `endStatsRun`): live push
+    /// + relink accounting + the pump, so no path can start half of it.
+    private func beginStatsRun() {
+        guard !statsReportedLive else { return }
+        statsReportedLive = true
+        statsLiveRuns += 1
+        let center = ConnectionStatsCenter.shared
+        center.recordTransportLive(hostID: host.id)
+        if statsLiveRuns > 1 {
+            center.recordRelink(hostID: host.id)
+        }
+        startStatsPump()
+    }
+
+    private func endStatsRun(reason: String?) {
+        statsTask?.cancel()
+        statsTask = nil
+        guard statsReportedLive else { return }
+        statsReportedLive = false
+        // Drain the tail window before the ended push — a session shorter
+        // than one pump tick still owes its bytes.
+        flushStatsBytes()
+        ConnectionStatsCenter.shared.recordTransportEnded(
+            hostID: host.id, reason: reason)
+    }
+
+    private func startStatsPump() {
+        statsTask?.cancel()
+        statsTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                let collecting = ConnectionStatsCenter.shared.isCollecting
+                if collecting {
+                    await self.pushLinkStats()
+                }
+                try? await Task.sleep(
+                    for: collecting
+                        ? Self.statsPushInterval : Self.statsDisabledInterval
+                )
+            }
+        }
+    }
+
+    private func flushStatsBytes() {
+        let center = ConnectionStatsCenter.shared
+        if center.isCollecting, statsBytesIn > 0 || statsBytesOut > 0 {
+            center.addBytes(
+                hostID: host.id, bytesIn: statsBytesIn, bytesOut: statsBytesOut)
+        }
+        statsBytesIn = 0
+        statsBytesOut = 0
+    }
+
+    private func pushLinkStats() async {
+        guard status == .live else { return }
+        flushStatsBytes()
+        guard let session = moshSession else { return }
+        let report = await session.linkReport()
+        guard status == .live, moshSession === session else { return }
+        ConnectionStatsCenter.shared.recordMosh(hostID: host.id, report: report)
+    }
+
+    /// The fork's echo-latency window (keystroke → first echoed paint),
+    /// delivered by `SwiftTermView` — the one number that matches "feels
+    /// slow" and works identically on SSH and mosh.
+    func recordEchoSample(milliseconds: Double) {
+        guard status == .live else { return }
+        ConnectionStatsCenter.shared.recordEcho(
+            hostID: host.id, milliseconds: milliseconds)
     }
 
     /// Called app-wide after one prompt accepts an answer. Tabs that were
@@ -1334,6 +2519,7 @@ final class TerminalSessionController {
         keyPassphraseChallenge = nil
         guard case .ended = status else { return }
         setTmuxCopyModeUIActive(false)
+        setSelectTextModeUIActive(false)
         resetHistoryState()
         status = .connecting
         beginTransportRun()

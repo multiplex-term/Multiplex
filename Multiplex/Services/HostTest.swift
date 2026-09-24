@@ -1,5 +1,4 @@
 import Foundation
-import os
 
 /// The host sheet's Test Connection button: one throwaway SSH connection
 /// using the form's (possibly unsaved) credentials, then a `command -v`
@@ -9,7 +8,9 @@ import os
 enum HostTest {
     /// What a successful sign-in found on the host.
     struct Report: Equatable {
-        var tmuxFound = false
+        /// Whether the host's explicitly selected session backend is on the
+        /// same exec PATH the deck will use.
+        var multiplexerFound = false
         /// nil when the host doesn't use mosh (nothing to check).
         var moshServerFound: Bool?
     }
@@ -33,7 +34,21 @@ enum HostTest {
             let output = try await deadlined(seconds: execDeadline) {
                 try await connection.exec(checkCommand(for: host))
             }
-            return .connected(parseReport(output, checksMosh: host.useMosh))
+            return .connected(parseReport(
+                output,
+                backend: host.sessionBackend,
+                checksMosh: host.useMosh
+            ))
+        } catch SSHConnectionError.commandFailed(let exitCode, let stderr) {
+            let shellOutput = try? await deadlined(seconds: execDeadline) {
+                try await connection.diagnoseLoginShell()
+            }
+            let rejection = RemoteShellDiagnosis.Rejection(
+                exitCode: exitCode,
+                stderrHead: stderr,
+                shellName: shellOutput.flatMap(RemoteShellDiagnosis.shellName(from:))
+            )
+            return .failed(rejection.message(host: host))
         } catch {
             return .failed(failureMessage(for: error, host: host))
         }
@@ -41,14 +56,18 @@ enum HostTest {
 
     // MARK: Tool sweep (pure)
 
-    /// tmux always (the deck's session wall needs it); mosh-server when the
-    /// host uses mosh — at its configured path if one is set (`command -v`
+    /// The selected multiplexer (tmux or herdr); mosh-server when the host
+    /// uses mosh — at its configured path if one is set (`command -v`
     /// accepts a pathname and checks it's executable). Always exits 0:
     /// Citadel throws on a non-zero exit status, and "tool missing" must
     /// read as a report line, not a failed connection.
     static func checkCommand(for host: Host) -> String {
-        var command = TmuxProbe.pathPrefix
-            + "command -v tmux >/dev/null 2>&1 && echo MPXT_TMUX_OK || echo MPXT_TMUX_MISSING; "
+        let pathPrefix = host.sessionBackend == .herdr
+            ? HerdrProbe.pathPrefix : TmuxProbe.pathPrefix
+        let marker = host.sessionBackend == .herdr ? "HERDR" : "TMUX"
+        var command = pathPrefix
+            + "command -v \(host.sessionBackend.rawValue) >/dev/null 2>&1"
+            + " && echo MPXT_\(marker)_OK || echo MPXT_\(marker)_MISSING; "
         if host.useMosh {
             let configured = host.moshServerPath?.trimmingCharacters(in: .whitespaces) ?? ""
             let server = configured.isEmpty ? "mosh-server" : configured
@@ -59,9 +78,14 @@ enum HostTest {
         return command
     }
 
-    static func parseReport(_ output: String, checksMosh: Bool) -> Report {
-        Report(
-            tmuxFound: output.contains("MPXT_TMUX_OK"),
+    static func parseReport(
+        _ output: String,
+        backend: Host.SessionBackend,
+        checksMosh: Bool
+    ) -> Report {
+        let marker = backend == .herdr ? "MPXT_HERDR_OK" : "MPXT_TMUX_OK"
+        return Report(
+            multiplexerFound: output.contains(marker),
             moshServerFound: checksMosh ? output.contains("MPXT_MOSH_OK") : nil
         )
     }
@@ -70,28 +94,55 @@ enum HostTest {
 
     /// Words that say what to fix, not what the transport saw.
     static func failureMessage(for error: Error, host: Host) -> String {
+        if let rejection = error as? RemoteShellDiagnosis.Rejection {
+            return rejection.message(host: host)
+        }
         if let ssh = error as? SSHConnectionError {
             switch ssh {
             case .missingCredentials:
                 return host.authMethod == .password
-                    ? "Enter a password first."
-                    : "Paste a private key first."
+                    ? String(localized: "Enter a password first.")
+                    : String(localized: "Paste a private key first.")
             case .keyPassphraseRequired:
-                return "This private key is encrypted. Enter its passphrase above."
+                return String(localized: "This private key is encrypted. Enter its passphrase above.")
             case .incorrectKeyPassphrase:
-                return "That passphrase didn't unlock the private key. Try again."
+                return String(localized: "That passphrase didn't unlock the private key. Try again.")
             case .unsupportedKey:
-                return "The private key couldn't be read. Paste an OpenSSH ed25519 or RSA key, including its BEGIN/END lines."
+                return String(localized: """
+                    The private key couldn't be read. Paste an OpenSSH ed25519 \
+                    or RSA key, including its BEGIN/END lines.
+                    """)
             case .tailscaleUnavailable:
                 return ssh.userMessage(host: host)
             case .connectFailed(let detail):
                 return connectFailureMessage(detail, host: host)
+            case .commandFailed:
+                return ssh.userMessage(host: host)
             case .notConnected:
-                return "The connection closed before the check finished. Try again."
+                return String(localized: "The connection closed before the check finished. Try again.")
+            case .hostKeyRefused(let refusal):
+                // Named rather than placed: Host key is the last section in
+                // the form, not the next one down, so "below" would send the
+                // reader looking in the wrong place.
+                switch refusal {
+                case .changed(let expected, let presented):
+                    return String(localized: """
+                        \(host.hostname) presented a different host key than the one \
+                        recorded for this host — \(expected.fingerprint), got \
+                        \(presented.fingerprint). Nothing was sent. If you rebuilt the \
+                        server, forget the recorded key under Host key and check again.
+                        """)
+                case .unrecognizedAlgorithm(let presented, _):
+                    return String(localized: """
+                        \(host.hostname) identified itself with a \(presented.algorithm) \
+                        key, which isn't recorded for this host. Nothing was sent. If its \
+                        host keys changed, forget the recorded keys under Host key and check again.
+                        """)
+                }
             }
         }
         if error is DeadlineExceeded {
-            return "No answer from \(host.hostname) after \(Int(connectDeadline)) seconds — check the address and port, and that the host is reachable from this network."
+            return String(localized: "No answer from \(host.hostname) after \(Int(connectDeadline)) seconds — check the address and port, and that the host is reachable from this network.")
         }
         return connectFailureMessage(String(describing: error), host: host)
     }
@@ -103,58 +154,28 @@ enum HostTest {
         let lower = detail.lowercased()
         if lower.contains("authentication") || lower.contains("permission denied") {
             return host.authMethod == .password
-                ? "\(host.hostname) rejected the sign-in — check the user name and password."
-                : "\(host.hostname) rejected the key — check the user name, and that the key's public half is in ~/.ssh/authorized_keys on the host."
+                ? String(localized: "\(host.hostname) rejected the sign-in — check the user name and password.")
+                : String(localized: "\(host.hostname) rejected the key — check the user name, and that the key's public half is in ~/.ssh/authorized_keys on the host.")
         }
         if lower.contains("connection refused") || lower.contains("econnrefused") {
-            return "\(host.hostname) refused the connection on port \(host.port) — is an SSH server listening there?"
+            return String(localized: "\(host.hostname) refused the connection on port \(String(host.port)) — is an SSH server listening there?")
         }
         if lower.contains("dnsaerror") || lower.contains("dnsaaaaerror")
             || lower.contains("nodename nor servname")
             || lower.contains("name or service not known") {
-            return "Couldn't find “\(host.hostname)” — check the address for typos."
+            return String(localized: "Couldn't find “\(host.hostname)” — check the address for typos.")
         }
         if lower.contains("timed out") || lower.contains("timeout") {
-            return "\(host.hostname) didn't answer — check the port, and any firewall between this device and the host."
+            return String(localized: "\(host.hostname) didn't answer — check the port, and any firewall between this device and the host.")
         }
         if lower.contains("network is unreachable") || lower.contains("enetunreach")
             || lower.contains("no route to host") || lower.contains("ehostunreach") {
-            return "No route to \(host.hostname) — check this device's network connection."
+            return String(localized: "No route to \(host.hostname) — check this device's network connection.")
         }
         if lower.contains("connection reset") || lower.contains("econnreset") {
-            return "\(host.hostname) dropped the connection — the port may not speak SSH."
+            return String(localized: "\(host.hostname) dropped the connection — the port may not speak SSH.")
         }
-        return "Couldn't connect to \(host.hostname): \(detail)"
+        return String(localized: "Couldn't connect to \(host.hostname): \(detail)")
     }
 
-    // MARK: Deadline
-
-    struct DeadlineExceeded: Error {}
-
-    /// Same shape as `HostConnectionModel.deadlined` — a hung future
-    /// resolves as a failure instead of never.
-    private static func deadlined<T: Sendable>(
-        seconds: Double, _ operation: @escaping @Sendable () async throws -> T
-    ) async throws -> T {
-        let resumed = OSAllocatedUnfairLock(initialState: false)
-        return try await withCheckedThrowingContinuation { continuation in
-            @Sendable func finish(_ result: Result<T, Error>) {
-                let first = resumed.withLock { done -> Bool in
-                    if done { return false }
-                    done = true
-                    return true
-                }
-                if first { continuation.resume(with: result) }
-            }
-            let work = Task {
-                do { finish(.success(try await operation())) }
-                catch { finish(.failure(error)) }
-            }
-            Task {
-                try? await Task.sleep(for: .seconds(seconds))
-                finish(.failure(DeadlineExceeded()))
-                work.cancel()
-            }
-        }
-    }
 }

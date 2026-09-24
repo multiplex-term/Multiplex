@@ -74,6 +74,7 @@ final class GhosttyImplicitLinkDetectionTests: TerminalDelegate {
             ("match news:comp.infosystems.www.servers.unix news links", "news:comp.infosystems.www.servers.unix"),
             ("Serving HTTP on :: port 8000 (http://[::]:8000/)", "http://[::]:8000/"),
             ("IPv6 address https://[2001:db8::1]:8080/path", "https://[2001:db8::1]:8080/path"),
+            ("IPv6 address https://[2001:db8::1]:8080(foo)", "https://[2001:db8::1]:8080"),
             ("../example.py", "../example.py"),
             ("../example.py ", "../example.py "),
             ("first time ../example.py contributor ", "../example.py"),
@@ -96,6 +97,13 @@ final class GhosttyImplicitLinkDetectionTests: TerminalDelegate {
         for (input, expected) in cases {
             assertImplicitMatch(input: input, expected: expected)
         }
+    }
+
+    @Test func testSchemeURLWithLongTrailingPunctuation() {
+        let url = "https://example.com/a/b/c"
+        let input = url + String(repeating: ".", count: 20)
+
+        assertImplicitMatch(input: input, expected: url)
     }
 
     @Test func testGhosttyStyleImplicitNoMatchCases() {
@@ -132,5 +140,57 @@ final class GhosttyImplicitLinkDetectionTests: TerminalDelegate {
 
         let row2 = terminal.link(at: .buffer(Position(col: 2, row: 2)), mode: .explicitAndImplicit)
         #expect(row2 == input)
+    }
+}
+
+extension GhosttyImplicitLinkDetectionTests {
+    /// Rows written with cursor addressing (never `isWrapped`), the upper
+    /// one reaching the right edge so the editor-wrap join heuristic runs.
+    private func makeAddressedRows(cols: Int, _ rows: [String]) -> Terminal {
+        let terminal = Terminal(delegate: self, options: TerminalOptions(cols: cols, rows: 8))
+        for (index, row) in rows.enumerated() {
+            terminal.feed(text: "\u{1b}[\(index + 1);1H" + row)
+        }
+        return terminal
+    }
+
+    @Test func listingRowsDoNotGlueFinishedFileToNextRowsWord() {
+        // `git status` shape: both rows indented, upper reaching the edge.
+        let terminal = makeAddressedRows(cols: 40, [
+            "        modified:   Sources/foo/test.ts",
+            "        modified:   Sources/bar/x.ts",
+        ])
+        let upper = terminal.linkWithRowTexts(at: .buffer(Position(col: 30, row: 0)), mode: .explicitAndImplicit)
+        #expect(upper?.text == "Sources/foo/test.ts")
+        #expect(upper?.rowTexts.isEmpty == true)
+        let lower = terminal.linkWithRowTexts(at: .buffer(Position(col: 30, row: 1)), mode: .explicitAndImplicit)
+        #expect(lower?.text == "Sources/bar/x.ts")
+        // The glued word itself is no target.
+        #expect(terminal.link(at: .buffer(Position(col: 10, row: 1)), mode: .explicitAndImplicit) == nil)
+    }
+
+    @Test func wrapInsideDirectoryOrShortExtensionStillJoins() {
+        // A directory name cut by the wrap: no extension above the seam.
+        let dir = makeAddressedRows(cols: 20, ["/Users/demo/Multipl", "ex/x.ts and more"])
+        #expect(dir.link(at: .buffer(Position(col: 5, row: 0)), mode: .explicitAndImplicit) == "/Users/demo/Multiplex/x.ts")
+        // A wrap landing inside a two-letter extension keeps joining.
+        let md = makeAddressedRows(cols: 20, ["/Users/demo/README.m", "d is the entry"])
+        #expect(md.link(at: .buffer(Position(col: 5, row: 0)), mode: .explicitAndImplicit) == "/Users/demo/README.md")
+        // A wrap after the extension whose tail is under three characters.
+        let html = makeAddressedRows(cols: 20, ["/Users/demo/site.htm", "l"])
+        #expect(html.link(at: .buffer(Position(col: 5, row: 0)), mode: .explicitAndImplicit) == "/Users/demo/site.html")
+        // A finished file over a path continuation (`/`) is not glue evidence.
+        let deep = makeAddressedRows(cols: 20, ["/Users/demo/dir/x.ts", "bak/y.ts"])
+        #expect(deep.link(at: .buffer(Position(col: 5, row: 0)), mode: .explicitAndImplicit) == "/Users/demo/dir/x.tsbak/y.ts")
+    }
+
+    @Test func seamGlueTell() {
+        #expect(Terminal.seamGluesFinishedFileToWord(upper: "Sources/foo/test.ts", lower: "modified"))
+        #expect(Terminal.seamGluesFinishedFileToWord(upper: "x.swift", lower: "Untracked"))
+        #expect(!Terminal.seamGluesFinishedFileToWord(upper: "x.swi", lower: "ft"))
+        #expect(!Terminal.seamGluesFinishedFileToWord(upper: "x.s", lower: "wift"))
+        #expect(!Terminal.seamGluesFinishedFileToWord(upper: "/Users/demo/Multip", lower: "lex"))
+        #expect(!Terminal.seamGluesFinishedFileToWord(upper: "x.ts", lower: "bak/y"))
+        #expect(!Terminal.seamGluesFinishedFileToWord(upper: ".hidden", lower: "word"))
     }
 }

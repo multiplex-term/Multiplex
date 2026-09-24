@@ -55,17 +55,7 @@ struct CustomAgentCommand: Identifiable, Codable, Hashable {
     }
 
     private static func normalizeContent(_ content: String) -> String {
-        let normalizedLineEndings = content
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
-        let safeText = normalizedLineEndings.unicodeScalars.reduce(into: "") {
-            result, scalar in
-            let allowedControl = scalar.value == 0x09 || scalar.value == 0x0A
-            if allowedControl || !CharacterSet.controlCharacters.contains(scalar) {
-                result.append(Character(scalar))
-            }
-        }
-        return safeText
+        ComposedText.lineNormalized(content)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -73,7 +63,7 @@ struct CustomAgentCommand: Identifiable, Codable, Hashable {
     /// The actual payload is never truncated.
     var menuLabel: String {
         let value = normalizedContent
-        guard !value.isEmpty else { return "Custom command" }
+        guard !value.isEmpty else { return String(localized: "Custom command") }
 
         let lines = value.split(separator: "\n", omittingEmptySubsequences: false)
         let firstLine = lines.first.map(String.init) ?? value
@@ -152,6 +142,33 @@ struct AgentCommandConfiguration: Codable, Hashable {
             self.agent = agent
             self.commands = commands
             self.builtInPlacements = builtInPlacements
+        }
+
+        fileprivate enum CodingKeys: String, CodingKey {
+            case agent, commands, builtInPlacements
+        }
+    }
+
+    /// `Host.sessionBackend`'s rule for a synced enum: read the raw string
+    /// and treat a value this build cannot name as absent. A profile for a
+    /// CLI added by a newer app (Grok Build arrived this way, 2026-08-16)
+    /// decodes to nil and is dropped, while a known agent's malformed
+    /// profile still throws — one unknown agent must not take the whole
+    /// Host record down, and a corrupt one must not vanish silently.
+    private struct LenientProfile: Decodable {
+        var profile: Profile?
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: Profile.CodingKeys.self)
+            guard let agent = AgentKind(rawValue: try container.decode(String.self, forKey: .agent))
+            else { return }
+            profile = Profile(
+                agent: agent,
+                commands: try container.decode([CustomAgentCommand].self, forKey: .commands),
+                builtInPlacements: try container.decode(
+                    [String: AgentCommandPlacement].self, forKey: .builtInPlacements
+                )
+            )
         }
     }
 
@@ -236,8 +253,8 @@ struct AgentCommandConfiguration: Codable, Hashable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        let profiles = try container.decode([Profile].self, forKey: .profiles)
-        self.init(profiles: profiles)
+        let profiles = try container.decode([LenientProfile].self, forKey: .profiles)
+        self.init(profiles: profiles.compactMap(\.profile))
     }
 
     func encode(to encoder: Encoder) throws {

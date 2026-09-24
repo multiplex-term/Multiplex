@@ -5,6 +5,9 @@ enum AgentKind: String, Hashable, Codable, CaseIterable {
     case claudeCode
     case codex
     case pi
+    case grok
+    case antigravity
+    case hermes
 
     /// Strip header / accessibility voice.
     var displayName: String {
@@ -12,6 +15,24 @@ enum AgentKind: String, Hashable, Codable, CaseIterable {
         case .claudeCode: "Claude Code"
         case .codex: "Codex"
         case .pi: "Pi"
+        case .grok: "Grok Build"
+        case .antigravity: "Antigravity"
+        case .hermes: "Hermes"
+        }
+    }
+
+    /// The agent's own mark — the helper strip's folded dot and the Talkback
+    /// eyebrow wear it. Grok has no single-glyph mark of its own in the TUI;
+    /// the plain capital reads as xAI's without leaning on a font-fallback
+    /// symbol.
+    var glyph: String {
+        switch self {
+        case .claudeCode: "✳"
+        case .codex: "◆"
+        case .pi: "π"
+        case .grok: "X"
+        case .antigravity: "✦"
+        case .hermes: "☤"
         }
     }
 
@@ -21,6 +42,9 @@ enum AgentKind: String, Hashable, Codable, CaseIterable {
         case .claudeCode: "CLAUDE"
         case .codex: "CODEX"
         case .pi: "PI"
+        case .grok: "GROK"
+        case .antigravity: "AGY"
+        case .hermes: "HERMES"
         }
     }
 
@@ -32,26 +56,74 @@ enum AgentKind: String, Hashable, Codable, CaseIterable {
         case .claudeCode: "claude"
         case .codex: "codex"
         case .pi: "pi"
+        case .grok: "grok"
+        case .antigravity: "agy"
+        case .hermes: "hermes"
         }
     }
 
-    /// The command typed into a fresh shell, optionally carrying the user's
-    /// first prompt as one safely quoted positional argument. Shell quoting
-    /// keeps prompt text inert; multiline prompts use printable `printf`
-    /// escapes so control bytes never reach the shell's line editor before
-    /// the final Enter.
-    func launchCommand(initialPrompt rawPrompt: String) -> String {
+    /// The command typed into a fresh shell, optionally carrying a model
+    /// override and the user's first prompt as one safely quoted positional
+    /// argument. Every supported CLI spells the override `--model <value>`
+    /// (verified 2026-07-27: Claude Code 2.1.220, Codex rust 0.145.0, Pi
+    /// 0.81.1 — Pi values may be `provider/id` with a `:<thinking>` suffix;
+    /// Grok Build source 2026-08-16: top-level `-m/--model` plus a
+    /// positional interactive prompt, `grok --model grok-build "fix it"`;
+    /// Antigravity CLI: top-level `--model` plus `-i/--prompt-interactive`
+    /// for interactive launch with initial prompt, `agy --model gemini-3.7-flash -i "fix it"`;
+    /// Hermes Agent source 2026-08-23: top-level `-m/--model`, but NO
+    /// interactive-with-prompt flag — `-q` answers one prompt and exits and
+    /// `-c/--continue` resumes the most recent session, so a prompt launch
+    /// chains the two: `hermes -q "fix it" && hermes --continue`).
+    /// Shell quoting keeps prompt text inert; the model value is quoted too,
+    /// which is load-bearing beyond hygiene — Claude aliases like
+    /// `sonnet[1m]` would otherwise glob in zsh. Multiline prompts use
+    /// printable `printf` escapes so control bytes never reach the shell's
+    /// line editor before the final Enter.
+    func launchCommand(model rawModel: String?, initialPrompt rawPrompt: String) -> String {
+        var command = launchCommand
+        if let model = rawModel.flatMap(Self.normalizedLaunchModel) {
+            command += " --model \(model.shellQuoted)"
+        }
         let prompt = Self.normalizedInitialPrompt(rawPrompt)
-        guard !prompt.isEmpty else { return launchCommand }
-        return "\(launchCommand) \(Self.shellArgument(for: prompt))"
+        guard !prompt.isEmpty else { return command }
+        switch self {
+        case .claudeCode, .codex, .pi, .grok:
+            return "\(command) \(Self.shellArgument(for: prompt))"
+        case .antigravity:
+            return "\(command) -i \(Self.shellArgument(for: prompt))"
+        case .hermes:
+            return "\(command) -q \(Self.shellArgument(for: prompt)) && \(command) --continue"
+        }
+    }
+
+    /// A model identifier fit to ride `--model` as one argv token, or nil —
+    /// which every caller treats as "the agent's own default". Deliberately
+    /// not a curated list: model names churn far faster than app releases,
+    /// and a wrong value fails visibly in the agent's own UI (the chip
+    /// philosophy). The gate only enforces token shape: no whitespace (one
+    /// argument, never a smuggled second one), no control bytes, no leading
+    /// `-` (must never read as another flag), bounded length. Quoting at the
+    /// composition site keeps the surviving characters inert.
+    static func normalizedLaunchModel(_ raw: String) -> String? {
+        let safeScalars = raw.unicodeScalars.filter {
+            !CharacterSet.controlCharacters.contains($0)
+        }
+        let trimmed = String(String.UnicodeScalarView(safeScalars))
+            .trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty,
+              trimmed.count <= 64,
+              !trimmed.hasPrefix("-"),
+              !trimmed.contains(where: \.isWhitespace)
+        else { return nil }
+        return trimmed
     }
 
     private static func normalizedInitialPrompt(_ prompt: String) -> String {
         let normalizedLineEndings = prompt
             .replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")
-        let safeText = normalizedLineEndings.unicodeScalars.reduce(into: "") {
-            result, scalar in
+        let safeText = normalizedLineEndings.unicodeScalars.reduce(into: "") { result, scalar in
             let allowedControl = scalar.value == 0x09 || scalar.value == 0x0A
             if allowedControl || !CharacterSet.controlCharacters.contains(scalar) {
                 result.append(Character(scalar))
@@ -77,8 +149,8 @@ enum AgentKind: String, Hashable, Codable, CaseIterable {
     /// attention deliberately fails soft.
     var hasVerifiedAttentionSignals: Bool {
         switch self {
-        case .claudeCode, .codex: true
-        case .pi: false
+        case .claudeCode, .codex, .grok: true
+        case .pi, .antigravity, .hermes: false
         }
     }
 }
@@ -94,9 +166,11 @@ struct PSRow: Hashable {
 /// against real processes on 2026-07-10 (Claude Code v2.1.206, Codex
 /// rust-v0.144.x) and 2026-07-15 (Pi v0.80.7, npm + native) — see
 /// local-plan/agent-harness-helpers.md §1.1 for the original experiment
-/// matrix. Everything here is pure and pinned by AgentSignatureTests; when
-/// an agent changes its signature, this file and its tests are the whole
-/// blast radius.
+/// matrix. Grok Build's rules (2026-08-16) come from reading the
+/// xai-org/grok-build source rather than a live process: comm/argv[0] is
+/// `grok` (official installs) or `xai-grok-pager` (the cargo artifact).
+/// Everything here is pure and pinned by AgentSignatureTests; when an agent
+/// changes its signature, this file and its tests are the whole blast radius.
 enum AgentSignature {
     /// Cheap first pass over one pane's `#{pane_current_command}` +
     /// `#{pane_title}`. Order matters.
@@ -107,6 +181,8 @@ enum AgentSignature {
         // through v2.1.x). Never match bare "claude" — the default title is
         // whatever a shell prompt wrote there, often a hostname.
         if title.contains("Claude Code") || title.hasPrefix("✳ ") { return .claudeCode }
+        // Antigravity sets dynamic window titles containing "Antigravity" or "✦ ".
+        if title.contains("Antigravity") || title.hasPrefix("✦ ") { return .antigravity }
         // Pi's npm entrypoint remains `node` to tmux on macOS, while its
         // interactive UI writes this narrow OSC title. Pi leaves that title
         // behind after returning to the shell, so it is authoritative only
@@ -118,6 +194,12 @@ enum AgentSignature {
         // basename — a bare version number. Nothing else realistically runs
         // in a pane with a semver comm.
         if isBareVersionNumber(command) { return .claudeCode }
+        // Grok's installer symlinks ~/.grok/bin/grok → downloads/
+        // grok-<semver>-<os>-<arch>; the comm is that target's basename,
+        // clipped to the kernel's 15/16 bytes ("grok-1.0.4-maco" observed
+        // live on macOS 27, 2026-08-16). The ps walk still sees argv[0]
+        // "grok", but the cheap pass should not depend on it.
+        if isVersionedGrokComm(command) { return .grok }
         // "node" alone is never enough — the process-tree walk decides.
         return nil
     }
@@ -130,7 +212,10 @@ enum AgentSignature {
     /// Keep this deliberately narrow: Claude identifies itself in its OSC
     /// title, Codex has a versioned screen masthead and a unique approval
     /// title, and a spinner may only preserve an already-known kind. Pi's OSC
-    /// title is omitted because Pi leaves it stale after exit. Visible lines
+    /// title is omitted because Pi leaves it stale after exit. Grok Build
+    /// composes `… - <session> - grok` while it runs and resets to a bare
+    /// `grok` on exit (source, 2026-08-16), so only the composed suffix
+    /// counts — the bare word is exactly the stale shape. Visible lines
     /// stay lazy so an explicit title signature never translates the screen.
     static func classifyTerminal(
         title: String,
@@ -143,6 +228,12 @@ enum AgentSignature {
         }
         if title.contains("Action Required |") {
             return .codex
+        }
+        if title.hasSuffix(" - grok") {
+            return .grok
+        }
+        if title.contains("Antigravity") || title.hasPrefix("✦ ") {
+            return .antigravity
         }
 
         let codexMasthead = visibleLines().contains { line in
@@ -169,14 +260,23 @@ enum AgentSignature {
     /// flags all false-positive otherwise). The interpreter rule covers
     /// shebang/JS wrappers ("node …/bin/claude", "node …/codex.js" spawn
     /// chains still expose the native child, but old installs may not).
+    /// Hermes is a Python venv entrypoint: its installer's `hermes` launcher
+    /// execs `…/venv/bin/python …/hermes-agent/hermes` (install.sh,
+    /// 2026-08-23), so the pane's comm is `python3.x`/`Python` and only
+    /// argv[1] names the agent — hence the `python*` rung.
     static func match(argv args: String) -> AgentKind? {
         let argv = args.split(separator: " ")
         guard let first = argv.first else { return nil }
         if let kind = agentNamed(basename(of: first)) { return kind }
-        if ["node", "bun"].contains(basename(of: first)), argv.count > 1 {
+        if isInterpreter(basename(of: first)), argv.count > 1 {
             return agentNamed(basename(of: argv[1]))
         }
         return nil
+    }
+
+    private static func isInterpreter(_ name: String) -> Bool {
+        if ["node", "bun"].contains(name) { return true }
+        return name.lowercased().hasPrefix("python")
     }
 
     /// Walk panePID and its descendants (the pane's own process tree —
@@ -218,17 +318,25 @@ enum AgentSignature {
         return result
     }
 
+    /// Every supported CLI's binary is spelled like its launch command; the
+    /// one extra alias is Grok's cargo artifact (`xai-grok-pager`), which a
+    /// from-source build runs under its own name.
     private static func agentNamed(_ name: String) -> AgentKind? {
-        switch name {
-        case "claude": .claudeCode
-        case "codex": .codex
-        case "pi": .pi
-        default: nil
-        }
+        if name == "xai-grok-pager" { return .grok }
+        if name == "antigravity" { return .antigravity }
+        // pyproject's second console script; the venv entrypoint is `hermes`.
+        if name == "hermes-agent" { return .hermes }
+        return AgentKind.allCases.first { $0.launchCommand == name }
     }
 
     private static func basename(of token: Substring) -> String {
         String(token.split(separator: "/").last ?? token)
+    }
+
+    private static func isVersionedGrokComm(_ command: String) -> Bool {
+        guard command.hasPrefix("grok-") else { return false }
+        let version = command.dropFirst("grok-".count).prefix { $0.isNumber || $0 == "." }
+        return version.first?.isNumber == true && version.contains(".")
     }
 
     private static func isBareVersionNumber(_ command: String) -> Bool {
@@ -252,6 +360,9 @@ struct AgentCommand: Identifiable, Hashable {
     /// "/new\r" leaves the text sitting in the composer; a CR ≥120 ms later
     /// submits). The other supported agents accept the delayed shape too.
     var submitsAfterPause = false
+    /// The pause — one number for every "type, then Enter" road (slash
+    /// chips, Key Commands text rows, Talkback SEND).
+    static let submitDelay: Duration = .milliseconds(160)
 
     var id: String { label }
 
@@ -264,9 +375,6 @@ struct AgentCommand: Identifiable, Hashable {
             submitsAfterPause: true
         )
     }
-
-    /// Interrupt the running turn. Esc in every supported TUI.
-    static let stop = AgentCommand(label: "STOP", payload: Data([0x1B]))
 
     /// Cycle permission / collaboration mode — Shift+Tab, which terminals
     /// send as CSI Z. A fixed default binding in Claude Code and Codex. Never
@@ -281,6 +389,11 @@ struct AgentCommand: Identifiable, Hashable {
     /// binding in the rust TUI. Only the tmux prefix (Ctrl+B) is special;
     /// Ctrl+T passes through to the pane untouched.
     static let transcript = AgentCommand(label: "TRANSCRIPT", payload: Data([0x14]))
+
+    /// Toggle Grok Build's todos pane — also Ctrl+T, a fixed binding
+    /// (bindings can't be remapped there). Grok's own "background this
+    /// command" key is Ctrl+B, which is why no chip carries it.
+    static let todos = AgentCommand(label: "TODOS", payload: Data([0x14]))
 
     /// Pi's default bindings. Ctrl+O expands/collapses tool output; Ctrl+T
     /// expands/collapses thinking blocks (users can remap them in Pi).
@@ -304,13 +417,18 @@ enum AgentCommandPlacement: String, Codable, Hashable {
 /// The curated command sets, one place to tune. Slash lists verified
 /// 2026-07-10 — Claude Code v2.1.x docs; Codex rust-v0.144.1 slash_command.rs
 /// (note: Codex renamed /approvals → /permissions and dropped /undo).
-/// Pi's list was verified against v0.80.7 on 2026-07-15.
+/// Pi's list was verified against v0.80.7 on 2026-07-15. Grok Build's list
+/// comes from the xai-org/grok-build user guide (04-slash-commands.md,
+/// 03-keyboard-shortcuts.md; source synced 2026-08-16): Shift+Tab cycles
+/// Normal → Plan → Always-approve, so MODE applies as-is. Hermes Agent's
+/// list comes from hermes_cli/commands.py's COMMAND_REGISTRY (source synced
+/// 2026-08-23).
 enum AgentCommandSet {
     static func primary(for kind: AgentKind) -> [AgentCommand] {
         switch kind {
         case .claudeCode:
             var commands: [AgentCommand] = [
-                .stop, .slash("clear"), .slash("resume"), .slash("compact"),
+                .slash("clear"), .slash("resume"), .slash("compact"),
                 .slash("rewind"), .slash("model"), .slash("effort"), .mode,
             ]
             #if os(visionOS)
@@ -321,12 +439,26 @@ enum AgentCommandSet {
             #endif
             return commands
         case .codex:
-            return [.stop, .slash("new"), .slash("resume"), .slash("model"),
+            return [.slash("new"), .slash("resume"), .slash("model"),
                     .slash("permissions"), .slash("review"),
                     .transcript, .mode]
         case .pi:
-            return [.stop, .slash("new"), .slash("resume"), .slash("compact"),
+            return [.slash("new"), .slash("resume"), .slash("compact"),
                     .slash("model"), .slash("tree"), .think, .tools]
+        case .grok:
+            return [.slash("new"), .slash("resume"), .slash("compact"),
+                    .slash("rewind"), .slash("model"), .slash("effort"), .mode]
+        case .antigravity:
+            return [.slash("clear"), .slash("resume"), .slash("diff"),
+                    .slash("model"), .slash("permissions"), .slash("agents"),
+                    .slash("skills")]
+        case .hermes:
+            // No /resume chip: Hermes's `/resume` is not a picker, it needs
+            // a session id argument (`/resume <id>`), so a tap would only
+            // leave a half-typed command in the composer.
+            return [.slash("new"), .slash("compress"), .slash("undo"),
+                    .slash("model"), .slash("approvals"), .slash("diff"),
+                    .slash("status")]
         }
     }
 
@@ -344,6 +476,20 @@ enum AgentCommandSet {
             [.slash("session"), .slash("fork"), .slash("clone"),
              .slash("settings"), .slash("scoped-models"), .slash("copy"),
              .thinking, .slash("reload"), .slash("hotkeys")]
+        case .grok:
+            [.slash("context"), .slash("fork"), .slash("plan"),
+             .slash("skills"), .slash("export"), .slash("usage"),
+             .slash("session-info"), .slash("doctor"), .todos]
+        case .antigravity:
+            [.slash("planning"), .slash("usage"), .slash("mcp"),
+             .slash("credits"), .slash("tasks"), .slash("context"),
+             .slash("statusline"), .slash("title"), .slash("fork"),
+             .slash("rewind"), .slash("config")]
+        case .hermes:
+            [.slash("context"), .slash("retry"),
+             .slash("title"), .slash("history"), .slash("tools"),
+             .slash("skills"), .slash("memory"), .slash("usage"),
+             .slash("sessions"), .slash("yolo")]
         }
     }
 

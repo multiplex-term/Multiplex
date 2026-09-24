@@ -13,8 +13,10 @@ struct ShortcutSessionScript: Identifiable, Hashable, Sendable {
 /// The host as Shortcuts and widget configuration see it: id + labels, no
 /// secrets. The app-side query also carries configured working directories
 /// and setup-script labels so dependent Shortcut parameters can offer them;
-/// the widget fallback does not need or publish either. Both processes share
-/// this type and query.
+/// the widget fallback does not need or publish either. Launch-model lists
+/// ride BOTH sides — the widget's own Model setting needs a picker in the
+/// widget process, and model names are ordinary labels, not secrets. Both
+/// processes share this type and query.
 struct HostEntity: AppEntity, Identifiable, Hashable {
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Multiplex Host"
     static let defaultQuery = HostEntityQuery()
@@ -24,6 +26,16 @@ struct HostEntity: AppEntity, Identifiable, Hashable {
     var address: String
     var workingDirs: [String] = []
     var sessionScripts: [ShortcutSessionScript] = []
+    /// Pre-configured launch models per agent, keyed by the agent raw value
+    /// (`AgentChoice`/`AgentKind` mirror one-to-one, unit-tested).
+    var agentModels: [String: [String]] = [:]
+    /// The host's session backend raw value — what the placement picker
+    /// labels its rows with; nil (a pre-backend snapshot) reads as tmux.
+    var backendRaw: String?
+    /// Every backend this host shows tiles for, default first — what the
+    /// Open Agent / Open Shell Backend pickers offer. One entry (or none)
+    /// means there is nothing to pick.
+    var backendsRaw: [String]?
 
     var displayRepresentation: DisplayRepresentation {
         DisplayRepresentation(title: "\(name)", subtitle: "\(address)")
@@ -40,7 +52,12 @@ enum HostEntityProvider {
     static func all() async -> [HostEntity] {
         if let entities = await liveEntities() { return entities }
         return (SharedStateStore.load()?.hosts ?? []).map {
-            HostEntity(id: $0.id, name: $0.name, address: $0.address)
+            HostEntity(
+                id: $0.id, name: $0.name, address: $0.address,
+                agentModels: $0.agentModels ?? [:],
+                backendRaw: $0.backendRaw,
+                backendsRaw: $0.backendsRaw
+            )
         }
     }
 

@@ -1,3 +1,4 @@
+import StoreKit
 import XCTest
 @testable import Multiplex
 
@@ -24,6 +25,7 @@ private final class ProStoreDouble {
     var loadError: ProStoreDoubleError?
     var loadDelay: Duration?
     var purchaseResult: ProStorePurchaseResult = .userCancelled
+    var purchaseThroughPresenter = false
     var purchaseError: ProStoreDoubleError?
     var purchaseDelay: Duration?
     var finishDelay: Duration?
@@ -32,9 +34,11 @@ private final class ProStoreDouble {
     var afterSync: [ProStoreVerification]?
     var syncError: ProStoreDoubleError?
     var syncDelay: Duration?
+    var sandboxEnvironment = false
 
     private(set) var loadCount = 0
     private(set) var purchaseCount = 0
+    private(set) var purchasePresenterCount = 0
     private(set) var syncCount = 0
     private(set) var finishCount = 0
     private(set) var currentRequestCount = 0
@@ -57,11 +61,16 @@ private final class ProStoreDouble {
                 if let loadError { throw loadError }
                 return product
             },
-            purchase: { [weak self] _, _ in
+            purchase: { [weak self] product, presenter in
                 guard let self else { return .unknown }
                 purchaseCount += 1
+                if presenter != nil { purchasePresenterCount += 1 }
                 if let purchaseDelay { try await Task.sleep(for: purchaseDelay) }
                 if let purchaseError { throw purchaseError }
+                if purchaseThroughPresenter {
+                    guard let presenter else { throw ProStoreDoubleError.purchase }
+                    return try await presenter(product)
+                }
                 return purchaseResult
             },
             currentEntitlements: { [weak self] in
@@ -78,6 +87,9 @@ private final class ProStoreDouble {
                 if let syncDelay { try await Task.sleep(for: syncDelay) }
                 if let syncError { throw syncError }
                 if let afterSync { current = afterSync }
+            },
+            isSandboxStoreEnvironment: { [weak self] in
+                self?.sandboxEnvironment ?? false
             }
         )
     }
@@ -192,12 +204,17 @@ final class EntitlementStoreTests: XCTestCase {
         XCTAssertTrue(store.canEnableMosh(currentlyEnabled: true))
         XCTAssertFalse(store.canMutateCustomThemes)
         XCTAssertFalse(store.canScheduleAgentAlerts)
+        XCTAssertFalse(store.canViewConnectionStats)
+        XCTAssertEqual(store.keyCommandLimit, EntitlementStore.freeKeyCommandLimit)
+        XCTAssertEqual(store.keyCommandLimit, 5)
 
         #if DEBUG
         store.setDebugUnlocked(true)
         XCTAssertTrue(store.canEnableMosh(currentlyEnabled: false))
         XCTAssertTrue(store.canMutateCustomThemes)
         XCTAssertTrue(store.canScheduleAgentAlerts)
+        XCTAssertTrue(store.canViewConnectionStats)
+        XCTAssertEqual(store.keyCommandLimit, KeyCommandSet.maximumCount)
         #endif
     }
 
@@ -408,6 +425,24 @@ final class EntitlementStoreTests: XCTestCase {
         storeDouble.finishUpdates()
     }
 
+    func testStartupProbePublishesSandboxStoreEnvironment() async {
+        let (defaults, name) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let storeDouble = ProStoreDouble()
+        storeDouble.sandboxEnvironment = true
+        let store = lockedStore(
+            defaults: defaults,
+            startStoreKit: true,
+            storeClient: storeDouble.client()
+        )
+
+        XCTAssertFalse(store.storeEnvironmentIsSandbox)
+        await waitUntil("sandbox store environment probe") {
+            store.storeEnvironmentIsSandbox
+        }
+        storeDouble.finishUpdates()
+    }
+
     func testBufferedPositiveUpdateOutranksBootstrapEmptySnapshot() async {
         let (defaults, name) = makeDefaults()
         defer { defaults.removePersistentDomain(forName: name) }
@@ -501,6 +536,28 @@ final class EntitlementStoreTests: XCTestCase {
         XCTAssertTrue(store.hasVerifiedStoreEntitlementForTesting)
         XCTAssertEqual(store.commerceState, .purchased)
         XCTAssertEqual(storeDouble.purchaseCount, 1)
+        XCTAssertEqual(storeDouble.finishCount, 1)
+    }
+
+    func testAppOwnedPurchasePresenterIsForwardedToInjectedClient() async {
+        let (defaults, name) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let storeDouble = ProStoreDouble()
+        storeDouble.purchaseThroughPresenter = true
+        let transaction = storeDouble.transaction()
+        let presenter = ProPurchasePresenter { product in
+            XCTAssertEqual(product.id, EntitlementStore.proProductID)
+            return .success(.verified(transaction))
+        }
+        let store = lockedStore(defaults: defaults, storeClient: storeDouble.client())
+
+        let purchased = await store.purchasePro(using: presenter)
+
+        XCTAssertTrue(purchased)
+        XCTAssertTrue(store.isPro)
+        XCTAssertEqual(store.commerceState, .purchased)
+        XCTAssertEqual(storeDouble.purchaseCount, 1)
+        XCTAssertEqual(storeDouble.purchasePresenterCount, 1)
         XCTAssertEqual(storeDouble.finishCount, 1)
     }
 
@@ -792,19 +849,6 @@ final class EntitlementStoreTests: XCTestCase {
         XCTAssertFalse(emptyStore.hasVerifiedStoreEntitlementForTesting)
     }
 
-    func testRestoreFailureIsReported() async {
-        let (defaults, name) = makeDefaults()
-        defer { defaults.removePersistentDomain(forName: name) }
-        let storeDouble = ProStoreDouble()
-        storeDouble.syncError = .sync
-        let store = lockedStore(defaults: defaults, storeClient: storeDouble.client())
-
-        let restored = await store.restorePurchases()
-        XCTAssertFalse(restored)
-        XCTAssertEqual(store.commerceState, .failed("restore failed"))
-        XCTAssertFalse(store.isPro)
-    }
-
     func testPreexistingOwnershipDoesNotHideRestoreFailure() async {
         let (defaults, name) = makeDefaults()
         defer { defaults.removePersistentDomain(forName: name) }
@@ -819,6 +863,39 @@ final class EntitlementStoreTests: XCTestCase {
         XCTAssertFalse(restored)
         XCTAssertTrue(store.hasVerifiedStoreEntitlementForTesting)
         XCTAssertEqual(store.commerceState, .failed("restore failed"))
+    }
+
+    func testRestoreSyncFailureFallsBackToOwnedEntitlements() async {
+        // TestFlight's commerce backend routinely fails AppStore.sync() with
+        // internal errors while the entitlement query still answers; owned
+        // entitlements must complete the restore anyway.
+        let (defaults, name) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let storeDouble = ProStoreDouble()
+        storeDouble.current = [.verified(storeDouble.transaction())]
+        storeDouble.syncError = .sync
+        let store = lockedStore(defaults: defaults, storeClient: storeDouble.client())
+
+        let restored = await store.restorePurchases()
+        XCTAssertTrue(restored)
+        XCTAssertEqual(store.commerceState, .restored)
+        XCTAssertTrue(store.isPro)
+        XCTAssertTrue(store.hasVerifiedStoreEntitlementForTesting)
+        XCTAssertEqual(storeDouble.syncCount, 1)
+    }
+
+    func testOpaqueStoreErrorMessageNamesTheDomainAndCode() {
+        let message = EntitlementStore.storeErrorMessage(
+            NSError(domain: "SKInternalErrorDomain", code: 14)
+        )
+        XCTAssertTrue(message.contains("(SKInternalErrorDomain 14)"))
+        XCTAssertTrue(message.contains("signed in to the App Store"))
+
+        // An authored LocalizedError message must survive untouched.
+        XCTAssertEqual(
+            EntitlementStore.storeErrorMessage(ProStoreDoubleError.sync),
+            "restore failed"
+        )
     }
 
     func testVerifiedUpdateClearsEarlierNonPendingRestoreError() async {
@@ -1005,5 +1082,30 @@ final class EntitlementStoreTests: XCTestCase {
         XCTAssertFalse(store.hasVerifiedStoreEntitlementForTesting)
         XCTAssertFalse(store.purchaseIsUnavailable)
         storeDouble.finishUpdates()
+    }
+
+    // MARK: - Store error copy
+
+    func testStoreErrorMessageNamesKnownStoreKitFailures() {
+        XCTAssertEqual(
+            EntitlementStore.storeErrorMessage(
+                StoreKitError.networkError(URLError(.notConnectedToInternet))
+            ),
+            "The App Store could not be reached. Check the internet connection and try again."
+        )
+        XCTAssertEqual(
+            EntitlementStore.storeErrorMessage(StoreKitError.notAvailableInStorefront),
+            "Multiplex Pro is not available in this App Store storefront."
+        )
+        XCTAssertEqual(
+            EntitlementStore.storeErrorMessage(StoreKitError.unknown),
+            "The App Store could not complete the request. Try again in a moment."
+        )
+        // Errors StoreKit does not own keep their own description, so the
+        // injected-client suites above stay valid and app errors stay honest.
+        XCTAssertEqual(
+            EntitlementStore.storeErrorMessage(ProStoreDoubleError.purchase),
+            "purchase failed"
+        )
     }
 }

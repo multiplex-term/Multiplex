@@ -22,6 +22,114 @@ final class SharedStateTests: XCTestCase {
         )
     }
 
+    /// The mixed-host half of the lockstep: a link that names a backend must
+    /// parse back to that backend, and one that names none must still parse
+    /// to nil — which is what keeps every widget, Shortcut, and hand-written
+    /// URL built before this parameter existed meaning exactly what it did.
+    func testBackendRidesBothLinkBuildersOrIsAbsentEntirely() {
+        let id = UUID()
+        for backend in Host.SessionBackend.allCases {
+            XCTAssertEqual(
+                ExternalActionURL.action(from: WidgetLink.shellURL(
+                    hostID: id, sessionName: "main",
+                    backendRaw: backend.rawValue)),
+                .openShell(host: .id(id), sessionName: "main", backend: backend)
+            )
+            XCTAssertEqual(
+                ExternalActionURL.action(from: WidgetLink.agentURL(
+                    hostID: id, agentRaw: "claudeCode", askForPrompt: false,
+                    backendRaw: backend.rawValue)),
+                .openAgent(
+                    host: .id(id), agent: .claudeCode, prompt: nil,
+                    askForPrompt: false, directory: nil,
+                    setupScript: .remembered, model: nil, target: .newSession,
+                    backend: backend)
+            )
+        }
+
+        // Omitted, empty, and unrecognized all read as the host's default.
+        // Fail-soft like `model` and `in`: the performer validates against
+        // the host's live record anyway.
+        for raw in [nil, "", "zellij", "TMUX?"] {
+            guard case .openShell(_, _, let parsed)? = ExternalActionURL.action(
+                from: WidgetLink.shellURL(
+                    hostID: id, sessionName: "main", backendRaw: raw))
+            else { return XCTFail("expected openShell for \(raw ?? "nil")") }
+            XCTAssertNil(parsed, "\(raw ?? "nil")")
+        }
+
+        // And a link that names none carries no `backend` item at all, so
+        // its bytes are unchanged from before the parameter existed.
+        XCTAssertFalse(
+            WidgetLink.shellURL(hostID: id).absoluteString.contains("backend"))
+        XCTAssertEqual(
+            ExternalActionURL.url(for: .openShell(host: .id(id), sessionName: nil)),
+            ExternalActionURL.url(
+                for: .openShell(host: .id(id), sessionName: nil, backend: nil))
+        )
+    }
+
+    /// Case-insensitive, because a hand-written URL is a supported road.
+    func testABackendTokenIsReadCaseInsensitively() {
+        let id = UUID()
+        let url = URL(string: "multiplex://open?host=\(id.uuidString)&backend=HERDR")!
+        XCTAssertEqual(
+            ExternalActionURL.action(from: url),
+            .openShell(host: .id(id), sessionName: nil, backend: .herdr)
+        )
+    }
+
+    /// The picker rows behind both the Shortcut parameter and the widget
+    /// setting. A host with one backend offers NOTHING — the surfaces hide
+    /// the setting rather than showing a picker with a single answer.
+    func testBackendChoicesAppearOnlyForAMixedHost() {
+        XCTAssertTrue(SessionTargetChoices.backendChoices(backendsRaw: nil).isEmpty)
+        XCTAssertTrue(SessionTargetChoices.backendChoices(backendsRaw: []).isEmpty)
+        XCTAssertTrue(SessionTargetChoices.backendChoices(backendsRaw: ["tmux"]).isEmpty)
+
+        let choices = SessionTargetChoices.backendChoices(
+            backendsRaw: ["herdr", "tmux"])
+        XCTAssertEqual(choices.map(\.value), ["", "herdr", "tmux"])
+        XCTAssertEqual(choices.first?.title, "Host Default")
+        // Default first, so the leading row and the explicit rows agree
+        // about which one "default" means.
+        XCTAssertEqual(choices.dropFirst().first?.value, "herdr")
+    }
+
+    /// The rows above are only reachable if the LIVE projection carries the
+    /// list: the Shortcuts option providers run in the app process, so
+    /// `HostEntityProvider.live` — not the published snapshot — is what they
+    /// read. Leaving `backendsRaw` unset there made the Backend picker empty
+    /// on every host, mixed ones included.
+    func testTheLiveHostEntityCarriesThePickerLists() {
+        var host = Host(name: "devbox", hostname: "127.0.0.1", username: "dev")
+        host.secondaryBackends = [.herdr]
+        host.workingDirs = ["~/src"]
+
+        let entity = HostEntity(host: host)
+        XCTAssertEqual(entity.backendRaw, "tmux")
+        XCTAssertEqual(entity.backendsRaw, ["tmux", "herdr"])
+        XCTAssertEqual(entity.workingDirs, ["~/src"])
+        XCTAssertFalse(
+            SessionTargetChoices.backendChoices(backendsRaw: entity.backendsRaw).isEmpty
+        )
+
+        let plain = HostEntity(host: Host(name: "a", hostname: "b", username: "c"))
+        XCTAssertEqual(plain.backendsRaw, ["tmux"])
+        XCTAssertTrue(
+            SessionTargetChoices.backendChoices(backendsRaw: plain.backendsRaw).isEmpty
+        )
+    }
+
+    func testAShortcutBackendVariableCannotNameAnArbitraryBackend() {
+        XCTAssertNil(ShortcutBackendOptions.selection(for: nil))
+        XCTAssertNil(ShortcutBackendOptions.selection(for: ""))
+        XCTAssertNil(ShortcutBackendOptions.selection(for: "  "))
+        XCTAssertNil(ShortcutBackendOptions.selection(for: "zellij"))
+        XCTAssertEqual(ShortcutBackendOptions.selection(for: "herdr"), .herdr)
+        XCTAssertEqual(ShortcutBackendOptions.selection(for: " TMUX "), .tmux)
+    }
+
     func testMostRecentSessionMirrorsExternalActionPlan() {
         let sessions = [
             ("old", 100.0), ("newest", 400.0), ("tie-b", 400.0), ("mid", 250.0),
@@ -37,8 +145,51 @@ final class SharedStateTests: XCTestCase {
         )
         XCTAssertEqual(
             widget.mostRecentSession?.name,
-            ExternalActionPlan.mostRecentSessionName(in: tmux)
+            ExternalActionPlan.mostRecentSession(in: tmux)?.name
         )
+    }
+
+    func testFeaturedSessionPrefersConfiguredThenLastOpenedThenNewest() throws {
+        func row(_ name: String, created: TimeInterval = 0, backend: String? = nil) -> WidgetSessionState {
+            WidgetSessionState(
+                name: name, createdAt: Date(timeIntervalSince1970: created), backendRaw: backend)
+        }
+        var host = WidgetHostState(
+            id: UUID(), name: "devbox", address: "a@b",
+            sessions: [row("alpha", created: 100), row("beta", created: 400), row("gamma", created: 250)]
+        )
+        // Nothing known: newest by creation. Last-opened outranks creation
+        // order (what makes "last session" mean something on herdr); a
+        // stale name falls through; the Session setting wins over both.
+        XCTAssertEqual(host.featuredSession()?.name, "beta")
+        host.lastAttached = WidgetSessionRef(name: "gone")
+        XCTAssertEqual(host.featuredSession()?.name, "beta")
+        host.lastAttached = WidgetSessionRef(name: "alpha")
+        XCTAssertEqual(host.featuredSession()?.name, "alpha")
+        XCTAssertEqual(host.featuredSession(configuredName: "gamma")?.name, "gamma")
+        XCTAssertEqual(host.featuredSession(configuredName: "gone")?.name, "alpha")
+
+        // Mixed host: the asked namespace wins and stays strict; Host
+        // Default ("") is the host's default namespace first, then wherever
+        // the name lives — the picker offered it with Backend untouched.
+        host.sessions = [row("main", created: 900, backend: "tmux"), row("main", backend: "herdr"),
+                         row("agents", backend: "herdr")]
+        host.backendRaw = "tmux"
+        XCTAssertEqual(host.featuredSession(configuredName: "main", configuredBackendRaw: "herdr")?.backendRaw, "herdr")
+        XCTAssertEqual(host.featuredSession(configuredName: "main", configuredBackendRaw: "")?.backendRaw, "tmux")
+        XCTAssertEqual(host.featuredSession(configuredName: "agents", configuredBackendRaw: "")?.backendRaw, "herdr")
+        XCTAssertNotEqual(host.featuredSession(configuredName: "agents", configuredBackendRaw: "tmux")?.name, "agents")
+        host.lastAttached = WidgetSessionRef(name: "main", backendRaw: "herdr")
+        XCTAssertEqual(host.featuredSession()?.backendRaw, "herdr")
+
+        // A file written before `lastAttached` existed still decodes.
+        let legacy = Data("""
+        {"hosts":[{"id":"00000000-0000-0000-0000-000000000009","name":"h","address":"a@b",
+        "sessions":[{"name":"main"}]}],"generatedAt":0}
+        """.utf8)
+        let decoded = try JSONDecoder().decode(WidgetFleetState.self, from: legacy)
+        XCTAssertNil(decoded.hosts[0].lastAttached)
+        XCTAssertEqual(decoded.hosts[0].featuredSession()?.name, "main")
     }
 
     func testWidgetAgentLinkParsesToOpenAgentForEveryAgent() {
@@ -51,13 +202,169 @@ final class SharedStateTests: XCTestCase {
                     .openAgent(
                         host: .id(id), agent: agent, prompt: nil,
                         askForPrompt: ask, directory: nil,
-                        setupScript: .remembered)
+                        setupScript: .remembered, model: nil, target: .newSession)
+                )
+            }
+        }
+    }
+
+    func testWidgetAgentLinkCarriesConfiguredModel() {
+        let id = UUID()
+        XCTAssertEqual(
+            ExternalActionURL.action(from: WidgetLink.agentURL(
+                hostID: id, agentRaw: "codex", askForPrompt: false,
+                model: "gpt-5-codex")),
+            .openAgent(
+                host: .id(id), agent: .codex, prompt: nil,
+                askForPrompt: false, directory: nil,
+                setupScript: .remembered, model: "gpt-5-codex", target: .newSession)
+        )
+        // The widget passes its configuration text through unvalidated; the
+        // app-side parser owns the grammar, so junk reads as agent default.
+        XCTAssertEqual(
+            ExternalActionURL.action(from: WidgetLink.agentURL(
+                hostID: id, agentRaw: "codex", askForPrompt: false,
+                model: "two words")),
+            .openAgent(
+                host: .id(id), agent: .codex, prompt: nil,
+                askForPrompt: false, directory: nil,
+                setupScript: .remembered, model: nil, target: .newSession)
+        )
+    }
+
+    // MARK: Session target choices ↔ URL grammar
+
+    func testWidgetAgentLinkCarriesSessionTargetAndPlacement() {
+        let id = UUID()
+        // Every row value the shared placement builder can hand a widget
+        // must parse to a real placement app-side — the widget target
+        // never compiles the grammar, so this test is the lockstep.
+        for (raw, placement) in [
+            ("tab", ExternalSessionPlacement.tab),
+            ("workspace", .workspace),
+            ("window", .workspace),
+        ] {
+            XCTAssertEqual(
+                ExternalActionURL.action(from: WidgetLink.agentURL(
+                    hostID: id, agentRaw: "claudeCode", askForPrompt: false,
+                    sessionName: "main", placementRaw: raw)),
+                .openAgent(
+                    host: .id(id), agent: .claudeCode, prompt: nil,
+                    askForPrompt: false, directory: nil,
+                    setupScript: .remembered, model: nil,
+                    target: .existingSession(name: "main", placement: placement))
+            )
+        }
+        // The New Session sentinel and an unset placement mean the original
+        // fresh-session launch.
+        XCTAssertEqual(
+            ExternalActionURL.action(from: WidgetLink.agentURL(
+                hostID: id, agentRaw: "claudeCode", askForPrompt: false,
+                sessionName: SessionTargetChoices.newSessionValue,
+                placementRaw: "workspace")),
+            .openAgent(
+                host: .id(id), agent: .claudeCode, prompt: nil,
+                askForPrompt: false, directory: nil,
+                setupScript: .remembered, model: nil, target: .newSession)
+        )
+    }
+
+    func testSessionChoicesLeadWithNewSessionAndDedupe() {
+        XCTAssertEqual(
+            SessionTargetChoices.sessionChoices(names: []),
+            [.init(value: "", title: "New Session")]
+        )
+        XCTAssertEqual(
+            SessionTargetChoices.sessionChoices(names: [
+                "main", "  scratch  ", "main", "", "   ",
+            ]),
+            [
+                .init(value: "", title: "New Session"),
+                .init(value: "main", title: "main"),
+                .init(value: "scratch", title: "scratch"),
+            ]
+        )
+    }
+
+    func testPlacementChoicesSpeakTheBackendVocabulary() {
+        // The herdr raw value is spelled in the shared layer so the widget
+        // process can compare without the Host model — keep them in step.
+        XCTAssertEqual(
+            SessionTargetChoices.herdrBackendRaw,
+            Host.SessionBackend.herdr.rawValue
+        )
+        XCTAssertEqual(
+            SessionTargetChoices.placementChoices(backendRaw: "herdr"),
+            [
+                .init(value: "tab", title: "New Tab (Focused Workspace)"),
+                .init(value: "workspace", title: "New Workspace"),
+            ]
+        )
+        // tmux — and a pre-backend snapshot's nil — get the one honest row.
+        for raw in [Host.SessionBackend.tmux.rawValue, nil] {
+            XCTAssertEqual(
+                SessionTargetChoices.placementChoices(backendRaw: raw),
+                [.init(value: "window", title: "New Window")]
+            )
+        }
+        // Every offered value must survive the app-side token parser.
+        for backend in ["tmux", "herdr"] {
+            for choice in SessionTargetChoices.placementChoices(backendRaw: backend) {
+                XCTAssertNotNil(
+                    ExternalSessionPlacement(token: choice.value),
+                    "\(backend) row \(choice.value) must parse"
                 )
             }
         }
     }
 
     // MARK: Shortcut working directories
+
+    func testWidgetAgentLinkCarriesDirectoryAndHostDefaultStaysHome() {
+        let id = UUID()
+        // Every value the widget's directory picker can hand back must
+        // round-trip the URL into the action's directory semantics: a real
+        // path rides, "~" rides (the quoting layer expands it), and the
+        // Host Default sentinel is omitted so the launch falls to the
+        // host's first configured dir.
+        for (raw, parsed) in [
+            ("/srv/build dir", "/srv/build dir" as String?),
+            ("~", "~"),
+            (ShortcutWorkingDirectoryOptions.hostDefaultValue, nil),
+        ] {
+            XCTAssertEqual(
+                ExternalActionURL.action(from: WidgetLink.agentURL(
+                    hostID: id, agentRaw: "claudeCode", askForPrompt: false,
+                    directory: raw)),
+                .openAgent(
+                    host: .id(id), agent: .claudeCode, prompt: nil,
+                    askForPrompt: false, directory: parsed,
+                    setupScript: .remembered, model: nil, target: .newSession),
+                raw
+            )
+        }
+    }
+
+    func testWorkingDirectoryChoicesLeadWithHostDefaultAndEndWithHome() {
+        XCTAssertEqual(
+            ShortcutWorkingDirectoryOptions.choices(configured: []),
+            [
+                .init(value: "", title: "Host Default"),
+                .init(value: "~", title: "Home"),
+            ]
+        )
+        XCTAssertEqual(
+            ShortcutWorkingDirectoryOptions.choices(configured: [
+                "  ~/workspace/Multiplex  ", "/srv/build dir", "~",
+            ]),
+            [
+                .init(value: "", title: "Host Default"),
+                .init(value: "~/workspace/Multiplex", title: "~/workspace/Multiplex"),
+                .init(value: "/srv/build dir", title: "/srv/build dir"),
+                .init(value: "~", title: "Home"),
+            ]
+        )
+    }
 
     func testWorkingDirectoryOptionsKeepHostOrderAndAddHomeOnce() {
         XCTAssertEqual(
@@ -119,6 +426,52 @@ final class SharedStateTests: XCTestCase {
         )
     }
 
+    // MARK: Launch-model choices
+
+    func testAgentModelChoicesTrimAndDedupeInOrder() {
+        XCTAssertEqual(
+            AgentModelChoices.values(configured: [
+                "  gpt-5-codex  ",
+                "gpt-5-codex",
+                "",
+                "anthropic/claude-opus-4:high",
+                "   ",
+            ]),
+            ["gpt-5-codex", "anthropic/claude-opus-4:high"]
+        )
+        XCTAssertEqual(AgentModelChoices.values(configured: []), [])
+    }
+
+    func testAgentModelChoicesAreNeverEmptyAndLeadWithAgentDefault() {
+        // A zero-item options query flash-dismisses the widget config
+        // picker, so Agent Default always leads.
+        XCTAssertEqual(
+            AgentModelChoices.choices(configured: []),
+            [.init(value: "", title: "Agent Default")]
+        )
+        XCTAssertEqual(
+            AgentModelChoices.choices(configured: ["gpt-5-codex"]),
+            [
+                .init(value: "", title: "Agent Default"),
+                .init(value: "gpt-5-codex", title: "gpt-5-codex"),
+            ]
+        )
+        // The sentinel must read as "no model" where the value is consumed:
+        // the launch grammar rejects it and the widget link omits it.
+        XCTAssertNil(AgentKind.normalizedLaunchModel(AgentModelChoices.agentDefaultValue))
+        XCTAssertEqual(
+            ExternalActionURL.action(from: WidgetLink.agentURL(
+                hostID: UUID(), agentRaw: "codex", askForPrompt: false,
+                model: AgentModelChoices.agentDefaultValue))
+                .flatMap { action -> String?? in
+                    guard case .openAgent(_, _, _, _, _, _, let model, _, _) = action
+                    else { return nil }
+                    return .some(model)
+                },
+            .some(nil)
+        )
+    }
+
     // MARK: AgentChoice ↔ AgentKind
 
     func testAgentChoiceMirrorsAgentKindOneToOne() {
@@ -152,16 +505,20 @@ final class SharedStateTests: XCTestCase {
             hosts: [WidgetHostState(
                 id: UUID(),
                 name: "devbox",
-                address: "jhen@10.0.1.7",
+                address: "demo@10.0.1.7",
                 sessions: [WidgetSessionState(
                     name: "main",
                     agentRaw: "claudeCode",
                     windowNames: ["editor", "server", "logs"],
+                    windowPaneTitles: ["✳ Claude Code", "pnpm dev", ""],
                     activeWindowIndex: 1,
                     miniatureLines: ["$ pnpm build", "✓ 214 modules · 3.2s"],
                     createdAt: Date(timeIntervalSince1970: 100)
                 )],
-                probedAt: Date(timeIntervalSince1970: 200)
+                probedAt: Date(timeIntervalSince1970: 200),
+                agentModels: ["codex": ["gpt-5-codex"], "claudeCode": ["opus"]],
+                backendRaw: "herdr",
+                workingDirs: ["~/workspace/Multiplex", "/srv/build dir"]
             )],
             generatedAt: Date(timeIntervalSince1970: 300)
         )
@@ -170,9 +527,102 @@ final class SharedStateTests: XCTestCase {
         XCTAssertEqual(SharedStateStore.load(directory: directory), state)
     }
 
+    func testStateWrittenBeforePaneTitlesStillDecodes() throws {
+        // A widget cannot ask the app to republish, so a file left by an older
+        // build has to keep rendering — the field defaults must be honoured on
+        // decode, not just by the memberwise initializer.
+        let json = """
+        {
+          "hosts": [{
+            "id": "00000000-0000-0000-0000-000000000001",
+            "name": "devbox",
+            "address": "demo@10.0.1.7",
+            "sessions": [{
+              "name": "main",
+              "windowNames": ["editor", "server"],
+              "activeWindowIndex": 1,
+              "miniatureLines": ["$ pnpm build"],
+              "createdAt": -978307200
+            }]
+          }],
+          "generatedAt": -978307200
+        }
+        """
+        let state = try JSONDecoder().decode(WidgetFleetState.self, from: Data(json.utf8))
+        let session = try XCTUnwrap(state.hosts.first?.sessions.first)
+        XCTAssertEqual(session.windowNames, ["editor", "server"])
+        XCTAssertEqual(session.windowPaneTitles, [])
+        XCTAssertNil(session.activePaneTitle)
+        // Launch-model lists arrived later still; absent decodes as none.
+        XCTAssertNil(state.hosts.first?.agentModels)
+        // The backend arrived later again; absent reads as tmux app-side.
+        XCTAssertNil(state.hosts.first?.backendRaw)
+        // Working dirs arrived later still; absent decodes as none.
+        XCTAssertNil(state.hosts.first?.workingDirs)
+    }
+
     func testLoadFailsSoftOnMissingFile() {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("shared-state-missing-\(UUID().uuidString)")
         XCTAssertNil(SharedStateStore.load(directory: directory))
     }
+    // MARK: Widget-link origin token
+
+    /// The scheme is public, so a link's only claim to being a widget tap is
+    /// this install's App Group token. Foreign links are confirmed, not run.
+    func testWidgetLinksCarryTheInstallTokenAndForeignLinksDoNot() {
+        let defaults = UserDefaults(suiteName: "SharedStateTests.\(UUID().uuidString)")!
+        defer { defaults.removePersistentDomain(forName: defaults.description) }
+        let token = SharedStateStore.ensureLinkToken(defaults: defaults)
+        XCTAssertNotNil(token)
+        XCTAssertEqual(SharedStateStore.ensureLinkToken(defaults: defaults), token,
+                       "the token must be stable: rendered widget links carry it")
+
+        let hostID = UUID()
+        let widgetLink = ExternalActionURL.url(
+            for: .openShell(host: .id(hostID), sessionName: nil))
+        var components = URLComponents(url: widgetLink, resolvingAgainstBaseURL: false)!
+        components.queryItems = (components.queryItems ?? [])
+            + [URLQueryItem(name: WidgetLink.tokenItemName, value: token)]
+
+        let carried = ExternalActionURL.request(from: components.url!)
+        XCTAssertEqual(carried?.token, token)
+        XCTAssertTrue(ExternalActionTrust.isTrusted(token: carried?.token, expected: token))
+
+        let foreign = ExternalActionURL.request(from: widgetLink)
+        XCTAssertNil(foreign?.token)
+        XCTAssertFalse(ExternalActionTrust.isTrusted(token: foreign?.token, expected: token))
+        XCTAssertFalse(ExternalActionTrust.isTrusted(token: "not-the-token", expected: token))
+        // An app that has not minted a token yet trusts nothing.
+        XCTAssertFalse(ExternalActionTrust.isTrusted(token: token, expected: nil))
+    }
+
+    /// The prompt an attacker-suppliable link carries has to be visible in
+    /// what the person is asked to approve.
+    func testConfirmationNamesTheHostAndShowsThePrompt() {
+        let confirmation = ExternalActionConfirmation.make(
+            for: .openAgent(
+                host: .named("devbox"), agent: .claudeCode,
+                prompt: "delete every branch", askForPrompt: false,
+                directory: nil, setupScript: .remembered, model: nil,
+                target: .newSession),
+            hostName: "devbox"
+        )
+        XCTAssertTrue(confirmation.title.contains("devbox"))
+        XCTAssertTrue(confirmation.message.contains("delete every branch"))
+    }
+
+    /// ASK mode is its own confirmation — the sheet names host and agent and
+    /// the person types the prompt, so a link's prompt never runs unseen.
+    func testAskModeNeedsNoOriginConfirmation() {
+        let ask = ExternalAction.openAgent(
+            host: .named("devbox"), agent: .claudeCode, prompt: "ignored",
+            askForPrompt: true, directory: nil, setupScript: .remembered, model: nil,
+            target: .newSession)
+        XCTAssertFalse(ask.needsOriginConfirmation)
+        XCTAssertTrue(
+            ExternalAction.openShell(host: .named("devbox"), sessionName: nil)
+                .needsOriginConfirmation)
+    }
+
 }

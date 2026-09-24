@@ -142,9 +142,27 @@ extension TerminalView: UITextInput {
     }
     
     public func replace(_ range: UITextRange, withText text: String) {
+        // Multiplex patch: clear the backspace filler before coercing the
+        // range. A non-empty range that addressed filler is dropped whole —
+        // sending its insert half alone would duplicate text on the remote.
+        let rangeAddressedFiller = inputFillerCount > 0 && !range.isEmpty
+        clearInputFiller()
+        if rangeAddressedFiller {
+            uitiLog("replace(range:, withText:\(text.debugDescription)) dropped — range addressed input filler")
+            return
+        }
         guard let r = coerceTextRange(range) else { return }
 
         guard _markedTextRange == nil else { return }
+
+        // Multiplex patch: backspaces only delete at the remote cursor, so a
+        // replacement is expressible only when its range reaches the document
+        // end. A mid-document edit (autocorrect/prediction fixing an earlier
+        // word) would eat the newest characters instead — drop it whole.
+        guard r.endPosition.offset == textInputStorage.textInputUTF16Count else {
+            uitiLog("replace(range:\(r), withText:\(text.debugDescription)) dropped — range does not reach the document end \(textInputStateDescription())")
+            return
+        }
         resetKoreanResyllabificationTransaction()
         uitiLog ("replace(range:\(r), withText:\(text.debugDescription)) \(textInputStateDescription())")
 
@@ -251,6 +269,9 @@ extension TerminalView: UITextInput {
 
     public func setMarkedText(_ markedText: String?, selectedRange: NSRange) {
         uitiLog("setMarkedText(\(markedText?.debugDescription ?? "nil"), selectedRange:\(selectedRange)) \(textInputStateDescription())")
+        // Multiplex patch: composition is real input — the backspace filler must
+        // be gone before any marked range is computed against the buffer.
+        clearInputFiller()
         resetKoreanResyllabificationTransaction()
 
         let rangeToReplace = _markedTextRange ?? _selectedTextRange
@@ -348,6 +369,8 @@ extension TerminalView: UITextInput {
         beginTextInputEdit()
         pendingAutoPeriodDeleteWasSpace = false
         resetKoreanResyllabificationTransaction()
+        // Multiplex patch: the filler lives in this buffer, so it resets with it.
+        inputFillerCount = 0
         textInputStorage = ""
         _selectedTextRange = TextRange (from: TextPosition(offset: 0), to: TextPosition(offset: 0))
         _markedTextRange = nil

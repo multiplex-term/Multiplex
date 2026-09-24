@@ -1,0 +1,1 @@
+mosh,shell,終端機,遠端,伺服器,devops,homelab,vps,linux,claude,codex,agent,cli,sysadmin,unix

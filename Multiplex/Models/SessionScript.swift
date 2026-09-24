@@ -29,8 +29,7 @@ struct SessionScript: Identifiable, Hashable {
         let normalizedLineEndings = body
             .replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")
-        let safeText = normalizedLineEndings.unicodeScalars.reduce(into: "") {
-            result, scalar in
+        let safeText = normalizedLineEndings.unicodeScalars.reduce(into: "") { result, scalar in
             let allowedControl = scalar.value == 0x09 || scalar.value == 0x0A
             if allowedControl || !CharacterSet.controlCharacters.contains(scalar) {
                 result.append(Character(scalar))
@@ -50,7 +49,7 @@ struct SessionScript: Identifiable, Hashable {
         let collapsed = firstLine
             .split(whereSeparator: \Character.isWhitespace)
             .joined(separator: " ")
-        guard !collapsed.isEmpty else { return "Script" }
+        guard !collapsed.isEmpty else { return String(localized: "Script") }
         guard collapsed.count > Self.maximumFallbackNameLength else { return collapsed }
         return String(collapsed.prefix(Self.maximumFallbackNameLength - 1)) + "…"
     }

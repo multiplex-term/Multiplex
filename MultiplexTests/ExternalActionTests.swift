@@ -28,17 +28,53 @@ final class ExternalActionTests: XCTestCase {
             prompt: "fix the build\nthen run tests & say \"done\" 100%",
             askForPrompt: true,
             directory: nil,
-            setupScript: .remembered
+            setupScript: .remembered,
+            model: nil,
+            target: .newSession
         )
         let url = ExternalActionURL.url(for: action)
         XCTAssertEqual(ExternalActionURL.action(from: url), action)
+    }
+
+    func testFileURLRoundTripsPathAndLine() {
+        for line: Int? in [nil, 42] {
+            let action = ExternalAction.openFile(
+                host: .id(UUID()),
+                path: "/srv/build dir/Sources/App:Release.swift",
+                line: line
+            )
+            XCTAssertEqual(
+                ExternalActionURL.action(from: ExternalActionURL.url(for: action)),
+                action
+            )
+        }
+    }
+
+    func testFileURLRoundTripsEmbeddedLineRange() {
+        let action = ExternalAction.openFile(
+            host: .named("devbox"), path: "Sources/App.swift:10-15", line: nil)
+        XCTAssertEqual(
+            ExternalActionURL.action(from: ExternalActionURL.url(for: action)),
+            action
+        )
+    }
+
+    func testFileURLRequiresAUsablePathAndPositiveLine() {
+        for query in [
+            "multiplex://open?host=devbox&action=file",
+            "multiplex://open?host=devbox&action=file&path=",
+            "multiplex://open?host=devbox&action=file&path=README.md&line=0",
+            "multiplex://open?host=devbox&action=file&path=README.md&line=nope",
+        ] {
+            XCTAssertNil(ExternalActionURL.action(from: URL(string: query)!))
+        }
     }
 
     func testAgentURLWithoutPromptRoundTrips() {
         let action = ExternalAction.openAgent(
             host: .id(UUID()), agent: .pi, prompt: nil,
             askForPrompt: false, directory: nil,
-            setupScript: .remembered)
+            setupScript: .remembered, model: nil, target: .newSession)
         XCTAssertEqual(
             ExternalActionURL.action(from: ExternalActionURL.url(for: action)),
             action
@@ -50,7 +86,7 @@ final class ExternalActionTests: XCTestCase {
             let action = ExternalAction.openAgent(
                 host: .id(UUID()), agent: .claudeCode, prompt: "go",
                 askForPrompt: true, directory: directory,
-                setupScript: .remembered)
+                setupScript: .remembered, model: nil, target: .newSession)
             XCTAssertEqual(
                 ExternalActionURL.action(from: ExternalActionURL.url(for: action)),
                 action
@@ -66,12 +102,90 @@ final class ExternalActionTests: XCTestCase {
             let action = ExternalAction.openAgent(
                 host: .id(UUID()), agent: .codex, prompt: nil,
                 askForPrompt: false, directory: nil,
-                setupScript: selection
+                setupScript: selection, model: nil, target: .newSession
             )
             XCTAssertEqual(
                 ExternalActionURL.action(from: ExternalActionURL.url(for: action)),
                 action
             )
+        }
+    }
+
+    func testAgentURLRoundTripsModel() {
+        for model in ["opus", "sonnet[1m]", "google/gemini-2.5-pro:minimal"] {
+            let action = ExternalAction.openAgent(
+                host: .id(UUID()), agent: .claudeCode, prompt: "go",
+                askForPrompt: false, directory: nil,
+                setupScript: .remembered, model: model, target: .newSession)
+            XCTAssertEqual(
+                ExternalActionURL.action(from: ExternalActionURL.url(for: action)),
+                action
+            )
+        }
+    }
+
+    func testMalformedModelParsesAsAgentDefaultNotAsFailure() {
+        // Unlike a bad script token (strict — a wrong script runs arbitrary
+        // text), a model the launch grammar rejects reads as omitted: the
+        // action still runs, on the agent's own default.
+        let url = URL(string:
+            "multiplex://open?host=devbox&action=agent&agent=claude&model=--help")!
+        XCTAssertEqual(
+            ExternalActionURL.action(from: url),
+            .openAgent(
+                host: .named("devbox"), agent: .claudeCode, prompt: nil,
+                askForPrompt: false, directory: nil,
+                setupScript: .remembered, model: nil, target: .newSession)
+        )
+    }
+
+    // MARK: Session target
+
+    func testAgentURLRoundTripsSessionTargetForBothPlacements() {
+        for placement: ExternalSessionPlacement in [.tab, .workspace] {
+            let action = ExternalAction.openAgent(
+                host: .id(UUID()), agent: .claudeCode, prompt: "go",
+                askForPrompt: false, directory: "~/work dir",
+                setupScript: .remembered, model: "opus",
+                target: .existingSession(name: "deploy tools", placement: placement))
+            XCTAssertEqual(
+                ExternalActionURL.action(from: ExternalActionURL.url(for: action)),
+                action
+            )
+        }
+    }
+
+    func testAgentSessionPlacementTokensWindowAliasAndFailSoftDefault() {
+        // "window" is the tmux-natural spelling of the workspace branch
+        // (the adapter maps herdr workspace → window)...
+        let window = URL(string:
+            "multiplex://open?host=devbox&action=agent&agent=claude&session=main&in=window")!
+        guard case .openAgent(_, _, _, _, _, _, _, let aliased, _)? =
+            ExternalActionURL.action(from: window)
+        else { return XCTFail("expected openAgent") }
+        XCTAssertEqual(aliased, .existingSession(name: "main", placement: .workspace))
+
+        // ...while junk fails soft to the tab default, like `model`: the
+        // performer validates the name against the live list anyway.
+        let junk = URL(string:
+            "multiplex://open?host=devbox&action=agent&agent=claude&session=main&in=explode")!
+        guard case .openAgent(_, _, _, _, _, _, _, let defaulted, _)? =
+            ExternalActionURL.action(from: junk)
+        else { return XCTFail("expected openAgent") }
+        XCTAssertEqual(defaulted, .existingSession(name: "main", placement: .tab))
+    }
+
+    func testAgentWithoutSessionParsesAsNewSessionAndEmptySessionToo() {
+        for query in [
+            "multiplex://open?host=devbox&action=agent&agent=claude",
+            "multiplex://open?host=devbox&action=agent&agent=claude&session=",
+            // A placement without a session names nowhere to place into.
+            "multiplex://open?host=devbox&action=agent&agent=claude&in=workspace",
+        ] {
+            guard case .openAgent(_, _, _, _, _, _, _, let target, _)? =
+                ExternalActionURL.action(from: URL(string: query)!)
+            else { return XCTFail("expected openAgent for \(query)") }
+            XCTAssertEqual(target, .newSession, query)
         }
     }
 
@@ -100,13 +214,13 @@ final class ExternalActionTests: XCTestCase {
             .openAgent(
                 host: .named("devbox"), agent: .claudeCode, prompt: nil,
                 askForPrompt: false, directory: nil,
-                setupScript: .remembered)
+                setupScript: .remembered, model: nil, target: .newSession)
         )
     }
 
     func testAgentDefaultsToClaudeCode() {
         let url = URL(string: "multiplex://open?host=devbox&action=agent")!
-        guard case .openAgent(_, let agent, _, _, _, _)? = ExternalActionURL.action(from: url) else {
+        guard case .openAgent(_, let agent, _, _, _, _, _, _, _)? = ExternalActionURL.action(from: url) else {
             return XCTFail("expected openAgent")
         }
         XCTAssertEqual(agent, .claudeCode)
@@ -125,6 +239,98 @@ final class ExternalActionTests: XCTestCase {
             from: URL(string: "multiplex://open?host=devbox&action=agent&script=echo%20oops")!))
     }
 
+    func testFileConfirmationNamesPathAndLine() {
+        let action = ExternalAction.openFile(
+            host: .named("devbox"), path: "Sources/App.swift", line: 88)
+        let confirmation = ExternalActionConfirmation.make(
+            for: action, hostName: "Development Mac")
+        XCTAssertEqual(confirmation.title, "Open file on Development Mac?")
+        XCTAssertTrue(confirmation.message.contains("Sources/App.swift, line 88"))
+        XCTAssertTrue(confirmation.message.contains("read-only"))
+        XCTAssertEqual(confirmation.action, action)
+    }
+
+    @MainActor
+    func testOpenFileRegistersViewerBeforeOpeningRoute() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var host = Host(name: "devbox", hostname: "127.0.0.1", username: "tester")
+        host.workingDirs = ["/srv/project"]
+        let store = HostStore(directory: directory, knownMirroredIDs: [])
+        store.add(host)
+        let workspace = TerminalWorkspace()
+        var opened: TerminalWindowRoute?
+        var failure: ExternalActionFailure?
+        let context = ExternalActionRouter.Context(
+            store: store,
+            hub: ConnectionHub(),
+            workspace: workspace,
+            open: { opened = $0 },
+            presentAgentPrompt: { _ in },
+            presentFailure: { failure = $0 },
+            presentConfirmation: { _ in }
+        )
+
+        await ExternalActionPerformer.perform(
+            .openFile(
+                host: .id(host.id), path: "Sources/App.swift:10-15", line: nil
+            ),
+            context: context
+        )
+
+        let route = try XCTUnwrap(opened)
+        let tab = try XCTUnwrap(route.tabs.first)
+        XCTAssertEqual(tab.mode, .fileViewer(path: "Sources/App.swift"))
+        XCTAssertNotNil(workspace.fileViewerController(for: tab.id))
+        XCTAssertNil(failure)
+        workspace.closeTab(tab.id)
+    }
+
+    @MainActor
+    func testOpenFileTargetsAnExistingActiveTerminalBeforeOpeningAFreshRoute() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let host = Host(name: "devbox", hostname: "127.0.0.1", username: "tester")
+        let store = HostStore(directory: directory, knownMirroredIDs: [])
+        store.add(host)
+        let workspace = TerminalWorkspace()
+        let terminal = TerminalRoute(hostID: host.id, mode: .shell)
+        var targeted: TerminalPathTarget?
+        workspace.registerWindow(.init(
+            id: UUID(),
+            tabs: [terminal],
+            label: "terminal",
+            reveal: { _ in },
+            surrender: { [] },
+            adopt: { _ in },
+            openFileViewer: { _, target in
+                targeted = target
+                return true
+            }
+        ))
+        var opened: TerminalWindowRoute?
+        let context = ExternalActionRouter.Context(
+            store: store,
+            hub: ConnectionHub(),
+            workspace: workspace,
+            open: { opened = $0 },
+            presentAgentPrompt: { _ in },
+            presentFailure: { _ in },
+            presentConfirmation: { _ in }
+        )
+
+        await ExternalActionPerformer.perform(
+            .openFile(host: .id(host.id), path: "/srv/project/App.swift", line: 42),
+            context: context
+        )
+
+        XCTAssertEqual(try XCTUnwrap(targeted).path, "/srv/project/App.swift")
+        XCTAssertEqual(targeted?.line, 42)
+        XCTAssertNil(opened, "the target window decides panel versus tab")
+    }
+
     // MARK: Session pick
 
     func testMostRecentSessionPicksNewestCreated() {
@@ -133,7 +339,7 @@ final class ExternalActionTests: XCTestCase {
             TmuxSession(name: "new", windows: [], created: Date(timeIntervalSince1970: 300)),
             TmuxSession(name: "mid", windows: [], created: Date(timeIntervalSince1970: 200)),
         ]
-        XCTAssertEqual(ExternalActionPlan.mostRecentSessionName(in: sessions), "new")
+        XCTAssertEqual(ExternalActionPlan.mostRecentSession(in: sessions)?.name, "new")
     }
 
     func testMostRecentSessionBreaksCreationTiesByName() {
@@ -142,11 +348,11 @@ final class ExternalActionTests: XCTestCase {
             TmuxSession(name: "alpha", windows: [], created: created),
             TmuxSession(name: "beta", windows: [], created: created),
         ]
-        XCTAssertEqual(ExternalActionPlan.mostRecentSessionName(in: sessions), "beta")
+        XCTAssertEqual(ExternalActionPlan.mostRecentSession(in: sessions)?.name, "beta")
     }
 
     func testMostRecentSessionEmptyIsNil() {
-        XCTAssertNil(ExternalActionPlan.mostRecentSessionName(in: []))
+        XCTAssertNil(ExternalActionPlan.mostRecentSession(in: [])?.name)
     }
 
     // MARK: Setup script selection

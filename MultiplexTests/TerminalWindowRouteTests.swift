@@ -33,6 +33,33 @@ final class TerminalWindowRouteTests: XCTestCase {
         XCTAssertEqual(route.activeTab, tabs[0])
     }
 
+    // MARK: Reordering
+
+    func testMoveTabIntoTargetSlotInEitherDirectionAndKeepActive() {
+        let tabs = [tab("a"), tab("b"), tab("c"), tab("d")]
+        var route = TerminalWindowRoute(tabs: tabs, activeTabID: tabs[1].id)
+
+        route.moveTab(id: tabs[1].id, to: tabs[3].id)
+        XCTAssertEqual(route.tabs, [tabs[0], tabs[2], tabs[3], tabs[1]])
+        XCTAssertEqual(route.activeTabID, tabs[1].id)
+
+        route.moveTab(id: tabs[3].id, to: tabs[0].id)
+        XCTAssertEqual(route.tabs, [tabs[3], tabs[0], tabs[2], tabs[1]])
+        XCTAssertEqual(route.activeTabID, tabs[1].id)
+    }
+
+    func testMoveTabIgnoresSelfAndUnknownIDs() {
+        let tabs = [tab("a"), tab("b")]
+        var route = TerminalWindowRoute(tabs: tabs)
+
+        route.moveTab(id: tabs[0].id, to: tabs[0].id)
+        route.moveTab(id: UUID(), to: tabs[1].id)
+        route.moveTab(id: tabs[0].id, to: UUID())
+
+        XCTAssertEqual(route.tabs, tabs)
+        XCTAssertEqual(route.activeTabID, tabs[0].id)
+    }
+
     // MARK: Removal (close / split)
 
     func testRemoveActiveTabActivatesRightNeighbor() {
@@ -157,5 +184,46 @@ final class TerminalWindowRouteTests: XCTestCase {
             "multiplex_tmux new-session -d -s 'deploy'") == true)
         XCTAssertTrue(decoded.remoteCommand?.hasSuffix(
             "exec tmux attach-session -t 'deploy'") == true)
+    }
+
+    // MARK: SessionHandoff
+
+    private func handoffSession(
+        name: String, backend: Host.SessionBackend = .tmux
+    ) -> TmuxSession {
+        var session = TmuxSession(name: name, windows: [], created: .distantPast)
+        session.backend = backend
+        return session
+    }
+
+    func testHandoffCommandIsTheBareLocalAttachLine() {
+        XCTAssertEqual(
+            SessionHandoff.command(session: handoffSession(name: "main")),
+            "tmux attach-session -t main"
+        )
+        XCTAssertEqual(
+            SessionHandoff.command(
+                session: handoffSession(name: "main", backend: .herdr)),
+            "herdr session attach main"
+        )
+    }
+
+    func testHandoffCommandQuotesAHostileSessionName() {
+        XCTAssertEqual(
+            SessionHandoff.command(session: handoffSession(name: "my session")),
+            "tmux attach-session -t 'my session'"
+        )
+        XCTAssertEqual(
+            SessionHandoff.command(session: handoffSession(name: "it's")),
+            "tmux attach-session -t 'it'\\''s'"
+        )
+    }
+
+    func testHandoffCommandForAnEmptyHerdrNameFallsBackToDefault() {
+        XCTAssertEqual(
+            SessionHandoff.command(
+                session: handoffSession(name: "", backend: .herdr)),
+            "herdr session attach default"
+        )
     }
 }

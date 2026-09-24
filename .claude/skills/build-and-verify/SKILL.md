@@ -34,8 +34,15 @@ Run everything through `Tools/build.sh` from the repo root:
 ./Tools/build.sh build [vos|ipad]    # build one platform (default: vos)
 ./Tools/build.sh test  [vos|ipad]    # run MultiplexTests unit tests
 ./Tools/build.sh verify [vos|ipad]   # build + install + drive end-to-end
+./Tools/build.sh uitest [vos|ipad]   # XCUITest real-touch runs (gesture recognizers)
 ./Tools/build.sh all                 # gen + build both platforms + test
 ```
+
+`uitest` is the one headless route that drives a **gesture recognizer** with
+real touches on an Xcode 27 simulator (`simctl` has no tap/drag, idb is dead):
+it starts the harness and runs `MultiplexUITests` (today: the Arrange Keys
+press-and-drag). Use it when a change touches how a gesture is recognized —
+the DEBUG hooks prove state, not the touch.
 
 `vos` = visionOS simulator (Apple Vision Pro), `ipad` = iPad Pro 13-inch (M5).
 visionOS is the primary target — default to it unless the task is iPad-specific.

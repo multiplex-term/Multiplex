@@ -11,7 +11,10 @@ final class AgentAttentionTests: XCTestCase {
     func testOnlyAgentsWithVerifiedAttentionSignalsParticipate() {
         XCTAssertTrue(AgentKind.claudeCode.hasVerifiedAttentionSignals)
         XCTAssertTrue(AgentKind.codex.hasVerifiedAttentionSignals)
+        XCTAssertTrue(AgentKind.grok.hasVerifiedAttentionSignals)
         XCTAssertFalse(AgentKind.pi.hasVerifiedAttentionSignals)
+        XCTAssertFalse(AgentKind.antigravity.hasVerifiedAttentionSignals)
+        XCTAssertFalse(AgentKind.hermes.hasVerifiedAttentionSignals)
 
         let permissionTail = [
             "❯ 1. Yes",
@@ -19,13 +22,23 @@ final class AgentAttentionTests: XCTestCase {
             "Enter to select",
             "Do you want to proceed?",
         ]
-        // Pi has neither a verified RUNNING title transition nor verified
+        // Pi and Antigravity have neither a verified RUNNING title transition nor verified
         // question/permission shapes. Exercise those paths independently so
-        // adding a generic classifier rule cannot silently opt Pi back in.
+        // adding a generic classifier rule cannot silently opt them back in.
         XCTAssertNil(AgentAttention.classifyVerified(
             title: "⠙ working",
             tail: [],
             agent: .pi
+        ))
+        XCTAssertNil(AgentAttention.classifyVerified(
+            title: "✦ Antigravity",
+            tail: permissionTail,
+            agent: .antigravity
+        ))
+        XCTAssertNil(AgentAttention.classifyVerified(
+            title: "⠙ hermes",
+            tail: permissionTail,
+            agent: .hermes
         ))
         XCTAssertNil(AgentAttention.classifyVerified(
             title: "π - repo",
@@ -47,6 +60,82 @@ final class AgentAttentionTests: XCTestCase {
         )
     }
 
+    // MARK: Grok Build (from the xai-org/grok-build source, 2026-08-16)
+
+    func testGrokTitleStates() {
+        // TitleManager's default composition: [⚠ Action Required] - [spinner]
+        // - [activity] - [session name] - grok, joined by " - ".
+        XCTAssertEqual(
+            AgentAttention.classifyVerified(title: "grok", tail: [], agent: .grok), .idle)
+        XCTAssertEqual(
+            AgentAttention.classifyVerified(title: "fix the parser - grok", tail: [], agent: .grok),
+            .idle)
+        XCTAssertEqual(
+            AgentAttention.classifyVerified(
+                title: "⠋ - Thinking - fix the parser - grok", tail: [], agent: .grok),
+            .busy)
+        XCTAssertEqual(
+            AgentAttention.classifyVerified(title: "⠧ - Waiting - grok", tail: [], agent: .grok),
+            .busy)
+        // Items are user-orderable — the spinner need not lead.
+        XCTAssertEqual(
+            AgentAttention.classifyVerified(title: "grok - ⠋ - Running: ls", tail: [], agent: .grok),
+            .busy)
+        // A non-empty permission queue prefixes the ⚠ item; the turn keeps
+        // spinning behind it, so the ⚠ outranks the spinner.
+        XCTAssertEqual(
+            AgentAttention.classifyVerified(
+                title: "⚠ Action Required - ⠋ - Waiting - fix the parser - grok",
+                tail: [], agent: .grok),
+            .needsYou(.permission))
+        XCTAssertEqual(
+            AgentAttention.classifyVerified(
+                title: "grok - ⚠ Action Required", tail: [], agent: .grok),
+            .needsYou(.permission))
+        // Codex's pipe form must not leak into Grok's, nor vice versa.
+        XCTAssertEqual(
+            AgentAttention.classify(title: "⚠ Action Required - grok", tail: []), .idle)
+    }
+
+    func testGrokQuestionCardReadsOptionRowsFromTheTail() {
+        // ask_user_question keeps the title spinning; the card is the signal.
+        let single = [
+            "Which database engine?",
+            "",
+            "1 (●) Postgres    battle-tested",
+            "2 (○) SQLite      zero-ops",
+            "3 (○) Other",
+        ]
+        XCTAssertEqual(
+            AgentAttention.classifyVerified(
+                title: "⠋ - Waiting for response… - grok", tail: single, agent: .grok),
+            .needsYou(.question))
+        let multi = [
+            "│ Pick the features to enable",
+            "│ 1 [x] Sync",
+            "│ 2 [ ] Widgets",
+            "│ a [ ] Everything else",
+        ]
+        XCTAssertEqual(
+            AgentAttention.classifyVerified(
+                title: "⠋ - grok", tail: multi, agent: .grok),
+            .needsYou(.question))
+        // One shaped line is prose (a shell echoing "1 (○) foo"); two is a card.
+        XCTAssertEqual(
+            AgentAttention.classifyVerified(
+                title: "⠋ - grok", tail: ["1 (○) lonely row", "$ ls"], agent: .grok),
+            .busy)
+        // Numbered lists and Claude's caret rows are not Grok option rows.
+        XCTAssertEqual(
+            AgentAttention.classifyVerified(
+                title: "grok",
+                tail: ["1. first", "2. second", "❯ 1. Yes", "  2. No"],
+                agent: .grok),
+            .idle)
+        // The generic classifier never reads Grok's card for other agents.
+        XCTAssertEqual(AgentAttention.classify(title: "✳ Claude Code", tail: single), .idle)
+    }
+
     // MARK: Title state machine
 
     func testTitleIdleStates() {
@@ -58,7 +147,7 @@ final class AgentAttentionTests: XCTestCase {
         // Pi's title identifies the TUI but stays static during work; without
         // a reliable transition signal attention deliberately fails soft.
         XCTAssertEqual(AgentAttention.classify(title: "π - Multiplex", tail: []), .idle)
-        XCTAssertEqual(AgentAttention.classify(title: "Jhen-MBPr14.local", tail: []), .idle)
+        XCTAssertEqual(AgentAttention.classify(title: "Demo-MBPr14.local", tail: []), .idle)
         XCTAssertEqual(AgentAttention.classify(title: "", tail: []), .idle)
     }
 
@@ -245,7 +334,7 @@ final class AgentAttentionTests: XCTestCase {
     func testTrustPromptDetectedEvenWithNonAgentTitle() {
         // At first launch the shell's title (a hostname) is still up.
         XCTAssertEqual(
-            AgentAttention.classify(title: "Jhen-MBPr14.local", tail: trustPrompt),
+            AgentAttention.classify(title: "Demo-MBPr14.local", tail: trustPrompt),
             .needsYou(.permission))
     }
 
@@ -376,7 +465,7 @@ final class AgentAttentionTests: XCTestCase {
     // MARK: Tracker edges
 
     func testFirstSightIsBaselineNotEdge() {
-        var tracker = AttentionTracker()
+        var tracker = AttentionTracker<String>()
         // Relaunching next to a long-standing dialog must not re-notify.
         XCTAssertEqual(
             tracker.update(session: "main", state: .needsYou(.permission), hasBell: false),
@@ -384,7 +473,7 @@ final class AgentAttentionTests: XCTestCase {
     }
 
     func testTurnEndEdgeFiresOnce() {
-        var tracker = AttentionTracker()
+        var tracker = AttentionTracker<String>()
         _ = tracker.update(session: "main", state: .busy, hasBell: false)
         XCTAssertEqual(
             tracker.update(session: "main", state: .idle, hasBell: false),
@@ -395,7 +484,7 @@ final class AgentAttentionTests: XCTestCase {
     }
 
     func testNeedsInputEdgeFiresOnceAndPerKind() {
-        var tracker = AttentionTracker()
+        var tracker = AttentionTracker<String>()
         _ = tracker.update(session: "main", state: .busy, hasBell: false)
         XCTAssertEqual(
             tracker.update(session: "main", state: .needsYou(.permission), hasBell: false),
@@ -414,7 +503,7 @@ final class AgentAttentionTests: XCTestCase {
     }
 
     func testDialogDismissedWithoutTurnEndStaysQuiet() {
-        var tracker = AttentionTracker()
+        var tracker = AttentionTracker<String>()
         _ = tracker.update(session: "main", state: .needsYou(.permission), hasBell: false)
         _ = tracker.update(session: "main", state: .needsYou(.permission), hasBell: false)
         // needsYou → idle is the user answering; they were there.
@@ -424,7 +513,7 @@ final class AgentAttentionTests: XCTestCase {
     func testSameTickEventsCoalesceToMostActionable() {
         // A remote hook can ring the bell on the same tick the turn ends;
         // the hub posts one banner, priority-ordered.
-        var tracker = AttentionTracker()
+        var tracker = AttentionTracker<String>()
         _ = tracker.update(session: "main", state: .busy, hasBell: false)
         let events = tracker.update(session: "main", state: .idle, hasBell: true)
         XCTAssertTrue(events.contains(.bell))
@@ -436,7 +525,7 @@ final class AgentAttentionTests: XCTestCase {
     }
 
     func testBellRisingEdgeOnly() {
-        var tracker = AttentionTracker()
+        var tracker = AttentionTracker<String>()
         _ = tracker.update(session: "main", state: nil, hasBell: false)
         XCTAssertEqual(
             tracker.update(session: "main", state: nil, hasBell: true),
@@ -448,15 +537,15 @@ final class AgentAttentionTests: XCTestCase {
     }
 
     func testPruneResetsBaselineForRecreatedSession() {
-        var tracker = AttentionTracker()
+        var tracker = AttentionTracker<String>()
         _ = tracker.update(session: "main", state: .busy, hasBell: false)
-        tracker.prune(keeping: [])
+        tracker.prune { _ in false }
         // Same name, new session: first sight again, no phantom turn-end.
         XCTAssertEqual(tracker.update(session: "main", state: .idle, hasBell: false), [])
     }
 
     func testAgentLossDropsStateWithoutEvents() {
-        var tracker = AttentionTracker()
+        var tracker = AttentionTracker<String>()
         _ = tracker.update(session: "main", state: .busy, hasBell: false)
         // Probe flap: agent detection misses a tick (state nil) — no edge.
         XCTAssertEqual(tracker.update(session: "main", state: nil, hasBell: false), [])
@@ -477,6 +566,141 @@ final class AgentAttentionTests: XCTestCase {
         // Bare-semver comm still classifies the agent while the busy title
         // (no "✳"/"Claude Code") gives the title rule nothing.
         XCTAssertEqual(sessions.first?.activeAgent, .claudeCode)
+    }
+
+    // MARK: Notification tap
+
+    func testTapTargetUserInfoRoundTrip() {
+        let session = AttentionTapTarget(
+            hostID: UUID(), sessionName: "main", backend: .herdr)
+        XCTAssertEqual(AttentionTapTarget(userInfo: session.userInfo), session)
+        XCTAssertTrue(session.sessionIsAttachable)
+
+        let tab = AttentionTapTarget(
+            hostID: UUID(), sessionName: "shell", backend: .tmux, tabID: UUID())
+        XCTAssertEqual(AttentionTapTarget(userInfo: tab.userInfo), tab)
+        // A tab-scoped alert's session name is display copy — pressing its
+        // banner must never mint an attach to a namesake session.
+        XCTAssertFalse(tab.sessionIsAttachable)
+
+        // A banner from another payload shape decodes to nil (the press
+        // just foregrounds the app), and so does a corrupted backend.
+        XCTAssertNil(AttentionTapTarget(userInfo: [:]))
+        var corrupted = session.userInfo
+        corrupted["attentionBackend"] = "screen"
+        XCTAssertNil(AttentionTapTarget(userInfo: corrupted))
+    }
+
+    /// The banner gets back to the ALERTING session, so the target carries
+    /// that session's backend. On a mixed host stamping the host's primary
+    /// instead would send the press looking in the wrong namespace — for a
+    /// namesake, or for nothing at all.
+    func testAlertBuildsTapTargetFromTheAlertingSessionsBackend() {
+        var host = Host(name: "devbox", hostname: "127.0.0.1", username: "dev")
+        host.sessionBackend = .herdr
+        let target = AttentionAlert(
+            host: host,
+            sessionName: "deploy",
+            backend: .herdr,
+            agent: .pi,
+            event: .turnEnded,
+            paneTitle: ""
+        ).tapTarget
+        XCTAssertEqual(target.hostID, host.id)
+        XCTAssertEqual(target.sessionName, "deploy")
+        XCTAssertEqual(target.backend, .herdr)
+        XCTAssertNil(target.tabID)
+
+        // The mixed host: a tmux session alerting on a herdr-primary host
+        // keeps its OWN backend.
+        host.secondaryBackends = [.tmux]
+        XCTAssertEqual(
+            AttentionAlert(
+                host: host,
+                sessionName: "deploy",
+                backend: .tmux,
+                agent: .claudeCode,
+                event: .turnEnded,
+                paneTitle: ""
+            ).tapTarget.backend,
+            .tmux
+        )
+    }
+
+    @MainActor
+    func testTapRevealsOpenTabBySessionIdentity() {
+        let center = AttentionCenter()
+        let workspace = TerminalWorkspace()
+        center.workspace = workspace
+        let host = Host(name: "devbox", hostname: "127.0.0.1", username: "dev")
+        let tmuxTab = TerminalRoute(hostID: host.id, mode: .attach(sessionName: "main"))
+        let herdrTab = TerminalRoute(hostID: host.id, mode: .herdrAttach(sessionName: "main"))
+        var revealed: [UUID] = []
+        workspace.registerWindow(TerminalWorkspace.WindowEntry(
+            id: UUID(),
+            tabs: [tmuxTab, herdrTab],
+            label: "terminal",
+            reveal: { revealed.append($0) },
+            surrender: { [] },
+            adopt: { _ in }
+        ))
+        var submitted: [ExternalAction] = []
+        center.performExternalAction = { submitted.append($0) }
+
+        // Backend is identity: both namespaces hold "main", and each press
+        // must reveal its own backend's tab.
+        center.handleTap(AttentionTapTarget(
+            hostID: host.id, sessionName: "main", backend: .herdr))
+        XCTAssertEqual(revealed, [herdrTab.id])
+        center.handleTap(AttentionTapTarget(
+            hostID: host.id, sessionName: "main", backend: .tmux))
+        XCTAssertEqual(revealed, [herdrTab.id, tmuxTab.id])
+
+        // A tab-scoped alert reveals its exact tab even though a plain
+        // shell has no session identity to match.
+        let shellTab = TerminalRoute(hostID: host.id, mode: .shell)
+        workspace.registerWindow(TerminalWorkspace.WindowEntry(
+            id: UUID(),
+            tabs: [shellTab],
+            label: "shell",
+            reveal: { revealed.append($0) },
+            surrender: { [] },
+            adopt: { _ in }
+        ))
+        center.handleTap(AttentionTapTarget(
+            hostID: host.id, sessionName: "shell", backend: .tmux, tabID: shellTab.id))
+        XCTAssertEqual(revealed.last, shellTab.id)
+
+        // Every press above found its window — none may fall through to
+        // the external-action seam.
+        XCTAssertTrue(submitted.isEmpty)
+    }
+
+    @MainActor
+    func testTapWithoutOpenWindowAttachesViaExternalSeam() {
+        let center = AttentionCenter()
+        center.workspace = TerminalWorkspace()
+        var submitted: [ExternalAction] = []
+        center.performExternalAction = { submitted.append($0) }
+        let hostID = UUID()
+
+        // A session-scoped alert re-attaches through the widget seam (the
+        // router queues behind the app lock and raises the deck itself).
+        // The banner's backend rides along: dropping it would resolve the
+        // name in the host's PRIMARY namespace, which on a mixed host is a
+        // different session — or none.
+        center.handleTap(AttentionTapTarget(
+            hostID: hostID, sessionName: "deploy", backend: .herdr))
+        XCTAssertEqual(
+            submitted,
+            [.openShell(host: .id(hostID), sessionName: "deploy", backend: .herdr)]
+        )
+
+        // A tab-scoped alert whose tab died stops at the reveal attempt:
+        // its "shell" display name is not an attachable session.
+        center.handleTap(AttentionTapTarget(
+            hostID: hostID, sessionName: "shell", backend: .tmux, tabID: UUID()))
+        XCTAssertEqual(submitted.count, 1)
     }
 
     // MARK: Pro gate
@@ -508,6 +732,41 @@ final class AgentAttentionTests: XCTestCase {
         center.alertsEnabled = false
         XCTAssertFalse(center.isActive)
         defaults.removePersistentDomain(forName: "attention-pro-test")
+    }
+
+    /// The bug behind "agent alerts never arrive when I switch away": keyboard
+    /// focus stands in for "you are watching this session", but the arbiter
+    /// keeps its owner when the app leaves the screen — so the session you
+    /// walked away from stayed silent, and it is the one most likely running
+    /// an agent. Focus may only silence an alert while the app is frontmost.
+    func testFocusSilencesAnAlertOnlyWhileTheAppIsFrontmost() {
+        XCTAssertTrue(
+            AttentionFocusPolicy.suppressesAlert(
+                appIsFrontmost: true,
+                sessionOwnsKeyboardFocus: true
+            ),
+            "the pane under your fingers must not banner at you"
+        )
+        XCTAssertFalse(
+            AttentionFocusPolicy.suppressesAlert(
+                appIsFrontmost: false,
+                sessionOwnsKeyboardFocus: true
+            ),
+            "walked away: retained keyboard focus is not engagement"
+        )
+        XCTAssertFalse(
+            AttentionFocusPolicy.suppressesAlert(
+                appIsFrontmost: true,
+                sessionOwnsKeyboardFocus: false
+            ),
+            "another window, a background tab, or no open tab always alerts"
+        )
+        XCTAssertFalse(
+            AttentionFocusPolicy.suppressesAlert(
+                appIsFrontmost: false,
+                sessionOwnsKeyboardFocus: false
+            )
+        )
     }
 
     func testParseTailsKeepsFullDialogWhileMiniatureClips() {

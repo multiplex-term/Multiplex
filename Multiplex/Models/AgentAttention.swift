@@ -49,16 +49,122 @@ enum AttentionEvent: Equatable {
 struct AttentionAlert {
     var host: Host
     var sessionName: String
+    /// The multiplexer the alerting session runs on — the session record's
+    /// own, never `host.sessionBackend`, which on a mixed host answers only
+    /// for the primary. Defaults to the primary for the single-backend
+    /// sources (plain-shell tabs, in-band bells) where it is the one answer.
+    var backend: Host.SessionBackend = .tmux
     /// Present for an event emitted by a plain-shell tab. tmux probe events
     /// remain session-scoped because the same remote session may have more
     /// than one attached client, while every plain shell is its own process.
-    var tabID: UUID? = nil
+    var tabID: UUID?
     var agent: AgentKind?
     var event: AttentionEvent
     var paneTitle: String
     /// What the blocking dialog asks (`AgentAttention.dialogSummary`),
     /// when the event is needs-input and the tail yielded readable copy.
-    var dialogSummary: String? = nil
+    var dialogSummary: String?
+
+    /// What this alert's banner should get back to when pressed. A banner
+    /// for a secondary-backend session must carry that backend, or the press
+    /// looks for the tab in the wrong namespace and finds nothing.
+    var tapTarget: AttentionTapTarget {
+        AttentionTapTarget(
+            hostID: host.id,
+            sessionName: sessionName,
+            backend: backend,
+            tabID: tabID
+        )
+    }
+}
+
+/// The identity a posted banner carries into its own press, encoded into
+/// the notification's `userInfo` as strings only — a pressed banner may
+/// outlive the process that posted it, so nothing here can be a live
+/// reference. Backend is part of the identity for the same reason it is in
+/// `TerminalWorkspace.focusTab`: both namespaces may legally contain `main`.
+struct AttentionTapTarget: Equatable {
+    var hostID: UUID
+    var sessionName: String
+    var backend: Host.SessionBackend
+    /// The exact open tab for tab-scoped alerts (plain shells, in-band
+    /// bells); nil for session-scoped probe alerts.
+    var tabID: UUID?
+
+    /// Only a session-scoped probe alert names a real multiplexer session
+    /// that could be attached fresh. A tab-scoped alert's session name is
+    /// display copy ("shell") — pressing its banner after the tab closed
+    /// must never mint an attach to a namesake.
+    var sessionIsAttachable: Bool { tabID == nil }
+
+    private enum Key {
+        static let host = "attentionHostID"
+        static let session = "attentionSession"
+        static let backend = "attentionBackend"
+        static let tab = "attentionTabID"
+    }
+
+    init(
+        hostID: UUID, sessionName: String,
+        backend: Host.SessionBackend, tabID: UUID? = nil
+    ) {
+        self.hostID = hostID
+        self.sessionName = sessionName
+        self.backend = backend
+        self.tabID = tabID
+    }
+
+    var userInfo: [String: String] {
+        var info = [
+            Key.host: hostID.uuidString,
+            Key.session: sessionName,
+            Key.backend: backend.rawValue,
+        ]
+        if let tabID { info[Key.tab] = tabID.uuidString }
+        return info
+    }
+
+    /// Fail-soft: a banner from a build with a different payload shape
+    /// decodes to nil and the press just foregrounds the app.
+    init?(userInfo: [AnyHashable: Any]) {
+        guard let hostString = userInfo[Key.host] as? String,
+              let hostID = UUID(uuidString: hostString),
+              let sessionName = userInfo[Key.session] as? String,
+              let backendRaw = userInfo[Key.backend] as? String,
+              let backend = Host.SessionBackend(rawValue: backendRaw)
+        else { return nil }
+        self.hostID = hostID
+        self.sessionName = sessionName
+        self.backend = backend
+        tabID = (userInfo[Key.tab] as? String).flatMap(UUID.init(uuidString:))
+    }
+}
+
+/// When an alert is dropped because the user is already watching the session
+/// that raised it.
+///
+/// Keyboard focus is the app's stand-in for "the terminal you are engaged
+/// with" (`TerminalFocusArbiter` owns exactly one, app-wide), and suppressing
+/// a banner about the pane under your fingers is right. But the arbiter does
+/// **not** release focus when the app leaves the screen: it answers "which
+/// terminal would receive a keystroke", not "is anyone here". So the premise
+/// silently inverts the moment you switch apps — the session you walked away
+/// from still looks focused, and it is the likeliest one to be running an
+/// agent. That made "leave while the agent works, get pinged" — the whole
+/// point of the feature — the one case that stayed quiet.
+///
+/// Hence: focus only silences an alert while the app is frontmost.
+/// `.inactive` deliberately does not count. A Stage Manager sibling window
+/// with the terminal visible beside the app being typed in is not engagement,
+/// and `ForegroundBanner` exists precisely to show a banner over a visible
+/// but unattended window.
+enum AttentionFocusPolicy {
+    static func suppressesAlert(
+        appIsFrontmost: Bool,
+        sessionOwnsKeyboardFocus: Bool
+    ) -> Bool {
+        appIsFrontmost && sessionOwnsKeyboardFocus
+    }
 }
 
 /// The state classifier. Everything here matches *structure*, not prose —
@@ -85,14 +191,18 @@ enum AgentAttention {
 
     /// Classify only agents whose outside-the-pane signals are known. Keeping
     /// this boundary here prevents a newly detected agent from accidentally
-    /// inheriting Claude/Codex alerts or RUNNING telemetry.
+    /// inheriting Claude/Codex alerts or RUNNING telemetry — the switch is
+    /// exhaustive so a fifth kind must choose its classifier out loud.
     static func classifyVerified(
         title: String,
         tail: [String],
         agent: AgentKind?
     ) -> PaneAgentState? {
-        guard agent?.hasVerifiedAttentionSignals == true else { return nil }
-        return classify(title: title, tail: tail)
+        guard let agent, agent.hasVerifiedAttentionSignals else { return nil }
+        switch agent {
+        case .grok: return classifyGrok(title: title, tail: tail)
+        case .claudeCode, .codex, .pi, .antigravity, .hermes: return classify(title: title, tail: tail)
+        }
     }
 
     static func classify(title: String, tail: [String]) -> PaneAgentState {
@@ -106,12 +216,54 @@ enum AgentAttention {
         return .idle
     }
 
+    /// Grok Build composes its title from `TitleManager` items (source,
+    /// 2026-08-16; default order `⚠ Action Required`, Braille spinner,
+    /// activity, session name, `grok`, joined by ` - `): the ⚠ prefix stands
+    /// exactly while its permission queue is non-empty, the spinner while the
+    /// turn runs, neither once the composer is back. Items are user-orderable
+    /// and each is optional, so match by presence, not position. A question
+    /// card (`ask_user_question`) is not a permission — the title keeps
+    /// spinning — so its option rows are read from the tail: two rows is the
+    /// card, one could be prose. The ⚠ item blinks only after Grok sees a
+    /// focus-out event; tmux ships with `focus-events off`, so over a
+    /// Multiplex attach it holds still.
+    static func classifyGrok(title: String, tail: [String]) -> PaneAgentState {
+        if title.contains("⚠ Action Required") { return .needsYou(.permission) }
+        var optionRows = 0
+        for line in tail.suffix(questionCaretWindow) where isGrokOptionRow(line) {
+            optionRows += 1
+            if optionRows == 2 { return .needsYou(.question) }
+        }
+        if title.unicodeScalars.contains(where: isBrailleSpinner) { return .busy }
+        return .idle
+    }
+
+    /// Grok's question card renders each option as `<shortcut> (○) label` /
+    /// `<shortcut> (●) label` (single) or `<shortcut> [ ] label` / `[x]`
+    /// (multi) — shortcuts are `1`–`9` then `a`–`f`; a modal frame may put
+    /// `│` before the shortcut.
+    private static let grokOptionMarkers = ["(●) ", "(○) ", "[ ] ", "[x] "]
+
+    private static func isGrokOptionRow(_ raw: String) -> Bool {
+        var line = raw.drop(while: \.isWhitespace)
+        if line.first == "│" { line = line.dropFirst().drop(while: { $0 == " " }) }
+        guard let shortcut = line.first?.asciiValue,
+              (0x31...0x39).contains(shortcut) || (0x61...0x66).contains(shortcut),
+              line.dropFirst().first == " "
+        else { return false }
+        let marker = line.dropFirst(2)
+        return grokOptionMarkers.contains { marker.hasPrefix($0) }
+    }
+
     /// Claude Code and Codex prefix the title with a Braille spinner while a
     /// turn is in flight (Claude Code: "⠂ Create probe.txt file", Codex:
     /// "⠦ wd") and drop it when the turn ends ("✳ …" / bare cwd).
     static func hasSpinnerPrefix(_ title: String) -> Bool {
-        guard let first = title.unicodeScalars.first else { return false }
-        return (0x2800...0x28FF).contains(first.value)
+        title.unicodeScalars.first.map(isBrailleSpinner) ?? false
+    }
+
+    private static func isBrailleSpinner(_ scalar: Unicode.Scalar) -> Bool {
+        (0x2800...0x28FF).contains(scalar.value)
     }
 
     /// A dialog blocked on the user renders a caret-selected numbered
@@ -207,7 +359,7 @@ enum AgentAttention {
         guard agent == .claudeCode else { return nil }
         var text = title
         if let first = text.unicodeScalars.first,
-           first.value == 0x2733 /* ✳ */ || (0x2800...0x28FF).contains(first.value) {
+           first.value == 0x2733 /* ✳ */ || isBrailleSpinner(first) {
             text = String(text.unicodeScalars.dropFirst())
                 .trimmingCharacters(in: .whitespaces)
         }
@@ -239,18 +391,22 @@ enum AgentAttention {
 /// The first sighting of a session is a baseline, not an edge: relaunching
 /// the app next to a long-waiting dialog must not re-notify (the wall
 /// badge shows standing state; events are for changes).
-struct AttentionTracker {
+/// Generic over the key because two owners track different things: the wall
+/// keys by `SessionKey` (a name alone collides across backends on a mixed
+/// host), while a direct `.shell` tab keys by its own tab UUID — it has no
+/// session at all.
+struct AttentionTracker<Session: Hashable> {
     private struct Observation: Equatable {
         var state: PaneAgentState?
         var hasBell: Bool
     }
 
-    private var previous: [String: Observation] = [:]
+    private var previous: [Session: Observation] = [:]
 
     /// Feed one observation; get the events this edge produces. `state` is
     /// nil when the session has no detected agent (bells still track).
     mutating func update(
-        session: String,
+        session: Session,
         state: PaneAgentState?,
         hasBell: Bool
     ) -> [AttentionEvent] {
@@ -274,8 +430,19 @@ struct AttentionTracker {
 
     /// Drop sessions that no longer exist so a recreated namesake starts
     /// from a fresh baseline.
-    mutating func prune(keeping sessions: Set<String>) {
-        previous = previous.filter { sessions.contains($0.key) }
+    ///
+    /// ⚠ On a mixed host, hand this the surviving keys of the backends that
+    /// actually ANSWERED this tick — never the union of everything expected.
+    /// A backend whose probe failed has not proved its sessions are gone,
+    /// and pruning them resets the very baseline the edge detector needs
+    /// (`ConnectionHub.evaluateAttention` keeps that baseline across a dead
+    /// probe for exactly this reason).
+    /// Predicate form so a mixed-host caller can keep an unanswered
+    /// backend's baselines while pruning an answered one's — the set form it
+    /// replaced could only express "these survive", which is the shape that
+    /// made the bug above possible.
+    mutating func prune(keeping isLive: (Session) -> Bool) {
+        previous = previous.filter { isLive($0.key) }
     }
 
     mutating func reset() {

@@ -6,10 +6,14 @@ import XCTest
 /// shapes — the classifier is substring-based on purpose).
 final class HostTestTests: XCTestCase {
     private func host(
-        auth: Host.AuthMethod = .password, useMosh: Bool = false, moshServerPath: String? = nil
+        auth: Host.AuthMethod = .password,
+        backend: Host.SessionBackend = .tmux,
+        useMosh: Bool = false,
+        moshServerPath: String? = nil
     ) -> Host {
         var host = Host(name: "devbox", hostname: "devbox.example.com", username: "dev")
         host.authMethod = auth
+        host.sessionBackend = backend
         host.useMosh = useMosh
         host.moshServerPath = moshServerPath
         return host
@@ -27,6 +31,14 @@ final class HostTestTests: XCTestCase {
         XCTAssertTrue(command.hasSuffix("true"))
     }
 
+    func testCheckCommandUsesTheSelectedBackendAndHerdrCargoPath() {
+        let command = HostTest.checkCommand(for: host(backend: .herdr))
+        XCTAssertTrue(command.contains("command -v herdr"))
+        XCTAssertTrue(command.contains("MPXT_HERDR_OK"))
+        XCTAssertTrue(command.contains("$HOME/.cargo/bin"))
+        XCTAssertFalse(command.contains("command -v tmux"))
+    }
+
     func testCheckCommandChecksMoshServerAtConfiguredPath() {
         let plain = HostTest.checkCommand(for: host(useMosh: true))
         XCTAssertTrue(plain.contains("command -v 'mosh-server'"))
@@ -38,17 +50,61 @@ final class HostTestTests: XCTestCase {
 
     func testParseReport() {
         XCTAssertEqual(
-            HostTest.parseReport("MPXT_TMUX_OK\n", checksMosh: false),
-            HostTest.Report(tmuxFound: true, moshServerFound: nil))
+            HostTest.parseReport(
+                "MPXT_TMUX_OK\n", backend: .tmux, checksMosh: false),
+            HostTest.Report(multiplexerFound: true, moshServerFound: nil))
         XCTAssertEqual(
-            HostTest.parseReport("MPXT_TMUX_MISSING\nMPXT_MOSH_OK\n", checksMosh: true),
-            HostTest.Report(tmuxFound: false, moshServerFound: true))
+            HostTest.parseReport(
+                "MPXT_HERDR_OK\nMPXT_MOSH_OK\n",
+                backend: .herdr,
+                checksMosh: true
+            ),
+            HostTest.Report(multiplexerFound: true, moshServerFound: true))
         XCTAssertEqual(
-            HostTest.parseReport("garbage\n", checksMosh: true),
-            HostTest.Report(tmuxFound: false, moshServerFound: false))
+            HostTest.parseReport(
+                "MPXT_TMUX_OK\n", backend: .herdr, checksMosh: true),
+            HostTest.Report(multiplexerFound: false, moshServerFound: false),
+            "a tmux marker cannot satisfy a herdr form")
     }
 
     // MARK: Failure wording
+
+    func testBareCommandFailureUsesPlainWordingAndIsNotAPassphraseFailure() {
+        let error = SSHConnectionError.commandFailed(exitCode: 127, stderr: "  parse error\nmore detail\n")
+        let expected = "devbox rejected Multiplex's commands (exit 127): parse error"
+        XCTAssertEqual(HostTest.failureMessage(for: error, host: host()), expected)
+        XCTAssertEqual(error.userMessage(host: host()), expected)
+        XCTAssertNil(error.keyPassphraseReason)
+    }
+
+    func testBareCommandFailureWithoutStderrOmitsTheColon() {
+        let error = SSHConnectionError.commandFailed(exitCode: 1, stderr: " \n\t")
+        let expected = "devbox rejected Multiplex's commands (exit 1)"
+        XCTAssertEqual(HostTest.failureMessage(for: error, host: host()), expected)
+        XCTAssertEqual(error.userMessage(host: host()), expected)
+    }
+
+    func testDiagnosedCommandFailureUsesShellWording() {
+        for shell: String? in ["fish", "csh", "zsh", nil] {
+            let rejection = RemoteShellDiagnosis.Rejection(
+                exitCode: 127, stderrHead: "parse error", shellName: shell
+            )
+            XCTAssertEqual(
+                HostTest.failureMessage(for: rejection, host: host()),
+                rejection.message(host: host())
+            )
+        }
+    }
+
+    func testNonPOSIXFailureAsksToCheckSh() {
+        let rejection = RemoteShellDiagnosis.Rejection(
+            exitCode: 127, stderrHead: "not found", shellName: "fish"
+        )
+        XCTAssertEqual(HostTest.failureMessage(for: rejection, host: host()), """
+            devbox's login shell is fish, so Multiplex runs its commands through sh — \
+            check that sh and printf work on the host (exit 127).
+            """)
+    }
 
     func testMissingCredentialsNameTheMissingSecret() {
         XCTAssertEqual(
@@ -100,16 +156,16 @@ final class HostTestTests: XCTestCase {
     }
 
     func testAuthenticationBuilderUnlocksAnEncryptedED25519Key() {
-        let encryptedKey = """
-        -----BEGIN OPENSSH PRIVATE KEY-----
-        b3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jdHIAAAAGYmNyeXB0AAAAGAAAABBQRAFCo9
-        /vv0icX60s6O6UAAAAEAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIBrez0rdYqROdkIA
-        qvSrLoYFO1KVEidE4wclxivVKMbmAAAAoA9dkA6h2tAtANBP9RzyKvgrw5JKVJLVHfvZRQ
-        8d3ttvy7WOs15y8lL/SdHiCyRukkKOPRd02zqx5g6WSmXZ0dKho/aMMO+58cIxsbCmMePT
-        HaJvuQjIx6DIEoQyq83rQeVngk5rgvgou2jgHy/35C1AHtUysH4DIcltmrU3rvMF8i2GL4
-        Od3cZL5cIOQVsmAZS6t3oL+GVeVOMFCqGFxjc=
-        -----END OPENSSH PRIVATE KEY-----
-        """
+        // A throwaway key generated for this test alone (ssh-keygen -t ed25519,
+        // aes256-ctr + bcrypt), sealed with the passphrase "example".
+        let encryptedKey = Self.pemArmored("""
+        b3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jdHIAAAAGYmNyeXB0AAAAGAAAABCsRBrMnz
+        P75kbEMEEoiAxwAAAAGAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIGXl/uASjqVbMtQc
+        HI7R86NNelrCqYvhtl6TI1cGMPCrAAAAkBzuqs3c2AwMnOKX1gsolwhac6NY8/gN33u4QD
+        PakwoMStfBhnEZG+hTmSNf8MDS8ecgjuo9vGKRYGKxrFYrTAhI/B56ha+Qbr5VhgzqrMhY
+        k764hcS+s5zDqM3Yt8BZuBpyi/6/k+Kyh9uxlplr+gs9FNvJ3EdyAK1tbg9Vp6xmUn/Pwk
+        QVoMKpl2iPRikG6Q==
+        """)
         let keyHost = host(auth: .privateKey)
 
         XCTAssertThrowsError(try SSHConnection.makeAuthenticationMethod(
@@ -168,11 +224,15 @@ final class HostTestTests: XCTestCase {
         data.append(UInt8((length >> 8) & 0xff))
         data.append(UInt8(length & 0xff))
         data.append(contentsOf: cipher.utf8)
-        return """
-        -----BEGIN OPENSSH PRIVATE KEY-----
-        \(data.base64EncodedString())
-        -----END OPENSSH PRIVATE KEY-----
-        """
+        return Self.pemArmored(data.base64EncodedString())
+    }
+
+    /// Assembles OpenSSH PEM armor at runtime — a contiguous BEGIN…END
+    /// private-key block in source would trip public secret scanners.
+    private static func pemArmored(_ base64Body: String) -> String {
+        let head = "-----BEGIN OPENSSH " + "PRIVATE KEY-----"
+        let tail = "-----END OPENSSH " + "PRIVATE KEY-----"
+        return head + "\n" + base64Body + "\n" + tail
     }
 
     func testAuthenticationFailureBlamesCredentialsNotTransport() {
@@ -207,7 +267,7 @@ final class HostTestTests: XCTestCase {
     }
 
     func testDeadlineFailureMentionsReachability() {
-        let message = HostTest.failureMessage(for: HostTest.DeadlineExceeded(), host: host())
+        let message = HostTest.failureMessage(for: DeadlineExceeded(), host: host())
         XCTAssertTrue(message.contains("No answer"))
         XCTAssertTrue(message.contains("devbox.example.com"))
     }

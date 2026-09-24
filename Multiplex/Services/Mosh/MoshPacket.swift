@@ -36,6 +36,11 @@ struct MoshPacketLayer {
     private(set) var rttvar: Double = 500
     private var haveRTTSample = false
 
+    /// Datagrams the peer has sent, inferred from the highest authentic
+    /// sequence number seen (sequences start at 0). Compared against the
+    /// engine's opened-packet count, the gap is the loss estimate.
+    var receivedDatagramCount: UInt64 { expectedReceiverSequence }
+
     init(key: MoshKey, direction: Direction = .client) throws {
         aead = try MoshAEAD(key: key.data)
         self.direction = direction

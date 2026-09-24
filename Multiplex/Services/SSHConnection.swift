@@ -3,6 +3,7 @@ import Crypto
 import Foundation
 import NIOCore
 import NIOSSH
+import OSLog
 
 /// A passphrase entered from the connection-time prompt. Every connection to
 /// the same host can reuse it for the life of this process, while persistence
@@ -160,14 +161,19 @@ enum SSHConnectionError: Error {
     case unsupportedKey
     case tailscaleUnavailable
     case connectFailed(String)
+    case commandFailed(exitCode: Int, stderr: String)
     case notConnected
+    /// The server's identity didn't match what this host has recorded. Kept
+    /// distinct from `connectFailed` because it is the one failure the user
+    /// must not shrug off as a flaky network.
+    case hostKeyRefused(HostKeyRefusal)
 
     var keyPassphraseReason: SSHKeyPassphraseChallenge.Reason? {
         switch self {
         case .keyPassphraseRequired: .required
         case .incorrectKeyPassphrase: .incorrect
         case .missingCredentials, .unsupportedKey, .tailscaleUnavailable,
-             .connectFailed, .notConnected:
+             .connectFailed, .notConnected, .hostKeyRefused, .commandFailed:
             nil
         }
     }
@@ -175,19 +181,41 @@ enum SSHConnectionError: Error {
     func userMessage(host: Host) -> String {
         switch self {
         case .missingCredentials:
-            "No saved credentials for \(host.name). Edit the host and sign in again."
+            String(localized: "No saved credentials for \(host.name). Edit the host and sign in again.")
         case .keyPassphraseRequired:
-            "The private key for \(host.name) is encrypted. Enter its passphrase to connect."
+            String(localized: "The private key for \(host.name) is encrypted. Enter its passphrase to connect.")
         case .incorrectKeyPassphrase:
-            "The passphrase didn't unlock the private key for \(host.name). Try again."
+            String(localized: "The passphrase didn't unlock the private key for \(host.name). Try again.")
         case .unsupportedKey:
-            "The private key for \(host.name) couldn't be read. Paste an OpenSSH ed25519 or RSA key."
+            String(localized: "The private key for \(host.name) couldn't be read. Paste an OpenSSH ed25519 or RSA key.")
         case .tailscaleUnavailable:
-            "The Tailscale backend isn't available in this build."
+            String(localized: "The Tailscale backend isn't available in this build.")
         case .connectFailed(let detail):
-            "Couldn't reach \(host.name) (\(detail))."
+            String(localized: "Couldn't reach \(host.name) (\(detail)).")
+        case .commandFailed(let exitCode, let stderr):
+            RemoteShellDiagnosis.Rejection(
+                exitCode: exitCode, stderrHead: stderr, shellName: nil
+            ).message(host: host)
         case .notConnected:
-            "Not connected to \(host.name)."
+            String(localized: "Not connected to \(host.name).")
+        case .hostKeyRefused(let refusal):
+            switch refusal {
+            case .changed(let expected, let presented):
+                String(localized: """
+                    \(host.name) presented a different SSH host key than the one \
+                    Multiplex recorded. Either the server was rebuilt, or something \
+                    is impersonating it. Nothing was sent. \
+                    Recorded \(expected.fingerprint), got \(presented.fingerprint). \
+                    If you rebuilt it, forget the recorded key in Host Settings.
+                    """)
+            case .unrecognizedAlgorithm(let presented, _):
+                String(localized: """
+                    \(host.name) identified itself with a \(presented.algorithm) key, \
+                    which isn't among the keys Multiplex recorded for it. \
+                    Nothing was sent. If the server's host keys changed, forget the \
+                    recorded keys in Host Settings.
+                    """)
+            }
         }
     }
 }
@@ -252,6 +280,10 @@ actor SSHConnection {
     /// action lands during a background connection attempt.
     private var connectTask: Task<SSHClient, Error>?
     private var connectGeneration = 0
+    /// The host-key verdict for the in-flight attempt. NIO can box our
+    /// failure inside its own error types on the way out of `connect`, so the
+    /// refusal is read from here rather than pattern-matched off the throw.
+    private var hostKeyOutcome: HostKeyOutcome?
     private var stdinWriter: TTYStdinWriter?
     private var shellTask: Task<Void, Never>?
     /// Set by `close()`. A connect that was abandoned on a deadline can
@@ -281,6 +313,8 @@ actor SSHConnection {
             }
             #endif
             let method = try Self.makeAuthenticationMethod(host: host, secrets: secrets)
+            let (verifier, outcome) = HostKeyTrust.verifier(for: host)
+            hostKeyOutcome = outcome
             connectGeneration &+= 1
             generation = connectGeneration
             task = Task {
@@ -295,7 +329,9 @@ actor SSHConnection {
                     // connection is spliced through a one-shot localhost
                     // relay and Citadel dials it via its ordinary bootstrap.
                     // The relay tears itself down when either side closes, so
-                    // the client's own close() is its lifetime owner.
+                    // the client's own close() is its lifetime owner. The
+                    // host-key pin is keyed by host id, so it still binds
+                    // through the 127.0.0.1 hop.
                     let relay = TailscaleLoopbackRelay()
                     let relayPort = try relay.start(spliceTo: remote)
                     do {
@@ -303,7 +339,7 @@ actor SSHConnection {
                             host: "127.0.0.1",
                             port: Int(relayPort),
                             authenticationMethod: method,
-                            hostKeyValidator: .acceptAnything(),
+                            hostKeyValidator: .custom(verifier),
                             reconnect: .never
                         )
                     } catch {
@@ -319,7 +355,7 @@ actor SSHConnection {
                     host: host.hostname,
                     port: host.port,
                     authenticationMethod: method,
-                    hostKeyValidator: .acceptAnything(),
+                    hostKeyValidator: .custom(verifier),
                     reconnect: .never
                 )
             }
@@ -338,6 +374,12 @@ actor SSHConnection {
             throw error
         } catch {
             if generation == connectGeneration { connectTask = nil }
+            // The identity check comes first: a refused key must never read
+            // as "couldn't reach the host", which is the message people
+            // retry past without looking.
+            if let refusal = hostKeyOutcome?.refusal {
+                throw SSHConnectionError.hostKeyRefused(refusal)
+            }
             throw SSHConnectionError.connectFailed(shortDescription(of: error))
         }
     }
@@ -432,10 +474,58 @@ actor SSHConnection {
 
     // MARK: Exec (tmux probing)
 
-    func exec(_ command: String) async throws -> String {
+    /// Every exec answer is buffered whole before it is decoded, and the
+    /// server writes it — a host that streams without end (hostile, or just
+    /// a command that went wrong) would otherwise grow this until the app is
+    /// killed. The ceiling is far above what any caller here produces (probe
+    /// records, git output, a framed history tail); Citadel throws
+    /// `commandOutputTooLarge` past it, which callers already treat as a
+    /// failed command.
+    static let maxExecResponseBytes = 16 << 20
+    private static let maxExecStderrBytes = 2 << 10
+    private static let execLogger = Logger(subsystem: "app.multiplexterm.multiplex", category: "exec")
+
+    func exec(
+        _ command: String,
+        maxResponseBytes: Int = SSHConnection.maxExecResponseBytes
+    ) async throws -> String {
+        try await execute(
+            RemoteShellEnvelope.exec(command),
+            maxResponseBytes: maxResponseBytes
+        )
+    }
+
+    /// Only the login-shell diagnosis bypasses the envelope: it must still
+    /// answer when sh itself cannot start.
+    func diagnoseLoginShell() async throws -> String {
+        try await execute(RemoteShellDiagnosis.command, maxResponseBytes: Self.maxExecResponseBytes)
+    }
+
+    private func execute(_ command: String, maxResponseBytes: Int) async throws -> String {
         guard let client else { throw SSHConnectionError.notConnected }
-        let buffer = try await client.executeCommand(command)
-        return String(decoding: buffer.readableBytesView, as: UTF8.self)
+        var stdout = ByteBuffer()
+        var stderr = Data()
+        do {
+            let stream = try await client.executeCommandStream(command)
+            for try await chunk in stream {
+                switch chunk {
+                case .stdout(let buffer):
+                    guard buffer.readableBytes <= maxResponseBytes - stdout.readableBytes else {
+                        throw CitadelError.commandOutputTooLarge
+                    }
+                    stdout.writeImmutableBuffer(buffer)
+                case .stderr(let buffer):
+                    stderr.append(contentsOf: buffer.readableBytesView.prefix(Self.maxExecStderrBytes - stderr.count))
+                }
+            }
+        } catch let failure as SSHClient.CommandFailed {
+            let head = String(decoding: stderr, as: UTF8.self)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            // Escape line breaks for one log line; remote stderr can contain private data.
+            Self.execLogger.error("Command failed (exit \(failure.exitCode)): \(head.debugDescription, privacy: .private)")
+            throw SSHConnectionError.commandFailed(exitCode: failure.exitCode, stderr: head)
+        }
+        return String(decoding: stdout.readableBytesView, as: UTF8.self)
     }
 
     // MARK: SFTP (file drops)
@@ -490,7 +580,7 @@ actor SSHConnection {
                     }
                 }
                 guard let file else {
-                    throw DropError(message: "Couldn't create \(upload.preferredName)")
+                    throw DropError(message: String(localized: "Couldn't create \(upload.preferredName)"))
                 }
                 do {
                     let chunkSize = 512 * 1024
@@ -525,6 +615,185 @@ actor SSHConnection {
         }
     }
 
+    // MARK: SFTP (file viewer)
+
+    /// One remote directory entry as SFTP reported it — a transport-side
+    /// value so Citadel types never cross into Models. `permissions` carry
+    /// the S_IFMT type bits; readdir has lstat semantics, so a symlink
+    /// reports itself (the viewer stats on select to follow it).
+    struct DirectoryEntry: Sendable {
+        var name: String
+        var permissions: UInt32?
+
+        var isDirectory: Bool { isDirectoryMode(permissions) }
+    }
+
+    struct FileStat: Sendable, Equatable {
+        var size: UInt64?
+        var permissions: UInt32?
+        /// SFTP v3 mtime is whole seconds — good enough for the viewer's
+        /// change watch (paired with size).
+        var modified: Date?
+
+        var isDirectory: Bool { isDirectoryMode(permissions) }
+    }
+
+    /// The one S_IFMT read — both entry types answer through it.
+    private static func isDirectoryMode(_ permissions: UInt32?) -> Bool {
+        permissions.map { ($0 & 0o170000) == 0o040000 } ?? false
+    }
+
+    /// The server decides how many names come back, and the tree maps and
+    /// sorts every one of them. A directory past this is not something the
+    /// column can show anyway — the excess is dropped rather than retained.
+    static let maxDirectoryEntries = 20_000
+
+    func listDirectory(atPath path: String) async throws -> [DirectoryEntry] {
+        guard let client else { throw SSHConnectionError.notConnected }
+        return try await client.withSFTP { sftp in
+            var entries: [DirectoryEntry] = []
+            outer: for name in try await sftp.listDirectory(atPath: path) {
+                for component in name.components {
+                    let filename = component.filename
+                    guard filename != "." && filename != ".." else { continue }
+                    entries.append(DirectoryEntry(
+                        name: filename,
+                        permissions: component.attributes.permissions
+                    ))
+                    if entries.count >= SSHConnection.maxDirectoryEntries {
+                        break outer
+                    }
+                }
+            }
+            return entries
+        }
+    }
+
+    /// SFTP `stat` — follows symlinks, which is exactly what selecting a
+    /// tree row needs (a linked directory navigates, a linked file opens).
+    func statFile(atPath path: String) async throws -> FileStat {
+        guard let client else { throw SSHConnectionError.notConnected }
+        return try await client.withSFTP { sftp in
+            let attributes = try await sftp.getAttributes(at: path)
+            return FileStat(
+                size: attributes.size,
+                permissions: attributes.permissions,
+                modified: attributes.accessModificationTime?.modificationTime
+            )
+        }
+    }
+
+    func canonicalPath(atPath path: String) async throws -> String {
+        guard let client else { throw SSHConnectionError.notConnected }
+        return try await client.withSFTP { sftp in
+            try await sftp.getRealPath(atPath: path)
+        }
+    }
+
+    /// Read up to `limit` bytes. One SFTP READ is server-capped (commonly
+    /// 32–64 KB) and costs a full round trip, so chunks at precomputed
+    /// offsets are requested concurrently — request IDs are per-call and
+    /// outstanding READs on one handle are protocol-legal (OpenSSH's own
+    /// sftp client keeps dozens in flight); a serialized walk pays
+    /// size ÷ grant round trips, seconds of latency on a megabyte file.
+    /// `truncated` reports whether the file continued past the limit.
+    func readFile(
+        atPath path: String,
+        limit: Int
+    ) async throws -> (data: Data, truncated: Bool) {
+        guard let client else { throw SSHConnectionError.notConnected }
+        return try await client.withSFTP { sftp in
+            let file = try await sftp.openFile(filePath: path, flags: .read)
+            do {
+                let size = try await file.readAttributes().size
+                let result = try await Self.readChunks(of: file, size: size, limit: limit)
+                try await file.close()
+                return result
+            } catch {
+                try? await file.close()
+                throw error
+            }
+        }
+    }
+
+    private static let readChunkSize = 128 * 1024
+    private static let readsInFlight = 6
+
+    /// Fill one fixed slice: loops because a single READ may legally return
+    /// less than asked. A short result means EOF landed inside the slice.
+    private static func readChunk(
+        _ file: SFTPFile, offset: Int, length: Int
+    ) async throws -> Data {
+        var data = Data()
+        while data.count < length {
+            var buffer = try await file.read(
+                from: UInt64(offset + data.count),
+                length: UInt32(length - data.count)
+            )
+            guard buffer.readableBytes > 0,
+                  let piece = buffer.readData(length: buffer.readableBytes)
+            else { break }
+            data.append(piece)
+        }
+        return data
+    }
+
+    /// `limit + 1` is the read target — the one extra byte answers "did the
+    /// file continue?" without reading the rest. With the server-reported
+    /// size in hand the chunk plan is fixed up front and a bounded window
+    /// keeps `readsInFlight` requests going; assembly stops at the first
+    /// short chunk (the file shrank underneath us — the watch's next stat
+    /// reconciles). A server that reports no size gets the sequential walk.
+    private static func readChunks(
+        of file: SFTPFile, size: UInt64?, limit: Int
+    ) async throws -> (data: Data, truncated: Bool) {
+        let wanted = limit + 1
+        var data = Data()
+        if let size {
+            let total = Int(min(size, UInt64(wanted)))
+            let offsets = Array(stride(from: 0, to: total, by: readChunkSize))
+            var chunks = [Data?](repeating: nil, count: offsets.count)
+            try await withThrowingTaskGroup(of: (Int, Data).self) { group in
+                var next = 0
+                func addNext() {
+                    let offset = offsets[next]
+                    let length = min(readChunkSize, total - offset)
+                    let index = next
+                    group.addTask {
+                        (index, try await readChunk(file, offset: offset, length: length))
+                    }
+                    next += 1
+                }
+                while next < offsets.count, next < readsInFlight { addNext() }
+                while let (index, chunk) = try await group.next() {
+                    chunks[index] = chunk
+                    if next < offsets.count { addNext() }
+                }
+            }
+            // Assemble into one reserved buffer, releasing each chunk as it
+            // lands: at the media cap the pieces are 60 MB on their own, and
+            // holding them beside the growing whole doubled the peak.
+            data.reserveCapacity(total)
+            for index in chunks.indices {
+                guard let chunk = chunks[index] else { break }
+                chunks[index] = nil
+                data.append(chunk)
+                let planned = min(readChunkSize, total - offsets[index])
+                if chunk.count < planned { break }
+            }
+        } else {
+            while data.count < wanted {
+                let length = min(readChunkSize, wanted - data.count)
+                let chunk = try await readChunk(file, offset: data.count, length: length)
+                data.append(chunk)
+                if chunk.count < length { break }
+            }
+        }
+        let truncated = data.count > limit
+        if truncated { data = data.prefix(limit) }
+        return (data, truncated)
+    }
+
     // MARK: Interactive PTY shell
 
     /// Opens a PTY'd login shell. When `command` is set (tmux attach/create),
@@ -539,6 +808,7 @@ actor SSHConnection {
     ) async throws {
         guard let client else { throw SSHConnectionError.notConnected }
         guard shellTask == nil else { return }
+        let command = command.map { RemoteShellEnvelope.handoff($0) }
 
         let request = SSHChannelRequestEvent.PseudoTerminalRequest(
             wantReply: true,

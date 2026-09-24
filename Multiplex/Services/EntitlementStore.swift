@@ -1,7 +1,8 @@
 import Foundation
 import Observation
+import OSLog
 import StoreKit
-import SwiftUI
+import UIKit
 
 /// App-owned StoreKit values. Keeping this boundary smaller than StoreKit's
 /// concrete types lets the entitlement policy be exhaustively exercised even
@@ -63,9 +64,9 @@ private enum ProStoreClientError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingProduct:
-            "Multiplex Pro is not available from the App Store right now."
+            String(localized: "Multiplex Pro is not available from the App Store right now.")
         case .missingPurchasePresenter:
-            "The App Store purchase sheet could not be presented from this window."
+            String(localized: "The App Store purchase sheet could not be presented from this window.")
         }
     }
 }
@@ -76,10 +77,15 @@ private enum ProStoreClientError: LocalizedError {
 @MainActor
 struct ProStoreClient {
     var loadProduct: () async throws -> ProStoreProduct?
-    var purchase: (ProStoreProduct, PurchaseAction?) async throws -> ProStorePurchaseResult
+    var purchase: (ProStoreProduct, ProPurchasePresenter?) async throws -> ProStorePurchaseResult
     var currentEntitlements: () -> AsyncStream<ProStoreVerification>
     var updates: () -> AsyncStream<ProStoreVerification>
     var sync: () async throws -> Void
+    /// Whether StoreKit is serving Apple's test commerce environment
+    /// (TestFlight/sandbox) instead of the production App Store. Informs
+    /// explanatory paywall copy only — never entitlement. Defaulted so test
+    /// doubles that predate the probe keep compiling as production.
+    var isSandboxStoreEnvironment: () async -> Bool = { false }
 
     static let live = ProStoreClient(
         loadProduct: {
@@ -93,19 +99,8 @@ struct ProStoreClient {
             )
         },
         purchase: { product, presenter in
-            guard let product = product.product else { throw ProStoreClientError.missingProduct }
             guard let presenter else { throw ProStoreClientError.missingPurchasePresenter }
-            let result = try await presenter(product)
-            switch result {
-            case .success(let verification):
-                return .success(map(verification))
-            case .pending:
-                return .pending
-            case .userCancelled:
-                return .userCancelled
-            @unknown default:
-                return .unknown
-            }
+            return try await presenter(product)
         },
         currentEntitlements: {
             currentEntitlementStream()
@@ -115,10 +110,20 @@ struct ProStoreClient {
         },
         sync: {
             try await AppStore.sync()
+        },
+        isSandboxStoreEnvironment: {
+            // AppTransaction.shared may reach the network on a first ask; a
+            // failure simply keeps the production default, which only means
+            // the paywall skips its TestFlight explainer.
+            guard let result = try? await AppTransaction.shared else { return false }
+            switch result {
+            case .verified(let transaction), .unverified(let transaction, _):
+                return transaction.environment == .sandbox
+            }
         }
     )
 
-    private static func map(
+    fileprivate static func map(
         _ result: VerificationResult<StoreKit.Transaction>
     ) -> ProStoreVerification {
         switch result {
@@ -161,6 +166,61 @@ struct ProStoreClient {
     }
 }
 
+/// The app-owned purchase presentation seam. `EntitlementStore` and its test
+/// client deal only in app-owned product/result values; the live presenter is
+/// the one place that unwraps StoreKit's product and anchors its confirmation
+/// UI to the UIKit scene containing the paywall.
+///
+/// Capturing the scene weakly matters for multiwindow Multiplex: a presenter
+/// resolved in one terminal/deck window must never keep that scene alive or
+/// silently move a later purchase prompt to a different active window.
+@MainActor
+struct ProPurchasePresenter {
+    typealias Purchase = @MainActor (
+        ProStoreProduct
+    ) async throws -> ProStorePurchaseResult
+
+    private let purchase: Purchase
+
+    /// Injectable app-owned boundary used by StoreKit-independent tests.
+    init(purchase: @escaping Purchase) {
+        self.purchase = purchase
+    }
+
+    /// Production presenter for the paywall's actual hosting controller.
+    /// `confirmIn: UIScene` is available at the app's iOS 17 / visionOS 1
+    /// deployment floors, including visionOS where unanchored purchase is
+    /// unavailable.
+    init?(presenting viewController: UIViewController) {
+        guard let scene = viewController.viewIfLoaded?.window?.windowScene else {
+            return nil
+        }
+        self.init { [weak scene] product in
+            guard let product = product.product else {
+                throw ProStoreClientError.missingProduct
+            }
+            guard let scene else {
+                throw ProStoreClientError.missingPurchasePresenter
+            }
+            let result = try await product.purchase(confirmIn: scene)
+            switch result {
+            case .success(let verification):
+                return .success(ProStoreClient.map(verification))
+            case .pending:
+                return .pending
+            case .userCancelled:
+                return .userCancelled
+            @unknown default:
+                return .unknown
+            }
+        }
+    }
+
+    func callAsFunction(_ product: ProStoreProduct) async throws -> ProStorePurchaseResult {
+        try await purchase(product)
+    }
+}
+
 /// Owns every decision about whether Multiplex Pro is available.
 ///
 /// The rest of the app asks this type about capabilities; StoreKit product and
@@ -172,6 +232,7 @@ final class EntitlementStore {
     static let proProductID = "app.multiplexterm.multiplex.pro"
     static let freeHostLimit = 2
     static let dailySlashChipLimit = 10
+    static let freeKeyCommandLimit = 5
 
     enum CommerceState: Equatable {
         case idle
@@ -204,6 +265,11 @@ final class EntitlementStore {
         let task: Task<Bool, Never>
     }
 
+    private static let logger = Logger(
+        subsystem: "app.multiplexterm.multiplex",
+        category: "commerce"
+    )
+
     private static let unlockedKey = "MultiplexProUnlocked"
     private static let slashChipDayKey = "MultiplexSlashChipDay"
     private static let slashChipCountKey = "MultiplexSlashChipCount"
@@ -218,6 +284,7 @@ final class EntitlementStore {
     @ObservationIgnored private var entitlementRefresh: EntitlementRefresh?
     @ObservationIgnored private var bootstrapTask: Task<Void, Never>?
     @ObservationIgnored private var transactionTask: Task<Void, Never>?
+    @ObservationIgnored private var environmentProbeTask: Task<Void, Never>?
 
     private var commerceOperation: CommerceOperation?
     /// Changes whenever an authoritative purchase/restore/update begins. The
@@ -243,6 +310,11 @@ final class EntitlementStore {
     #endif
 
     private(set) var isPro: Bool
+    /// True when this install talks to Apple's test store (TestFlight or the
+    /// developer sandbox). A production purchase can never be restored across
+    /// that boundary, so the paywall explains an empty restore instead of
+    /// letting it read as a failure.
+    private(set) var storeEnvironmentIsSandbox = false
     private(set) var productDisplayPrice: String?
     private(set) var productIsLoading = false
     private(set) var productLoadError: String?
@@ -270,6 +342,14 @@ final class EntitlementStore {
         isPro || existingHostCount < Self.freeHostLimit
     }
 
+    /// The free tier keeps five Key Commands; Pro lifts the set to its full
+    /// cap. Like hosts, a set that already holds more (synced from a Pro
+    /// device, or after an entitlement lapse) is never trimmed or disabled —
+    /// the panel enforces this only before an add.
+    var keyCommandLimit: Int {
+        isPro ? KeyCommandSet.maximumCount : Self.freeKeyCommandLimit
+    }
+
     /// Turning on mosh is Pro intent; a record that already has it remains
     /// usable/editable after sync or a temporary entitlement loss.
     func canEnableMosh(currentlyEnabled: Bool) -> Bool {
@@ -281,6 +361,10 @@ final class EntitlementStore {
     /// The HISTORY surface (reading agent session files + jump-to-message)
     /// is a Pro helper like the strip's commands; detection stays free.
     var canBrowseAgentHistory: Bool { isPro }
+    /// The Connection Stats panel (fleet board + host drill-in). The rail
+    /// chip's live number stays free — it is the standing advertisement —
+    /// and collection is passive either way; only the panel is the product.
+    var canViewConnectionStats: Bool { isPro }
 
     /// Slash commands alone consume the taste meter. Keyboard-equivalent
     /// helper chips do not call this API.
@@ -338,6 +422,13 @@ final class EntitlementStore {
             await self.refreshEntitlements(ifAuthorityUnchangedSince: bootstrapAuthority)
             await self.loadStorefront()
         }
+        // Independent of bootstrap so a slow AppTransaction fetch can never
+        // delay the entitlement snapshot or the storefront load.
+        environmentProbeTask = Task { [weak self] in
+            guard let self else { return }
+            let sandbox = await self.storeClient.isSandboxStoreEnvironment()
+            self.storeEnvironmentIsSandbox = sandbox
+        }
     }
 
     /// Loads the App Store's localized product metadata. A missing product is
@@ -361,11 +452,17 @@ final class EntitlementStore {
                 do {
                     guard let product = try await storeClient.loadProduct(),
                           product.id == Self.proProductID else {
-                        return .failed("Multiplex Pro is not available from the App Store right now.")
+                        Self.logger.error("product load returned no Pro product")
+                        return .failed(String(
+                            localized: "Multiplex Pro is not available from the App Store right now."
+                        ))
                     }
                     return .loaded(product)
                 } catch {
-                    return .failed(error.localizedDescription)
+                    Self.logger.error(
+                        "product load failed: \(String(describing: error), privacy: .public)"
+                    )
+                    return .failed(Self.storeErrorMessage(error))
                 }
             }
             load = ProductLoad(id: id, task: task)
@@ -390,12 +487,13 @@ final class EntitlementStore {
     }
 
     /// Purchases the non-consumable. Returns true only when Pro is owned after
-    /// verified transaction processing (or was already owned). The scene's
-    /// PurchaseAction is injected because visionOS must anchor confirmation
-    /// to an active window; the product and result stay inside this service.
+    /// verified transaction processing (or was already owned). The app-owned
+    /// presenter is resolved from the paywall's hosting controller because
+    /// visionOS must anchor confirmation to that active window; StoreKit's
+    /// product and result stay behind this service boundary.
     @discardableResult
-    func purchasePro(using purchaseAction: PurchaseAction) async -> Bool {
-        await performPurchase(using: purchaseAction)
+    func purchasePro(using purchasePresenter: ProPurchasePresenter?) async -> Bool {
+        await performPurchase(using: purchasePresenter)
     }
 
     #if DEBUG
@@ -408,7 +506,7 @@ final class EntitlementStore {
     }
     #endif
 
-    private func performPurchase(using purchaseAction: PurchaseAction?) async -> Bool {
+    private func performPurchase(using purchasePresenter: ProPurchasePresenter?) async -> Bool {
         if isPro {
             commerceState = .purchased
             return true
@@ -423,23 +521,25 @@ final class EntitlementStore {
         }
         guard let product = proProduct else {
             return settlePurchase(withFallback: .failed(
-                productLoadError ?? "Multiplex Pro is not available from the App Store right now."
+                productLoadError
+                    ?? String(localized: "Multiplex Pro is not available from the App Store right now.")
             ))
         }
 
         do {
-            let result = try await storeClient.purchase(product, purchaseAction)
+            let result = try await storeClient.purchase(product, purchasePresenter)
 
             switch result {
             case .success(.unverified):
+                Self.logger.error("purchase returned an unverified transaction")
                 return settlePurchase(withFallback: .failed(
-                    "The App Store transaction could not be verified."
+                    String(localized: "The App Store transaction could not be verified.")
                 ))
 
             case .success(.verified(let transaction)):
                 guard transactionGrantsPro(transaction) else {
                     return settlePurchase(withFallback: .failed(
-                        "The purchase is not an active Multiplex Pro entitlement."
+                        String(localized: "The purchase is not an active Multiplex Pro entitlement.")
                     ))
                 }
                 advanceEntitlementAuthority()
@@ -470,11 +570,14 @@ final class EntitlementStore {
 
             case .unknown:
                 return settlePurchase(withFallback: .failed(
-                    "The App Store returned an unknown purchase result."
+                    String(localized: "The App Store returned an unknown purchase result.")
                 ))
             }
         } catch {
-            return settlePurchase(withFallback: .failed(error.localizedDescription))
+            Self.logger.error(
+                "purchase failed: \(String(describing: error), privacy: .public)"
+            )
+            return settlePurchase(withFallback: .failed(Self.storeErrorMessage(error)))
         }
     }
 
@@ -516,9 +619,55 @@ final class EntitlementStore {
                 commerceState = .restored
                 return true
             }
-            commerceState = .failed(error.localizedDescription)
+            Self.logger.error(
+                "restore sync failed: \(String(describing: error), privacy: .public)"
+            )
+            // TestFlight's commerce backend routinely fails AppStore.sync()
+            // with internal errors (SKInternalErrorDomain) even while the
+            // entitlement query works. A snapshot begun NOW is current
+            // StoreKit truth — newer than the failed sync — so a verified
+            // ownership it reports completes the restore. Promotion only:
+            // an EMPTY answer beside a failed sync is the same backend
+            // flakiness and must not revoke ownership already established.
+            let fallbackAuthority = entitlementAuthority
+            let entitled = await currentOwnershipSnapshot()
+            if entitlementAuthority == fallbackAuthority {
+                if entitled {
+                    advanceEntitlementAuthority()
+                    invalidateEntitlementRefresh()
+                    storeEntitled = true
+                    #if DEBUG
+                    debugOverride = nil
+                    #endif
+                    recomputeProStatus()
+                    purchaseAwaitingApproval = false
+                    commerceState = .restored
+                    return true
+                }
+            } else if storeEntitled {
+                // A newer StoreKit event established ownership while the
+                // fallback snapshot ran; it owns the outcome.
+                purchaseAwaitingApproval = false
+                commerceState = .restored
+                return true
+            }
+            commerceState = .failed(Self.storeErrorMessage(error))
             return false
         }
+    }
+
+    /// One fresh pass over `currentEntitlements`, published nowhere — the
+    /// failed-sync fallback's evidence gathering.
+    private func currentOwnershipSnapshot() async -> Bool {
+        let entitlementDate = now()
+        var entitled = false
+        for await result in storeClient.currentEntitlements() {
+            guard case .verified(let transaction) = result,
+                  Self.transactionGrantsPro(transaction, at: entitlementDate)
+            else { continue }
+            entitled = true
+        }
+        return entitled
     }
 
     /// Rebuilds ownership from verified current App Store entitlements. A
@@ -675,7 +824,9 @@ final class EntitlementStore {
                     switch (wasAwaitingApproval, commerceState) {
                     case (true, _):
                         commerceState = .failed(
-                            "The pending purchase did not grant an active Multiplex Pro entitlement."
+                            String(
+                                localized: "The pending purchase did not grant an active Multiplex Pro entitlement."
+                            )
                         )
                     case (false, .purchased):
                         commerceState = .idle
@@ -685,9 +836,14 @@ final class EntitlementStore {
                 }
                 await transaction.finish()
             case .unverified(let productID):
+                Self.logger.error(
+                    "unverified transaction update for \(productID ?? "?", privacy: .public)"
+                )
                 guard productID == Self.proProductID, purchaseAwaitingApproval else { continue }
                 purchaseAwaitingApproval = false
-                commerceState = .failed("The App Store transaction could not be verified.")
+                commerceState = .failed(
+                    String(localized: "The App Store transaction could not be verified.")
+                )
             }
         }
     }
@@ -720,6 +876,48 @@ final class EntitlementStore {
         }
         commerceState = fallback
         return false
+    }
+
+    /// StoreKit's `localizedDescription` collapses most failures into "An
+    /// unknown error occurred", which is undiagnosable from a screenshot of
+    /// the paywall (the shape of the App Review sandbox reports). Name the
+    /// known StoreKit failure modes in actionable copy; anything else keeps
+    /// its own description.
+    static func storeErrorMessage(_ error: Error) -> String {
+        switch error {
+        case StoreKitError.networkError:
+            return String(localized: """
+                The App Store could not be reached. Check the internet \
+                connection and try again.
+                """)
+        case StoreKitError.systemError(let underlying):
+            return String(localized: "The App Store reported a system error. (\(underlying.localizedDescription))")
+        case StoreKitError.notAvailableInStorefront:
+            return String(localized: "Multiplex Pro is not available in this App Store storefront.")
+        case StoreKitError.notEntitled:
+            return String(localized: "This copy of the app is not entitled to App Store purchases.")
+        case StoreKitError.unknown:
+            return String(localized: "The App Store could not complete the request. Try again in a moment.")
+        case Product.PurchaseError.purchaseNotAllowed:
+            return String(localized: "Purchases are not allowed for this Apple ID on this device.")
+        case Product.PurchaseError.productUnavailable:
+            return String(localized: "Multiplex Pro is not available for purchase right now.")
+        default:
+            // An error with no authored description renders as the opaque
+            // "operation couldn't be completed (SKInternalErrorDomain error
+            // 14)" shape — say something actionable and keep the code as a
+            // diagnostic suffix. Bridged Swift errors carry no userInfo, so
+            // LocalizedError's authored message must be consulted directly.
+            let nsError = error as NSError
+            if nsError.userInfo[NSLocalizedDescriptionKey] == nil,
+               (error as? LocalizedError)?.errorDescription == nil {
+                return String(localized: """
+                    The App Store could not complete the request. Check that this device is \
+                    signed in to the App Store, then try again. (\(nsError.domain) \(nsError.code))
+                    """)
+            }
+            return error.localizedDescription
+        }
     }
 
     /// One policy function serves both compilation modes, so tests can pin

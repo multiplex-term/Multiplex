@@ -80,8 +80,7 @@ final class NetworkChangeMonitor {
             // First unsatisfied update starts the clock; repeats while it
             // runs must not push the deadline out.
             offlineTask = Task { [weak self] in
-                do { try await Task.sleep(for: Self.settleDelay) }
-                catch { return }
+                do { try await Task.sleep(for: Self.settleDelay) } catch { return }
                 guard let self, self.monitor != nil else { return }
                 self.offlineTask = nil
                 self.isOffline = true
@@ -90,11 +89,14 @@ final class NetworkChangeMonitor {
         guard detector.register(snapshot) else { return }
         settleTask?.cancel()
         settleTask = Task { [weak self] in
-            do { try await Task.sleep(for: Self.settleDelay) }
-            catch { return }
+            do { try await Task.sleep(for: Self.settleDelay) } catch { return }
             guard let self, self.monitor != nil else { return }
             self.settleTask = nil
             self.reconnectRevision &+= 1
+            // The stats board's NET counter records at the mint, not at a
+            // consumer — the deck's reconnect fan-out is gated on scene
+            // activity and would undercount.
+            ConnectionStatsCenter.shared.recordNetworkChange()
         }
     }
 }

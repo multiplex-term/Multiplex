@@ -75,7 +75,7 @@ struct FleetWidgetView: View {
             HStack {
                 WidgetLabel("multiplex · fleet", size: 10)
                 Spacer(minLength: 4)
-                Text("\(entry.hosts.count) HOSTS · \(sessionCount) SESS")
+                Text(verbatim: "\(entry.hosts.count) HOSTS · \(sessionCount) SESS")
                     .font(.widgetMono(7.5))
                     .foregroundStyle(palette.signal3)
             }
@@ -106,8 +106,13 @@ struct FleetWidgetView: View {
 
     private func hostRow(_ host: WidgetHostState) -> some View {
         HStack(spacing: 8) {
+            let session = host.featuredSession()
             Link(destination: WidgetLink.shellURL(
-                hostID: host.id, sessionName: host.mostRecentSession?.name
+                hostID: host.id, sessionName: session?.name,
+                // The row's own backend, present only where the host shows
+                // more than one — without it a same-named session on the
+                // other multiplexer could answer the tap.
+                backendRaw: session?.backendRaw
             )) {
                 HStack(spacing: 6) {
                     WidgetLabel(
@@ -132,7 +137,7 @@ struct FleetWidgetView: View {
                 }
                 Link(destination: WidgetLink.agentURL(
                     hostID: host.id,
-                    agentRaw: host.mostRecentSession?.agentRaw ?? "claudeCode",
+                    agentRaw: session?.agentRaw ?? "claudeCode",
                     askForPrompt: false
                 )) {
                     keyChip("✳")
@@ -195,7 +200,8 @@ struct FleetWidgetView: View {
             ) {
                 ForEach(tiles) { tile in
                     Link(destination: WidgetLink.shellURL(
-                        hostID: tile.host.id, sessionName: tile.session?.name
+                        hostID: tile.host.id, sessionName: tile.session?.name,
+                        backendRaw: tile.session?.backendRaw
                     )) {
                         tileView(tile)
                     }
@@ -212,9 +218,9 @@ struct FleetWidgetView: View {
                 if let session = tile.session, !session.miniatureLines.isEmpty {
                     MiniatureScreen(lines: session.miniatureLines, fontSize: 7)
                 } else if tile.session != nil {
-                    HatchScreen(caption: "No recent frame")
+                    HatchScreen(caption: String(localized: "No recent frame"))
                 } else {
-                    HatchScreen(caption: "No recent data")
+                    HatchScreen(caption: String(localized: "No recent data"))
                 }
             }
             HStack {

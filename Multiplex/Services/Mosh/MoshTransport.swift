@@ -68,6 +68,9 @@ struct MoshTransportEngine {
     private var totalEvents: Int { eventOffset + events.count }
 
     private var sentStates: [SentState]
+    /// The acked front's event count — everything before it is confirmed
+    /// received. `sentStates[0]` is the known front by construction.
+    private var confirmedEventCount: Int { sentStates[0].eventCount }
     private var assumedReceiverNum: UInt64 = 0
     private var nextAckTime: UInt64
     private var nextSendTime: UInt64?
@@ -206,7 +209,7 @@ struct MoshTransportEngine {
         guard let index = sentStates.firstIndex(where: { $0.num == ackNum }) else { return }
         sentStates.removeFirst(index)
         // rationalize_states: everyone agrees on the acked prefix — drop it.
-        let confirmed = sentStates[0].eventCount
+        let confirmed = confirmedEventCount
         if confirmed > eventOffset {
             events.removeFirst(confirmed - eventOffset)
             eventOffset = confirmed
@@ -436,6 +439,23 @@ struct MoshTransportEngine {
     /// ms since the server was last heard — drives the contact lamp.
     func quiet(now: UInt64) -> UInt64 {
         now - min(lastHeard, now)
+    }
+
+    /// Snapshot of the counters the engine keeps as part of the protocol —
+    /// the stats feature's read surface. Pure aggregation, no side effects;
+    /// `roamCount` is the session's socket bookkeeping, passed through so
+    /// the report is complete in one value.
+    func linkReport(roamCount: Int) -> MoshLinkReport {
+        MoshLinkReport(
+            srttMilliseconds: packets.srtt,
+            rttVarianceMilliseconds: packets.rttvar,
+            packetsHeard: packetsHeard,
+            packetsExpected: Int(min(
+                packets.receivedDatagramCount, UInt64(Int.max)
+            )),
+            unackedEvents: max(0, totalEvents - confirmedEventCount),
+            roamCount: roamCount
+        )
     }
 }
 

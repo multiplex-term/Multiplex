@@ -5,8 +5,8 @@ submission (ship-blocker #4 in the release playbook).*
 
 **Effective:** <date of publication>
 
-Multiplex is an SSH/tmux terminal for Apple Vision Pro and iPad, made by
-Jhen-Jie Hong (Bricks). It is built so that we cannot see your data.
+Multiplex is an SSH/tmux terminal for Apple Vision Pro, iPad, and iPhone,
+made by Jhen-Jie Hong (Bricks). It is built so that we cannot see your data.
 
 ## What we collect
 
@@ -29,11 +29,16 @@ credentials, keys, terminal content, or usage.
 ## Permissions the app may request
 
 - **Camera** — only after you choose Camera from the terminal's FILE menu on
-  iPad, to capture a photo you explicitly send to your remote SSH session.
-  Optional; Photos and Files use Apple's system pickers.
+  iPad or iPhone, to capture a photo you explicitly send to your remote SSH
+  session. Optional; Photos and Files use Apple's system pickers.
 - **Notifications** — only to alert you when a CLI agent in one of your
   sessions finishes or needs input. Processed entirely on device; optional.
 - **Local Network** — only to connect to SSH hosts on your own network.
+- **Face ID / Optic ID** — only if you turn on the optional App Lock setting,
+  to unlock the app (Touch ID and the device passcode are the system
+  fallbacks). Authentication is performed entirely by the system; the app
+  never sees biometric data, only whether the unlock succeeded. The setting
+  stays on that device and never syncs.
 
 ## Purchases
 

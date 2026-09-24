@@ -6,9 +6,13 @@
 #   bundle exec fastlane tests                 # unit tests (visionOS sim)
 #   bundle exec fastlane beta                  # archive + upload BOTH platforms to TestFlight
 #   bundle exec fastlane beta platform:visionos
+#   bundle exec fastlane beta external:true    # + add to the external group, submit for review
+#   bundle exec fastlane beta external:true submit_review:false   # add, don't submit
 #   bundle exec fastlane store_metadata        # push metadata to BOTH platform versions
 #   bundle exec fastlane store_metadata platform:visionos
 #   bundle exec fastlane store_screenshots     # push fastlane/screenshots → App Store Connect
+#   bundle exec fastlane testflight_group      # create/verify the external group
+#   bundle exec fastlane testflight_info       # push TestFlight Test Information
 #
 # The Xcode project is XcodeGen-generated: every lane regenerates it first, so
 # lanes work from a clean checkout. Build numbers use YYYYMMDDN, where N is
@@ -17,6 +21,11 @@
 
 default_platform(:ios)
 
+# App Store Connect's field caps and the vetted glyph set, shared with
+# `ruby Tools/check-metadata.rb` — the Linux CI job that fails a pull request
+# in seconds with the same numbers this file would fail an archive on.
+require_relative "../Tools/metadata_limits"
+
 PROJECT = "Multiplex.xcodeproj"
 SCHEME  = "Multiplex"
 
@@ -24,6 +33,11 @@ DESTINATIONS = {
   "ios"      => { generic: "generic/platform=iOS",      pilot: "ios"  },
   "visionos" => { generic: "generic/platform=visionOS", pilot: "xros" },
 }.freeze
+
+# The one external TestFlight group. Invitation only by construction: it is
+# created with no public link, so a tester joins by an emailed invite and the
+# seat cannot be forwarded on.
+EXTERNAL_GROUP = ENV.fetch("TESTFLIGHT_EXTERNAL_GROUP", "Multiplex Beta")
 
 def asc_api_key
   app_store_connect_api_key(
@@ -66,24 +80,247 @@ def generate_project
   sh("cd .. && xcodegen generate")
 end
 
-def whats_new
+# The build's What to Test. AGENTS.md asks every user-visible commit to append
+# here, so by upload time the file is the release's tester script. Internal
+# builds may go out without one; an external build reaches real testers and a
+# placeholder would be the first thing they read.
+#
+# App Store Connect caps whatsNew at 4,000 characters, same as the review
+# notes — and for the same reason it is checked here rather than left to the
+# API: a file that grew past the cap across a beta cycle otherwise fails after
+# both platform archives, as Spaceship's opaque "An attribute value is too
+# long. - /data/attributes/whatsNew". Measured in CHARACTERS, which is what the
+# API counts; this file's bullets and arrows make its byte length run higher.
+WHATS_NEW_LIMIT = MetadataLimits::WHATS_NEW
+
+def whats_new(external)
   path = File.expand_path("testflight-whats-new.txt", __dir__)
-  File.exist?(path) ? File.read(path) : "Internal build."
+  body = File.exist?(path) ? File.read(path) : ""
+  if body.strip.empty?
+    UI.user_error!("Write #{path} before distributing externally") if external
+    return "Internal build."
+  end
+  if body.strip.length > WHATS_NEW_LIMIT
+    UI.user_error!(
+      "What to Test is too long: #{path} is #{body.strip.length} characters, " \
+      "App Store Connect allows #{WHATS_NEW_LIMIT}. Condense it to this " \
+      "release's tester script.",
+    )
+  end
+  body
 end
 
-# Beta App Review contact + demo host. TestFlight external review and App
-# Store review both need a reachable SSH demo host — see
-# docs/appstore/release-playbook.md for the demo-host runbook.
+# Deliver has one shared metadata path, so inject the fields that differ
+# between App Store platform versions instead of duplicating every shared file.
+# App Store Connect caps both localized fields at 4,000 characters.
+PLATFORM_LOCALIZED_LIMITS = MetadataLimits::LOCALIZED.slice("description", "release_notes").freeze
+
+def platform_localized_metadata(field, platform)
+  field = field.to_s
+  pattern = File.expand_path("metadata/*/#{field}_#{platform}.txt", __dir__)
+  localized = Dir.glob(pattern).sort.each_with_object({}) do |path, values|
+    body = File.read(path).strip
+    UI.user_error!("Platform metadata is empty: #{path}") if body.empty?
+    limit = PLATFORM_LOCALIZED_LIMITS.fetch(field)
+    if body.length > limit
+      UI.user_error!(
+        "Platform metadata is too long: #{path} is #{body.length} characters; " \
+        "App Store Connect allows #{limit}",
+      )
+    end
+    values[File.basename(File.dirname(path))] = body
+  end
+  UI.user_error!("No #{field} found for #{platform} (expected #{pattern})") if localized.empty?
+  localized
+end
+
+# Review information is ONE record, read once and handed to both reviews:
+# deliver's `app_review_information` (App Store) and pilot's
+# `beta_app_review_info` (TestFlight Beta App Review). They only differ in
+# how the two tools spell the fields, so mapping beats maintaining a second
+# copy — a reviewer contact or demo credential can never drift between them.
+#
+# Values live in fastlane/metadata/review_information/*.txt, deliver's own
+# convention. The two files deliberately kept out of git (phone_number,
+# demo_password) fall back to fastlane/.env. Both reviews need a reachable
+# SSH demo host — see docs/appstore/release-playbook.md for its runbook.
+REVIEW_INFORMATION = {
+  # deliver's key  => .env fallback for the git-ignored files
+  first_name:    "REVIEW_CONTACT_FIRST",
+  last_name:     "REVIEW_CONTACT_LAST",
+  phone_number:  "REVIEW_CONTACT_PHONE",
+  email_address: "REVIEW_CONTACT_EMAIL",
+  demo_user:     "DEMO_SSH_USER",
+  demo_password: "DEMO_SSH_PASSWORD",
+  notes:         nil,
+}.freeze
+
+# App Store Connect's own caps on these fields, enforced here so an over-long
+# note fails the lane on the file that can fix it — before an archive — instead
+# of surfacing mid-upload as Spaceship's opaque "An attribute value is too
+# long. - /data/attributes/notes". Measured in CHARACTERS, which is what the
+# API counts: notes.txt is full of em dashes and arrows, so its byte length
+# runs several hundred over its character length.
+REVIEW_INFORMATION_LIMITS = {
+  notes: MetadataLimits::REVIEW_NOTES,
+}.freeze
+
+# deliver's key => pilot's key for the same App Store Connect field.
+BETA_REVIEW_INFORMATION = {
+  first_name:    :contact_first_name,
+  last_name:     :contact_last_name,
+  phone_number:  :contact_phone,
+  email_address: :contact_email,
+  demo_user:     :demo_account_name,
+  demo_password: :demo_account_password,
+  notes:         :notes,
+}.freeze
+
+def review_value(key)
+  env_key = REVIEW_INFORMATION.fetch(key)
+  path = File.expand_path("metadata/review_information/#{key}.txt", __dir__)
+  value = File.exist?(path) ? File.read(path).strip : ""
+  value = ENV.fetch(env_key, "").strip if value.empty? && env_key
+  if value.empty?
+    hint = env_key ? " (or set #{env_key} in fastlane/.env)" : ""
+    UI.user_error!("Review information is missing: write #{path}#{hint}")
+  end
+  limit = REVIEW_INFORMATION_LIMITS[key]
+  if limit && value.length > limit
+    UI.user_error!(
+      "Review information is too long: #{key} is #{value.length} characters, " \
+      "App Store Connect allows #{limit}. Trim #{path}."
+    )
+  end
+  value
+end
+
+def app_review_information
+  REVIEW_INFORMATION.keys.each_with_object({}) { |key, info| info[key] = review_value(key) }
+end
+
+# The App Review demo video (a screen recording of the reviewer flow against
+# the demo host) rides the iOS version's review record only; visionOS
+# deliberately carries none. The file is git-ignored like the .env secrets —
+# returns nil when absent, and deliver REMOVES any remote attachment on a
+# push without one, so restore the file before store_metadata when the
+# attachment should survive.
+def review_attachment_path
+  path = File.expand_path("multiplex-ios-demo.mp4", __dir__)
+  return path if File.exist?(path)
+
+  UI.important("fastlane/multiplex-ios-demo.mp4 is missing — this push removes the iOS review attachment")
+  nil
+end
+
 def beta_review_info
-  {
-    contact_email:      ENV.fetch("REVIEW_CONTACT_EMAIL", "iainst0409@gmail.com"),
-    contact_first_name: ENV.fetch("REVIEW_CONTACT_FIRST", "Jhen-Jie"),
-    contact_last_name:  ENV.fetch("REVIEW_CONTACT_LAST", "Hong"),
-    contact_phone:      ENV.fetch("REVIEW_CONTACT_PHONE"),
-    demo_account_name:  ENV.fetch("DEMO_SSH_USER"),
-    demo_account_password: ENV.fetch("DEMO_SSH_PASSWORD"),
-    notes: File.read(File.expand_path("metadata/review_information/notes.txt", __dir__)),
-  }
+  info = app_review_information.each_with_object({}) do |(key, value), beta|
+    beta[BETA_REVIEW_INFORMATION.fetch(key)] = value
+  end
+  # deliver derives this from a filled-in demo account; pilot wants it stated.
+  info[:demo_account_required] = true
+  info
+end
+
+def locale_metadata(locale, key)
+  path = File.expand_path("metadata/#{locale}/#{key}.txt", __dir__)
+  return nil unless File.exist?(path)
+
+  value = File.read(path).strip
+  value.empty? ? nil : value
+end
+
+# TestFlight's Test Information: the app-level description testers read, plus
+# the feedback address. App Store Connect **requires** the description before
+# it will accept an external submission — a build uploads and lands in the
+# group fine without it, then the Beta App Review submission fails with
+# "Beta App Description is missing", which is what an unset record looks like.
+#
+# Locale-keyed on purpose, matching pilot's `localized_app_info`. Its flat
+# `beta_app_description`/`beta_app_feedback_email` options only PATCH
+# localizations that already exist, so on an app whose Test Information has
+# never been set they iterate an empty list and silently write nothing.
+#
+# The feedback address is the review contact record, so a tester and a
+# reviewer can never be told to write to different places; the URLs are the
+# listing's own. Only the description is a file of its own.
+def beta_test_information
+  pattern = File.expand_path("metadata/*/beta_app_description.txt", __dir__)
+  paths = Dir.glob(pattern).sort
+  UI.user_error!("No TestFlight description found (expected #{pattern})") if paths.empty?
+
+  email = review_value(:email_address)
+  paths.each_with_object({}) do |path, info|
+    body = File.read(path).strip
+    UI.user_error!("TestFlight description is empty: #{path}") if body.empty?
+
+    locale = File.basename(File.dirname(path))
+    info[locale] = {
+      description: body,
+      feedback_email: email,
+      marketing_url: locale_metadata(locale, "marketing_url"),
+      privacy_policy_url: locale_metadata(locale, "privacy_url"),
+    }.compact
+  end
+end
+
+# Written straight through Spaceship rather than handed to pilot, so one code
+# path serves both the upload and the standalone `testflight_info` lane — and
+# so a submission blocked on missing Test Information can be repaired without
+# archiving anything.
+def push_beta_test_information(info_by_locale)
+  app = asc_app
+  existing = app.get_beta_app_localizations.each_with_object({}) do |localization, by_locale|
+    by_locale[localization.locale] = localization
+  end
+
+  info_by_locale.each do |locale, info|
+    attributes = {
+      description: info[:description],
+      feedbackEmail: info[:feedback_email],
+      marketingUrl: info[:marketing_url],
+      privacyPolicyUrl: info[:privacy_policy_url],
+    }.compact
+
+    if (localization = existing[locale])
+      Spaceship::ConnectAPI.patch_beta_app_localizations(localization_id: localization.id, attributes: attributes)
+      UI.message("Updated TestFlight Test Information (#{locale})")
+    else
+      Spaceship::ConnectAPI.post_beta_app_localizations(app_id: app.id, attributes: attributes.merge(locale: locale))
+      UI.message("Created TestFlight Test Information (#{locale})")
+    end
+  end
+end
+
+def asc_app
+  identifier = CredentialsManager::AppfileConfig.try_fetch_value(:app_identifier)
+  app = Spaceship::ConnectAPI::App.find(identifier)
+  UI.user_error!("No App Store Connect app record for #{identifier}") if app.nil?
+  app
+end
+
+# pilot silently skips a `groups:` name App Store Connect does not know, so
+# the group has to exist before a build asks to be distributed to it.
+# Invitation only means no public link — and an existing group that grew one
+# gets it taken away again rather than being quietly accepted.
+def ensure_external_group(name)
+  app = asc_app
+  group = app.get_beta_groups(filter: { name: name }).find { |candidate| candidate.name == name }
+
+  if group.nil?
+    UI.message("Creating invitation-only TestFlight group '#{name}'")
+    group = Spaceship::ConnectAPI.create_beta_group(
+      app_id: app.id,
+      group_name: name,
+      is_internal_group: false,
+      public_link_enabled: false,
+      public_link_limit_enabled: false,
+    ).to_models.first
+  else
+    UI.message("TestFlight group '#{name}' is present")
+  end
+
+  group
 end
 
 lane :tests do
@@ -118,13 +355,48 @@ lane :archive do |options|
   ipa
 end
 
-desc "Upload to TestFlight. platform:ios|visionos or omit for both. external:true to distribute to the external group after processing."
+desc "Create or verify the invitation-only external TestFlight group."
+lane :testflight_group do
+  asc_api_key
+  ensure_external_group(EXTERNAL_GROUP)
+end
+
+desc "Push TestFlight Test Information (beta app description, feedback email, URLs). Uploads no binary."
+lane :testflight_info do
+  info = beta_test_information
+  asc_api_key
+  push_beta_test_information(info)
+end
+
+desc "Upload to TestFlight. platform:ios|visionos or omit for both. " \
+     "external:true adds the build to the external group; submit_review:false " \
+     "stages it there without posting the Beta App Review submission."
 lane :beta do |options|
   platforms = options[:platform] ? [options[:platform]] : DESTINATIONS.keys
   platforms.each { |platform| DESTINATIONS.fetch(platform) }
+  external = options[:external] == true
+  # Adding a build to the group and submitting it for Beta App Review are two
+  # separate calls, so they can be taken separately: submit_review:false lands
+  # the build in Public Beta and leaves the submission for later (Apple still
+  # gates external testers on that review — the build waits until it passes).
+  # Only meaningful with external:true; pilot ignores it otherwise.
+  submit_review = options[:submit_review] != false
+  # Resolve all three before archiving, so a missing note, review field, or
+  # Test Information file fails in seconds rather than after two platform
+  # archives. The review record is written either way — a later submission
+  # then already has it.
+  changelog = whats_new(external)
+  review_info = external ? beta_review_info : nil
+  test_information = external ? beta_test_information : nil
   number = bump_build_number
   generate_project
   api_key = asc_api_key
+  if external
+    ensure_external_group(EXTERNAL_GROUP)
+    # App Store Connect rejects the submission, not the upload, when Test
+    # Information is unset — so it goes up before any binary does.
+    push_beta_test_information(test_information)
+  end
   platforms.each do |platform|
     ipa = archive(platform: platform, build_number: number, skip_generate: true)
     upload_to_testflight(
@@ -135,18 +407,19 @@ lane :beta do |options|
       # fallback explicit so iOS and visionOS cannot diverge if ASC fails to
       # read the plist value while a build is processing.
       uses_non_exempt_encryption: false,
-      changelog: whats_new,
-      distribute_external: options[:external] == true,
-      groups: options[:external] == true ? [ENV.fetch("TESTFLIGHT_EXTERNAL_GROUP", "Multiplex Beta")] : nil,
-      beta_app_review_info: options[:external] == true ? beta_review_info : nil,
+      changelog: changelog,
+      distribute_external: external,
+      groups: external ? [EXTERNAL_GROUP] : nil,
+      submit_beta_review: submit_review,
+      beta_app_review_info: review_info,
       # External distribution must wait for processing; internal-only uploads
       # return as soon as the binary is accepted.
-      skip_waiting_for_build_processing: options[:external] != true,
+      skip_waiting_for_build_processing: !external,
     )
   end
 end
 
-desc "Push fastlane/metadata to App Store Connect. platform:ios|visionos or omit for both. Uploads no binary or screenshots."
+desc "Push shared metadata plus platform descriptions/release notes. platform:ios|visionos or omit for both. Uploads no binary or screenshots."
 lane :store_metadata do |options|
   platforms = options[:platform] ? [options[:platform]] : DESTINATIONS.keys
   platforms.each { |platform| DESTINATIONS.fetch(platform) }
@@ -155,12 +428,45 @@ lane :store_metadata do |options|
     deliver(
       api_key: api_key,
       platform: DESTINATIONS.fetch(platform)[:pilot],
+      description: platform_localized_metadata(:description, platform),
+      release_notes: platform_localized_metadata(:release_notes, platform),
+      # Passed explicitly rather than left to deliver's own file discovery, so
+      # App Store review reads the exact record TestFlight's Beta App Review
+      # gets — including the two values that live in .env, not in git.
+      app_review_information: app_review_information,
+      # iOS carries the demo-video review attachment; the visionOS record
+      # stays empty on purpose (nil here means deliver deletes any remote
+      # attachment, which keeps that promise on every push).
+      app_review_attachment_file: platform == "ios" ? review_attachment_path : nil,
       skip_binary_upload: true,
       skip_screenshots: true,
       force: true,                             # skip the HTML preview prompt (CI-friendly)
       precheck_include_in_app_purchases: false, # API-key auth cannot precheck IAP
     )
   end
+end
+
+desc "Attach fastlane/multiplex-ios-demo.mp4 to the editable iOS version's App Review Information. Touches no other metadata; visionOS stays empty."
+lane :review_attachment do
+  path = review_attachment_path
+  UI.user_error!("fastlane/multiplex-ios-demo.mp4 not found") unless path
+  Spaceship::ConnectAPI.token = Spaceship::ConnectAPI::Token.create(
+    key_id: ENV.fetch("ASC_KEY_ID"),
+    issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+    filepath: File.expand_path(ENV.fetch("ASC_KEY_PATH")),
+  )
+  app = Spaceship::ConnectAPI::App.find("app.multiplexterm.multiplex")
+  UI.user_error!("App record not found") unless app
+  version = app.get_edit_app_store_version(platform: Spaceship::ConnectAPI::Platform::IOS)
+  UI.user_error!("No editable iOS App Store version") unless version
+  detail = version.fetch_app_store_review_detail
+  UI.user_error!("The iOS version has no App Review Information record yet — run store_metadata once first") unless detail
+  (detail.app_store_review_attachments || []).each do |attachment|
+    UI.message("Removing existing review attachment #{attachment.file_name}")
+    attachment.delete!
+  end
+  detail.upload_attachment(path: path)
+  UI.success("Attached #{File.basename(path)} to iOS #{version.version_string} (#{version.app_version_state})")
 end
 
 desc "Push fastlane/screenshots to App Store Connect (device class inferred from pixel size)."

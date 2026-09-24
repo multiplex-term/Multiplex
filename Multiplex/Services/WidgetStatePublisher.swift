@@ -58,33 +58,99 @@ enum WidgetStateBuilder {
     /// Lines the medium widget's held frame can actually show.
     static let miniatureLineLimit = 6
 
+    /// `miniatures` is keyed by `SessionKey.storageKey`, matching the deck
+    /// snapshot it is read from — a bare name collides across backends.
     static func hostState(
         host: Host,
         sessions: [TmuxSession],
         miniatures: [String: [String]],
-        probedAt: Date?
+        probedAt: Date?,
+        lastAttached: SessionKey? = nil
+    ) -> WidgetHostState {
+        hostState(
+            host: host, sessions: sessions, probedAt: probedAt, lastAttached: lastAttached
+        ) {
+            miniatures[$0.id.storageKey] ?? []
+        }
+    }
+
+    /// The live-probe form. The model keeps its maps `SessionKey`-keyed, and
+    /// this publish runs once per host per tick for every host — going
+    /// through the storage spelling would interpolate two strings per session
+    /// only to parse them straight back.
+    ///
+    /// A distinct label rather than an overload: overloading on the key type
+    /// alone makes an empty `[:]` literal ambiguous at every call site.
+    static func hostState(
+        host: Host,
+        sessions: [TmuxSession],
+        liveMiniatures: [SessionKey: [String]],
+        probedAt: Date?,
+        lastAttached: SessionKey? = nil
+    ) -> WidgetHostState {
+        hostState(
+            host: host, sessions: sessions, probedAt: probedAt, lastAttached: lastAttached
+        ) {
+            liveMiniatures[$0.id] ?? []
+        }
+    }
+
+    /// `lastAttached` rides the snapshot unfiltered against `sessions`: the
+    /// widget falls through when the name is gone, and one stale probe
+    /// should not erase the memory.
+    private static func hostState(
+        host: Host,
+        sessions: [TmuxSession],
+        probedAt: Date?,
+        lastAttached: SessionKey?,
+        miniatureLines: (TmuxSession) -> [String]
     ) -> WidgetHostState {
         WidgetHostState(
             id: host.id,
             name: host.name,
             address: host.address,
             sessions: sessions.map {
-                sessionState($0, miniatureLines: miniatures[$0.name] ?? [])
+                sessionState(
+                    $0,
+                    miniatureLines: miniatureLines($0),
+                    // Rows carry a backend only where it disambiguates. On
+                    // a single-backend host nil keeps every row — and every
+                    // link built from one — byte-identical to before.
+                    qualifiesBackend: host.showsBackendIdentity
+                )
             },
-            probedAt: probedAt
+            probedAt: probedAt,
+            agentModels: host.agentLaunchModels.isEmpty ? nil : host.agentLaunchModels,
+            backendRaw: host.sessionBackend.rawValue,
+            // Default first, so the pickers' leading "Host Default" row and
+            // the explicit rows agree without the widget process knowing the
+            // rule. A single entry means there is nothing to pick.
+            backendsRaw: host.monitoredBackends.map(\.rawValue),
+            workingDirs: host.workingDirs.isEmpty ? nil : host.workingDirs,
+            lastAttached: lastAttached.map {
+                WidgetSessionRef(
+                    name: $0.name,
+                    backendRaw: host.showsBackendIdentity ? $0.backend.rawValue : nil
+                )
+            }
         )
     }
 
     static func sessionState(
-        _ session: TmuxSession, miniatureLines: [String]
+        _ session: TmuxSession, miniatureLines: [String],
+        qualifiesBackend: Bool = false
     ) -> WidgetSessionState {
         WidgetSessionState(
             name: session.name,
             agentRaw: sessionAgent(session)?.rawValue,
             windowNames: session.windows.map(\.name),
+            windowPaneTitles: session.windows.map {
+                $0.displayPaneTitle(serverHost: session.serverHost) ?? ""
+            },
             activeWindowIndex: session.windows.firstIndex(where: \.isActive) ?? 0,
             miniatureLines: Array(miniatureLines.suffix(miniatureLineLimit)),
-            createdAt: session.created
+            createdAt: session.created,
+            backendRaw: qualifiesBackend ? session.backend.rawValue : nil
         )
     }
 

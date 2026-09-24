@@ -10,8 +10,8 @@ import Foundation
 ///
 /// Everything here is pure command-building/classification, exercised
 /// directly by `KeychainLockCheckTests`. Claude Code is currently the only
-/// supported agent that stores credentials in the keychain (Codex and Pi use
-/// files), so the needles and the probed item are Claude's; add per-agent
+/// supported agent that stores credentials in the keychain (Codex, Pi, and
+/// Grok Build use files), so the needles and the probed item are Claude's; add per-agent
 /// entries here if another CLI grows the same failure mode.
 enum KeychainLockCheck {
     /// The keychain item Claude Code reads at startup (`security

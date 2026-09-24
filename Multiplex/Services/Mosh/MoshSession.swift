@@ -18,9 +18,12 @@ actor MoshSession: TerminalTransport {
         func userMessage(host: Host) -> String {
             switch self {
             case .noResponse:
-                "mosh-server started on \(host.name) but no UDP reply arrived. Check firewalls/NAT for the mosh port range (default 60000-61000)."
+                String(localized: """
+                    mosh-server started on \(host.name) but no UDP reply arrived. \
+                    Check firewalls/NAT for the mosh port range (default 60000-61000).
+                    """)
             case .alreadyOpen:
-                "This mosh session is already open."
+                String(localized: "This mosh session is already open.")
             }
         }
     }
@@ -149,6 +152,13 @@ actor MoshSession: TerminalTransport {
             try? await Task.sleep(for: .milliseconds(100))
         }
         finish(reason: nil, notify: false)
+    }
+
+    /// The transport counters as one value — read by the stats pump. Zero
+    /// network cost: everything in the report is bookkeeping the engine
+    /// already keeps. The first socket is setup, not a roam.
+    func linkReport() -> MoshLinkReport {
+        engine.linkReport(roamCount: max(0, socketGeneration - 1))
     }
 
     /// Foregrounded / user prodded the UI: heartbeat immediately, and if
@@ -321,7 +331,7 @@ actor MoshSession: TerminalTransport {
                 return
             }
             if engine.isDesynced(now: now) {
-                finish(reason: "mosh session lost sync", notify: true)
+                finish(reason: String(localized: "mosh session lost sync"), notify: true)
                 return
             }
             updateContact(now: now)

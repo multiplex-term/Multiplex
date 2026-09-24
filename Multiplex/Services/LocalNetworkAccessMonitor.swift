@@ -34,6 +34,13 @@ struct LocalNetworkPermissionState: Equatable {
 /// but no payload or SSH connection reaches the host. A public/VPN route can
 /// become ready without proving anything about Local Network permission, so
 /// only the exact host that reported a denial is allowed to clear it later.
+///
+/// A denial is never surfaced from a single path report: iOS reports
+/// `.localNetworkDenied` transiently while a connection establishes — and for
+/// the whole time the system permission prompt is pending — even when access
+/// is (or ends up) granted. Each report only arms a confirmation delay; the
+/// denial commits when the connection's live path still says denied after the
+/// grace period, and a probe reaching `.ready` first disarms it.
 @MainActor
 @Observable
 final class LocalNetworkAccessMonitor {
@@ -55,6 +62,17 @@ final class LocalNetworkAccessMonitor {
         let token: UUID
         let connection: NWConnection
         var reportedDenial = false
+        var pendingConfirmation: Task<Void, Never>?
+    }
+
+    /// How long a reported denial must persist before it is believed. Long
+    /// enough to outlive the transient `.localNetworkDenied` flaps a granted
+    /// connection emits while establishing; a genuine denial keeps reporting
+    /// itself and merely surfaces this much later.
+    private let denialConfirmationDelay: Duration
+
+    init(denialConfirmationDelay: Duration = .seconds(2)) {
+        self.denialConfirmationDelay = denialConfirmationDelay
     }
 
     /// Re-check every configured route. Calls are intentionally tied to Deck
@@ -84,7 +102,7 @@ final class LocalNetworkAccessMonitor {
             connection.pathUpdateHandler = { [weak self] path in
                 guard Self.isLocalNetworkDenied(path) else { return }
                 Task { @MainActor [weak self] in
-                    self?.recordDenied(
+                    self?.armDenialConfirmation(
                         hostID: hostID,
                         token: token,
                         generation: currentGeneration
@@ -107,7 +125,7 @@ final class LocalNetworkAccessMonitor {
                           Self.isLocalNetworkDenied(path)
                     else { return }
                     Task { @MainActor [weak self] in
-                        self?.recordDenied(
+                        self?.armDenialConfirmation(
                             hostID: hostID,
                             token: token,
                             generation: currentGeneration
@@ -142,11 +160,38 @@ final class LocalNetworkAccessMonitor {
         path.status == .unsatisfied && path.unsatisfiedReason == .localNetworkDenied
     }
 
-    private func recordDenied(hostID: UUID, token: UUID, generation: Int) {
+    private func armDenialConfirmation(hostID: UUID, token: UUID, generation: Int) {
+        guard generation == self.generation,
+              var probe = probes[hostID],
+              probe.token == token,
+              !probe.reportedDenial,
+              probe.pendingConfirmation == nil
+        else { return }
+
+        let delay = denialConfirmationDelay
+        probe.pendingConfirmation = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            self?.confirmDenial(hostID: hostID, token: token, generation: generation)
+        }
+        probes[hostID] = probe
+    }
+
+    private func confirmDenial(hostID: UUID, token: UUID, generation: Int) {
         guard generation == self.generation,
               var probe = probes[hostID],
               probe.token == token,
               !probe.reportedDenial
+        else { return }
+
+        probe.pendingConfirmation = nil
+        probes[hostID] = probe
+
+        // The report is believed only if the connection's live path still
+        // says denied — a transient flap on a granted route has resolved by
+        // now (its path is satisfied again, or the probe already finished).
+        guard let path = probe.connection.currentPath,
+              Self.isLocalNetworkDenied(path)
         else { return }
 
         // Keep the denied probe alive. If the system prompt is still up and
@@ -162,6 +207,7 @@ final class LocalNetworkAccessMonitor {
         let redundant = probes.filter { $0.key != hostID }
         for (otherHostID, otherProbe) in redundant {
             probes.removeValue(forKey: otherHostID)
+            otherProbe.pendingConfirmation?.cancel()
             otherProbe.connection.cancel()
         }
     }
@@ -182,12 +228,16 @@ final class LocalNetworkAccessMonitor {
               probe.token == token
         else { return }
         probes.removeValue(forKey: hostID)
+        probe.pendingConfirmation?.cancel()
         probe.connection.cancel()
     }
 
     private func cancelAllProbes() {
-        let active = probes.values.map(\.connection)
+        let active = probes.values
         probes.removeAll()
-        active.forEach { $0.cancel() }
+        for probe in active {
+            probe.pendingConfirmation?.cancel()
+            probe.connection.cancel()
+        }
     }
 }

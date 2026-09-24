@@ -18,13 +18,12 @@ final class StoreKitIntegrationTests: XCTestCase {
         session.clearTransactions()
         defer { session.clearTransactions() }
 
-        // The first Product request establishes the just-created test
-        // session on iPadOS; app-level requests made before that activation
-        // can race StoreKit's catalog swap and briefly see an empty result.
-        let products = try await Product.products(for: [EntitlementStore.proProductID])
-        let product = try XCTUnwrap(
-            products.first(where: { $0.id == EntitlementStore.proProductID })
-        )
+        // Product requests establish the just-created test session. Xcode 26's
+        // simulator StoreKit daemon can race that catalog swap, log
+        // SKInternalError Code=3, and return an empty first response. Retry
+        // only that transient empty result; real request errors still fail.
+        let loadedProduct = try await loadProProduct()
+        let product = try XCTUnwrap(loadedProduct)
         XCTAssertEqual(product.type, .nonConsumable)
         XCTAssertEqual(product.displayName, "Multiplex Pro")
         XCTAssertEqual(product.description, "Unlimited hosts, mosh, agent tools & themes.")
@@ -45,4 +44,17 @@ final class StoreKitIntegrationTests: XCTestCase {
         XCTAssertFalse(store.isPro)
     }
 
+    private func loadProProduct() async throws -> Product? {
+        let maximumAttempts = 3
+        for attempt in 1...maximumAttempts {
+            let products = try await Product.products(for: [EntitlementStore.proProductID])
+            if let product = products.first(where: { $0.id == EntitlementStore.proProductID }) {
+                return product
+            }
+            if attempt < maximumAttempts {
+                try await Task.sleep(for: .seconds(1))
+            }
+        }
+        return nil
+    }
 }
