@@ -518,7 +518,7 @@ final class TerminalWindowViewController: UIViewController,
         return shell.sideColumn.frame(
             in: rootView.bounds,
             strip: edge == .trailing ? shell.contentSafeArea.right : shell.contentSafeArea.left,
-            obstruction: activeController?.keyboardObstruction ?? 0
+            obstruction: paneKeyboardObstruction
         )
     }
 
@@ -1803,10 +1803,23 @@ final class TerminalWindowViewController: UIViewController,
     /// with it over a docked keyboard.
     private var paneChromeBottom: CGFloat {
         rootView.paneContainer.frame.maxY
-            - (activeController?.keyboardObstruction ?? 0)
+            - paneKeyboardObstruction
             - TerminalKeyBar.barHeight(spendsBottomStrip: railOwnsBottomSafeArea)
     }
     #endif
+
+    /// `KeyboardAvoidance.paneObstruction`: the controller's window-measured
+    /// obstruction, less the gap below a pane that stops short of the window.
+    private var paneKeyboardObstruction: CGFloat {
+        let reported = activeController?.keyboardObstruction ?? 0
+        guard reported > 0, let window = rootView.window else { return reported }
+        return KeyboardAvoidance.paneObstruction(
+            reported: reported,
+            restingBottom: window.bounds.maxY
+                - (railOwnsBottomSafeArea ? 0 : window.safeAreaInsets.bottom),
+            paneBottom: rootView.convert(rootView.paneContainer.frame, to: window).maxY
+        )
+    }
 
     private func configurePassphrasePresenter() {
         addChild(passphrasePresenter)

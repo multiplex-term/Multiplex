@@ -137,6 +137,9 @@ Measured on the 27.1 simulator with `MULTIPLEX_DUO_PROBE=1` (log category
 - Content installed inside the fold spring keeps its in-flight geometry
   (collapsed rows at the origin), so the deck's presentation update runs
   on the settled pass, not at the animation's start.
+- The keyboard obstruction is measured against the window's bottom; a
+  pane above the fold subtracts the gap (`KeyboardAvoidance.paneObstruction`)
+  or a keyboard over the console lifts its composer to the pane's top.
 - Orientation comes from the display, not the pane: a laptop-pose pane is
   landscape-shaped on a portrait display.
 - A header inset change must lay the row out itself (`applyPanelWidth`
