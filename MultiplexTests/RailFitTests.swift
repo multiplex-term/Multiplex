@@ -51,17 +51,25 @@ final class RailFitTests: XCTestCase {
     }
 
     func testTheClosedDisplayKeepsTheColumnOffItsGlyphsAndCamera() {
-        func insets(compact: Bool, landscape: Bool, trailing: Bool) -> [CGFloat] {
-            let insets = RailFit.columnInsets(compactWidth: compact, landscape: landscape, trailingEdge: trailing)
-            return [insets.top, insets.bottom]
+        func placement(compact: Bool, landscape: Bool, trailing: Bool) -> RailFit.ColumnPlacement {
+            RailFit.columnPlacement(compactWidth: compact, landscape: landscape, trailingEdge: trailing)
         }
-        XCTAssertEqual(insets(compact: false, landscape: true, trailing: true), [120, 0], "inner: glyphs at the top")
         XCTAssertEqual(
-            insets(compact: true, landscape: false, trailing: true), [160, 0],
-            "closed portrait: glyphs under the camera"
+            placement(compact: false, landscape: true, trailing: true),
+            .init(top: 120, bottom: 0, anchoredToBottom: false), "inner: glyphs at the top"
         )
-        XCTAssertEqual(insets(compact: true, landscape: true, trailing: false), [80, 12], "camera top-left")
-        XCTAssertEqual(insets(compact: true, landscape: true, trailing: true), [12, 80], "camera bottom-right")
+        XCTAssertEqual(
+            placement(compact: true, landscape: false, trailing: true),
+            .init(top: 160, bottom: 0, anchoredToBottom: false), "closed portrait: glyphs under the camera"
+        )
+        XCTAssertEqual(
+            placement(compact: true, landscape: true, trailing: false),
+            .init(top: 80, bottom: 12, anchoredToBottom: false), "camera top-left: chips hang below it"
+        )
+        XCTAssertEqual(
+            placement(compact: true, landscape: true, trailing: true),
+            .init(top: 12, bottom: 80, anchoredToBottom: true), "camera bottom-right: chips stack up from it"
+        )
     }
 
     func testEverythingFitsOnTheInnerDisplay() {

@@ -519,28 +519,13 @@ final class TerminalWindowViewController: UIViewController,
     /// and visionOS keep the horizontal rail.
     private var resolvedRailEdge: ShellRailEdge {
         guard let shell else { return .top }
-        #if os(iOS)
-        var systemEdge: ShellRailEdge?
-        if #available(iOS 27.1, *) {
-            switch traitCollection.verticalBarEdge {
-            case .leading: systemEdge = .leading
-            case .trailing: systemEdge = .trailing
-            default: systemEdge = nil
-            }
-        }
         return ShellRailPlacement.edge(
-            systemVerticalBarEdge: systemEdge,
-            idiom: .device,
-            horizontalSizeClass: ShellSizeClass(traitCollection.horizontalSizeClass),
-            verticalSizeClass: ShellSizeClass(traitCollection.verticalSizeClass),
+            traits: traitCollection,
             isLandscape: shell.displayIsLandscape,
             foldable: shell.foldable,
             leadingSafeArea: shell.contentSafeArea.left,
             trailingSafeArea: shell.contentSafeArea.right
         )
-        #else
-        return .top
-        #endif
     }
 
     /// The UMD stands as a column for terminal tabs only; a ▤ / ⌗ tab keeps
@@ -557,17 +542,21 @@ final class TerminalWindowViewController: UIViewController,
         let strip = edge == .trailing ? shell.contentSafeArea.right : shell.contentSafeArea.left
         let width = max(strip, UMDColumnChip.side + 4)
         let obstruction = activeController?.keyboardObstruction ?? 0
-        let insets = RailFit.columnInsets(
-            compactWidth: traitCollection.horizontalSizeClass == .compact,
-            landscape: shell.displayIsLandscape,
-            trailingEdge: edge == .trailing
-        )
-        let bottom = bounds.maxY - max(obstruction, insets.bottom)
+        let placement = columnPlacement(edge: edge)
+        let bottom = bounds.maxY - max(obstruction, placement.bottom)
         return CGRect(
             x: edge == .trailing ? bounds.width - width : 0,
-            y: insets.top,
+            y: placement.top,
             width: width,
-            height: max(0, bottom - insets.top)
+            height: max(0, bottom - placement.top)
+        )
+    }
+
+    private func columnPlacement(edge: ShellRailEdge) -> RailFit.ColumnPlacement {
+        RailFit.columnPlacement(
+            compactWidth: traitCollection.horizontalSizeClass == .compact,
+            landscape: shell?.displayIsLandscape ?? false,
+            trailingEdge: edge == .trailing
         )
     }
 
@@ -2637,7 +2626,8 @@ extension TerminalWindowViewController {
                     stripWidth: column.width,
                     trailingEdge: edge == .trailing
                 )
-                : nil
+                : nil,
+            columnAnchorsToBottom: vertical && columnPlacement(edge: edge).anchoredToBottom
         )
         renderedColumnCapacity = vertical ? columnCapacity : nil
         renderedRailEdge = edge

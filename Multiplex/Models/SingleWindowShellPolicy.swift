@@ -71,6 +71,15 @@ enum SingleWindowShellLayout {
         idiom == .phone && foldable
     }
 
+    /// iPhone Duo: while the deck spans the display, its + HOST / FAQ /
+    /// SETTINGS chips stand in the side column on the rail's edge (Jhen,
+    /// 2026-09-25). Beside a terminal the terminal's own column owns the
+    /// strip, so the chips stay in the header row; a shipped iPhone has no
+    /// side edge and never moves them.
+    static func deckActionColumnEdge(railEdge: ShellRailEdge, deckSpansShell: Bool) -> ShellRailEdge {
+        deckSpansShell ? railEdge : .top
+    }
+
     /// The iPad rule: the shell runs full-screen there, so the window's own
     /// usable width is the measure.
     static func isExpanded(width: CGFloat) -> Bool {

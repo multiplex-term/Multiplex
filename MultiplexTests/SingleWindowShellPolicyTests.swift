@@ -167,6 +167,21 @@ final class SingleWindowShellPolicyTests: XCTestCase {
         XCTAssertFalse(SingleWindowShellLayout.chromeIsBare(idiom: .pad, foldable: false))
     }
 
+    func testDeckActionsStandInTheColumnOnlyWhileTheDeckSpansTheShell() {
+        XCTAssertEqual(
+            SingleWindowShellLayout.deckActionColumnEdge(railEdge: .trailing, deckSpansShell: true),
+            .trailing, "inner landscape, deck alone"
+        )
+        XCTAssertEqual(
+            SingleWindowShellLayout.deckActionColumnEdge(railEdge: .trailing, deckSpansShell: false),
+            .top, "beside a terminal the terminal's column owns the strip"
+        )
+        XCTAssertEqual(
+            SingleWindowShellLayout.deckActionColumnEdge(railEdge: .top, deckSpansShell: true),
+            .top, "shipped iPhone"
+        )
+    }
+
     func testBareTopPaddingOnlyOnTheInnerDisplayWithNoTopInset() {
         func padding(
             top: CGFloat, idiom: ShellModeDecision.Idiom = .phone,

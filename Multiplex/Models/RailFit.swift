@@ -35,17 +35,30 @@ enum RailFit {
     static let closedCameraInset: CGFloat = 80
     static let closedCornerInset: CGFloat = 12
 
+    /// Where a column's chips live inside the strip: the room kept at each
+    /// end, and which end the chips gather at. They gather at the camera's
+    /// end (Jhen, 2026-09-25: the closed display turned around left the
+    /// column at the far corner from the camera), so the stack hangs from
+    /// the bottom exactly when the camera is there.
+    struct ColumnPlacement: Equatable {
+        var top: CGFloat
+        var bottom: CGFloat
+        var anchoredToBottom: Bool
+    }
+
     /// The closed display is the compact-width one.
-    static func columnInsets(
+    static func columnPlacement(
         compactWidth: Bool,
         landscape: Bool,
         trailingEdge: Bool
-    ) -> (top: CGFloat, bottom: CGFloat) {
-        guard compactWidth else { return (innerTopInset, 0) }
-        guard landscape else { return (closedPortraitTopInset, 0) }
+    ) -> ColumnPlacement {
+        guard compactWidth else { return ColumnPlacement(top: innerTopInset, bottom: 0, anchoredToBottom: false) }
+        guard landscape else {
+            return ColumnPlacement(top: closedPortraitTopInset, bottom: 0, anchoredToBottom: false)
+        }
         return trailingEdge
-            ? (closedCornerInset, closedCameraInset)
-            : (closedCameraInset, closedCornerInset)
+            ? ColumnPlacement(top: closedCornerInset, bottom: closedCameraInset, anchoredToBottom: true)
+            : ColumnPlacement(top: closedCameraInset, bottom: closedCornerInset, anchoredToBottom: false)
     }
 
     /// Drop order: the row-only MERGE and GUIDE first, the shortcut last.

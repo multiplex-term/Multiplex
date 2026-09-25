@@ -28,6 +28,13 @@ struct FleetWallConfiguration {
     /// corner (iPhone Duo landscape, 55 pt corners — the wall below starts
     /// under the curve's reach) and the inner-portrait status band.
     var headerChrome = ShellHeaderChrome.none
+    /// iPhone Duo: the side edge the header's + HOST / FAQ / SETTINGS chips
+    /// stand on as a column in the system's strip while the deck spans the
+    /// display; `.top` keeps them in the row.
+    var actionColumnEdge = ShellRailEdge.top
+    /// The display's orientation (the column's end insets differ on the
+    /// closed display's portrait and landscape).
+    var displayIsLandscape = false
     var reduceMotion: Bool
     var sceneIsActive: Bool
     var addHost: () -> Void
@@ -292,6 +299,8 @@ final class FleetWallViewController: UIViewController {
     private let offerPreferences = BackendOfferPreferences()
     private var awaitingSignalView: FleetAwaitingSignalView?
     private var inlineHeader: FleetHeaderView?
+    /// iPhone Duo: the header's action chips as a column in the side strip.
+    private var actionColumn: FleetActionColumnView?
     private var latestSnapshot: WallSnapshot?
     private var observationGeneration = 0
     private var feedTask: Task<Void, Never>?
@@ -342,6 +351,7 @@ final class FleetWallViewController: UIViewController {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         updateColumnCount()
+        layoutActionColumn()
     }
 
     deinit {
@@ -356,6 +366,8 @@ final class FleetWallViewController: UIViewController {
         let layoutChanged = self.configuration.presentation != configuration.presentation
             || self.configuration.shellSafeArea != configuration.shellSafeArea
             || self.configuration.headerChrome != configuration.headerChrome
+            || self.configuration.actionColumnEdge != configuration.actionColumnEdge
+            || self.configuration.displayIsLandscape != configuration.displayIsLandscape
             || self.configuration.usesSystemNavigation != configuration.usesSystemNavigation
         let activeChanged = self.configuration.sceneIsActive != configuration.sceneIsActive
         self.configuration = configuration
@@ -462,8 +474,21 @@ final class FleetWallViewController: UIViewController {
         fixedHeader.configure(
             presentation: presentation,
             summary: fleetSummary,
-            actions: headerActions
+            actions: headerActions,
+            actionsDetached: actionsStandInColumn
         )
+        if actionsStandInColumn {
+            if actionColumn == nil {
+                let column = FleetActionColumnView()
+                view.addSubview(column)
+                actionColumn = column
+            }
+            view.bringSubviewToFront(actionColumn!)
+            layoutActionColumn()
+        } else {
+            actionColumn?.removeFromSuperview()
+            actionColumn = nil
+        }
 
         // The shell spends the bottom safe area and its panes hand back the
         // clearance exactly once: the wall restores it as scroll padding
@@ -503,6 +528,39 @@ final class FleetWallViewController: UIViewController {
             openFAQ: configuration.openFAQ,
             openSettings: configuration.openSettings,
             openStats: { [weak self] in self?.configuration.openStats(nil) }
+        )
+    }
+
+    private var actionsStandInColumn: Bool {
+        configuration.actionColumnEdge != .top
+    }
+
+    /// The column's frame: the side strip on the rail's edge, below the
+    /// system's glyphs and clear of the camera, its chips gathered at the
+    /// camera's end on the system glyph line — the terminal's UMD column
+    /// recipe (`RailFit.columnPlacement`).
+    private func layoutActionColumn() {
+        guard let actionColumn else { return }
+        let trailing = configuration.actionColumnEdge == .trailing
+        let safe = configuration.shellSafeArea
+        let width = max(trailing ? safe.right : safe.left, UMDColumnChip.side + RailFit.gap)
+        let placement = RailFit.columnPlacement(
+            compactWidth: traitCollection.horizontalSizeClass == .compact,
+            landscape: configuration.displayIsLandscape,
+            trailingEdge: trailing
+        )
+        let bounds = view.bounds
+        actionColumn.frame = CGRect(
+            x: trailing ? bounds.width - width : 0,
+            y: placement.top,
+            width: width,
+            height: max(0, bounds.height - placement.top - placement.bottom)
+        )
+        actionColumn.configure(
+            actions: headerActions,
+            centerX: SingleWindowShellLayout.sideColumnCenterX(stripWidth: width, trailingEdge: trailing),
+            capacity: RailFit.capacity(availableHeight: actionColumn.bounds.height),
+            anchoredToBottom: placement.anchoredToBottom
         )
     }
 
@@ -623,8 +681,10 @@ final class FleetWallViewController: UIViewController {
         fixedHeader.configure(
             presentation: configuration.presentation,
             summary: fleetSummary,
-            actions: headerActions
+            actions: headerActions,
+            actionsDetached: actionsStandInColumn
         )
+        actionColumn?.configure(actions: headerActions)
         inlineHeader?.configure(
             presentation: configuration.presentation,
             summary: fleetSummary,
@@ -1233,6 +1293,9 @@ private final class FleetHeaderView: UIView {
     private var bottomConstraint: NSLayoutConstraint?
     private var compactLayout = CompactLayout.captions
     private var compactLabeledMinimumWidth: CGFloat?
+    /// The chips stand in the side column (iPhone Duo): the row keeps the
+    /// title and the summary only.
+    private var actionsDetached = false
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -1287,10 +1350,12 @@ private final class FleetHeaderView: UIView {
     func configure(
         presentation: FleetWall.Presentation,
         summary: String,
-        actions: FleetHeaderActions
+        actions: FleetHeaderActions,
+        actionsDetached: Bool = false
     ) {
         self.presentation = presentation
         self.actions = actions
+        self.actionsDetached = actionsDetached
         setSummary(summary)
         standardTitleLabel.setText("Multiplex")
         railTitleLabel.setText("Multiplex")
@@ -1352,11 +1417,13 @@ private final class FleetHeaderView: UIView {
     /// phone on the captioned candidate for as long as it genuinely fits.
     private func measureCompactLabeledWidth() -> CGFloat {
         applyCompactLayout(.captions)
-        return standardTitleLabel.intrinsicContentSize.width
+        let title = standardTitleLabel.intrinsicContentSize.width + stack.spacing
+        guard !actionsDetached else { return title }
+        return title
             + addChip.intrinsicContentSize.width
             + faqChip.intrinsicContentSize.width
             + settingsChip.intrinsicContentSize.width
-            + stack.spacing * 4
+            + stack.spacing * 3
     }
 
     private func applyCompactLayout(_ layout: CompactLayout) {
@@ -1413,10 +1480,103 @@ private final class FleetHeaderView: UIView {
         )
         stack.addArrangedSubview(UIView())
         stack.addArrangedSubview(summaryLabel)
+        guard !actionsDetached else { return }
         stack.addArrangedSubview(addChip)
         stack.addArrangedSubview(statsChip)
         stack.addArrangedSubview(faqChip)
         stack.addArrangedSubview(settingsChip)
+    }
+}
+
+/// iPhone Duo: the header's + HOST / FAQ / SETTINGS as 44 pt column chips in
+/// the system's side strip while the deck spans the display — the same
+/// faces and spacing as the terminal's UMD column, so the strip reads as
+/// one column whichever pane owns it.
+@MainActor
+private final class FleetActionColumnView: UIView {
+    private let stack = UIStackView()
+    private var chips: [UMDColumnChip] = []
+    private var centerXConstraint: NSLayoutConstraint?
+    private var topConstraint: NSLayoutConstraint?
+    private var bottomConstraint: NSLayoutConstraint?
+    private var actions = FleetHeaderActions(
+        addHost: {}, openFAQ: {}, openSettings: {}, openStats: {})
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        stack.axis = .vertical
+        stack.alignment = .center
+        stack.spacing = RailFit.gap
+        addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        centerXConstraint = stack.centerXAnchor.constraint(equalTo: leadingAnchor)
+        topConstraint = stack.topAnchor.constraint(equalTo: topAnchor)
+        bottomConstraint = stack.bottomAnchor.constraint(equalTo: bottomAnchor)
+        NSLayoutConstraint.activate([
+            topConstraint!,
+            stack.widthAnchor.constraint(equalToConstant: UMDColumnChip.side),
+            centerXConstraint!,
+        ])
+        chips = [
+            makeChip(
+                caption: "HOST",
+                systemImage: "plus",
+                accessibilityLabel: String(localized: "Add host"),
+                identifier: "deck.column.addHost"
+            ) { [weak self] in self?.actions.addHost() },
+            makeChip(
+                caption: "FAQ",
+                systemImage: "questionmark",
+                accessibilityLabel: String(localized: "Frequently asked questions"),
+                identifier: "deck.column.faq"
+            ) { [weak self] in self?.actions.openFAQ() },
+            makeChip(
+                caption: "SETTINGS",
+                systemImage: "gearshape",
+                accessibilityLabel: String(localized: "Settings"),
+                identifier: "deck.column.settings"
+            ) { [weak self] in self?.actions.openSettings() },
+        ]
+        chips.forEach(stack.addArrangedSubview)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    private func makeChip(
+        caption: String,
+        systemImage: String,
+        accessibilityLabel: String,
+        identifier: String,
+        action: @escaping () -> Void
+    ) -> UMDColumnChip {
+        let chip = UMDColumnChip(
+            caption: caption,
+            systemImage: systemImage,
+            prominent: false,
+            accessibilityLabel: accessibilityLabel
+        )
+        chip.accessibilityIdentifier = identifier
+        chip.addAction(UIAction { _ in action() }, for: .touchUpInside)
+        return chip
+    }
+
+    /// `capacity` whole chips fit (`RailFit.capacity`); the rest hide from
+    /// the bottom — no ⋯ menu here, the header row is the fallback road on
+    /// every other layout.
+    func configure(actions: FleetHeaderActions, centerX: CGFloat, capacity: Int, anchoredToBottom: Bool) {
+        configure(actions: actions)
+        centerXConstraint?.constant = centerX
+        // The chips gather at the camera's end of the strip.
+        topConstraint?.isActive = !anchoredToBottom
+        bottomConstraint?.isActive = anchoredToBottom
+        for (index, chip) in chips.enumerated() {
+            chip.isHidden = index >= capacity
+        }
+    }
+
+    func configure(actions: FleetHeaderActions) {
+        self.actions = actions
     }
 }
 

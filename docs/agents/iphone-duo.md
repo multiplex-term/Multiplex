@@ -138,7 +138,10 @@ iPhone Duo" (2026-09-09) and the four tech talks for the rules.
   glyphs, and the camera sits in the strip's end nearest the device's
   corner (30…66 pt: top when the strip is leading, bottom when the device
   is turned around and it is trailing), so the column keeps 80 pt clear
-  of that end and 12 of the other. The shell hands the display's
+  of that end and 12 of the other, and its chips gather at the camera's
+  end (`RailFit.columnPlacement.anchoredToBottom`: the stack hangs from
+  the bottom when the camera is there — Jhen, 2026-09-25). The shell
+  hands the display's
   orientation down
   (`displayIsLandscape`): the screen's bounds lag a rotation's layout pass
   and left a column on the closed portrait display. Order top→bottom: DECK
@@ -154,6 +157,16 @@ iPhone Duo" (2026-09-09) and the four tech talks for the rules.
   so `UMDSourceStripView` (20 pt) over the pane carries `MAIN · DEVBOX ·
   ● LIVE` while the rail is vertical. The key rail stays horizontal above
   the keyboard in every pose.
+- **Deck action column** — `SingleWindowShellLayout.deckActionColumnEdge`:
+  while the deck spans the display (`.shellCompact`) on a side rail edge
+  — the closed display in either orientation — its + HOST / FAQ /
+  SETTINGS chips stand in the system's strip as `UMDColumnChip`s
+  (`FleetActionColumnView`, same insets and glyph-line centre as the UMD
+  column) and the header row keeps the title and summary (Jhen,
+  2026-09-25). Beside a terminal the terminal's column owns the strip, so
+  the chips stay in the deck rail's header. The shell resolves the edge
+  once (`ShellRailPlacement.edge(traits:…)`, shared with the terminal
+  window) and hands it down as `actionColumnEdge`.
 - **Panel home** — `SidePanelPresentationStyle.shellColumn`: admitted on
   regular width for a terminal anchor AND only while the shell offers a
   column (`columnAvailable`: expanded, a book page, or the console region);

@@ -27,6 +27,43 @@ extension ShellModeDecision.Idiom {
     }
 }
 
+extension ShellRailPlacement {
+    /// The rail's edge from live traits: the iOS 27.1 vertical-bar trait
+    /// when the system reports one, else the pure rule. The shell resolves
+    /// it for the deck's action column, the terminal window for its UMD
+    /// column — one mapping, so the two agree by construction.
+    static func edge(
+        traits: UITraitCollection,
+        isLandscape: Bool,
+        foldable: Bool,
+        leadingSafeArea: CGFloat,
+        trailingSafeArea: CGFloat
+    ) -> ShellRailEdge {
+        #if os(iOS)
+        var systemEdge: ShellRailEdge?
+        if #available(iOS 27.1, *) {
+            switch traits.verticalBarEdge {
+            case .leading: systemEdge = .leading
+            case .trailing: systemEdge = .trailing
+            default: systemEdge = nil
+            }
+        }
+        return edge(
+            systemVerticalBarEdge: systemEdge,
+            idiom: .device,
+            horizontalSizeClass: ShellSizeClass(traits.horizontalSizeClass),
+            verticalSizeClass: ShellSizeClass(traits.verticalSizeClass),
+            isLandscape: isLandscape,
+            foldable: foldable,
+            leadingSafeArea: leadingSafeArea,
+            trailingSafeArea: trailingSafeArea
+        )
+        #else
+        return .top
+        #endif
+    }
+}
+
 extension UIViewController {
     /// Child containment with the child filling `container` by autoresizing.
     func embed(_ child: UIViewController, in container: UIView) {

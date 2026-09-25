@@ -74,6 +74,9 @@ struct UMDBarConfiguration {
     /// iPhone Duo: the column chips' centre x inside the side strip (nil =
     /// the strip's centre).
     var columnCenterX: CGFloat?
+    /// iPhone Duo: the column's chips gather at its bottom end (the camera
+    /// is there: `RailFit.ColumnPlacement`).
+    var columnAnchorsToBottom = false
 }
 
 struct UMDBarObservedState: Equatable {
@@ -112,6 +115,7 @@ private struct UMDBarPresentationKey: Equatable {
     var bandRowCenterY: CGFloat?
     var bandTrailingClearance: CGFloat
     var columnCenterX: CGFloat?
+    var columnAnchorsToBottom: Bool
 
     @MainActor
     init(_ configuration: UMDBarConfiguration) {
@@ -136,6 +140,7 @@ private struct UMDBarPresentationKey: Equatable {
         bandRowCenterY = configuration.bandRowCenterY
         bandTrailingClearance = configuration.bandTrailingClearance
         columnCenterX = configuration.columnCenterX
+        columnAnchorsToBottom = configuration.columnAnchorsToBottom
     }
 }
 
@@ -378,7 +383,8 @@ final class UMDBarViewController: UIViewController,
             minimumHeight: configuration.minimumContentHeight,
             bandRowCenterY: configuration.bandRowCenterY,
             bandTrailingClearance: configuration.bandTrailingClearance,
-            columnCenterX: configuration.columnCenterX
+            columnCenterX: configuration.columnCenterX,
+            columnAnchorsToBottom: configuration.columnAnchorsToBottom
         )
         view.setNeedsLayout()
         view.layoutIfNeeded()
@@ -1516,7 +1522,8 @@ final class UMDBarRootView: UIView {
         minimumHeight: CGFloat = 0,
         bandRowCenterY: CGFloat? = nil,
         bandTrailingClearance: CGFloat = 0,
-        columnCenterX: CGFloat? = nil
+        columnCenterX: CGFloat? = nil,
+        columnAnchorsToBottom: Bool = false
     ) {
         NSLayoutConstraint.deactivate(containerEdgeConstraints)
         NSLayoutConstraint.deactivate(contentEdgeConstraints)
@@ -1555,13 +1562,18 @@ final class UMDBarRootView: UIView {
             // One column, one width: every chip is a fixed 44 pt square on
             // the strip's own centre line (the clock and radio glyphs are
             // centred in the same strip), 4 pt apart.
+            // The chips gather at the camera's end of the strip.
             containerEdgeConstraints = [
-                contentContainer.topAnchor.constraint(equalTo: topAnchor),
+                columnAnchorsToBottom
+                    ? contentContainer.bottomAnchor.constraint(equalTo: bottomAnchor)
+                    : contentContainer.topAnchor.constraint(equalTo: topAnchor),
                 columnCenterX.map {
                     contentContainer.centerXAnchor.constraint(equalTo: leadingAnchor, constant: $0)
                 } ?? contentContainer.centerXAnchor.constraint(equalTo: centerXAnchor),
                 contentContainer.widthAnchor.constraint(equalToConstant: UMDColumnChip.side),
-                contentContainer.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
+                columnAnchorsToBottom
+                    ? contentContainer.topAnchor.constraint(greaterThanOrEqualTo: topAnchor)
+                    : contentContainer.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
             ]
         case .shell:
             layer.cornerRadius = 0

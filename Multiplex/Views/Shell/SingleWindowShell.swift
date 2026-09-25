@@ -43,6 +43,11 @@ struct SingleWindowShellPresentation: Equatable {
     /// The display's orientation (the shell spans the display; a pane does
     /// not — a laptop-pose pane is landscape-shaped on a portrait display).
     var displayIsLandscape = false
+    /// iPhone Duo: the side edge the deck's + HOST / FAQ / SETTINGS chips
+    /// stand on while the deck spans the display
+    /// (`SingleWindowShellLayout.deckActionColumnEdge`); `.top` keeps them
+    /// in the header row.
+    var deckActionColumnEdge = ShellRailEdge.top
     var deckHeaderChrome = ShellHeaderChrome.none
     var terminalRailChrome = ShellHeaderChrome.none
     /// The shell has a column to lend a ▤/⌗ panel (iPhone Duo): the deck
@@ -1090,6 +1095,14 @@ final class SingleWindowShellViewController: UIViewController {
     }
 
     private func updateChildPresentation(_ metrics: SingleWindowShellLayoutMetrics) {
+        let displayIsLandscape = shellRootView.bounds.width > shellRootView.bounds.height
+        let railEdge = ShellRailPlacement.edge(
+            traits: traitCollection,
+            isLandscape: displayIsLandscape,
+            foldable: hingePresent,
+            leadingSafeArea: metrics.deckSafeArea.left,
+            trailingSafeArea: metrics.deckSafeArea.right
+        )
         let presentation = SingleWindowShellPresentation(
             expanded: metrics.expanded,
             deckPresentation: metrics.deckPresentation,
@@ -1104,7 +1117,11 @@ final class SingleWindowShellViewController: UIViewController {
                 && terminalFocusReady,
             foldable: hingePresent,
             bareChrome: SingleWindowShellLayout.chromeIsBare(idiom: .device, foldable: hingePresent),
-            displayIsLandscape: shellRootView.bounds.width > shellRootView.bounds.height,
+            displayIsLandscape: displayIsLandscape,
+            deckActionColumnEdge: SingleWindowShellLayout.deckActionColumnEdge(
+                railEdge: railEdge,
+                deckSpansShell: metrics.deckPresentation == .shellCompact
+            ),
             deckHeaderChrome: metrics.deckHeaderChrome,
             terminalRailChrome: metrics.terminalRailChrome,
             columnAvailable: metrics.columnAvailable
@@ -1265,6 +1282,8 @@ final class SingleWindowShellViewController: UIViewController {
             selectedTerminal: state.terminalRoute.activeTab,
             shellSafeArea: presentation.deckSafeArea,
             headerChrome: presentation.deckHeaderChrome,
+            actionColumnEdge: presentation.deckActionColumnEdge,
+            displayIsLandscape: presentation.displayIsLandscape,
             sceneIsActive: state.sceneIsActive,
             reduceMotion: state.reduceMotion
         )
