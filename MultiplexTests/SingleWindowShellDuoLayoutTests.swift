@@ -127,6 +127,23 @@ final class SingleWindowShellDuoLayoutTests: XCTestCase {
         }
     }
 
+    func testLaptopPoseKeepsTheStatusBandOffTheConsoleDeck() {
+        let metrics = SingleWindowShellNativeLayout.resolve(
+            size: CGSize(width: 669, height: 951),
+            safeArea: innerPortrait,
+            verticalSizeClass: .regular,
+            horizontalSizeClass: .regular,
+            idiom: .phone,
+            division: DuoFoldGeometry.syntheticDivision(in: CGSize(width: 669, height: 951)),
+            deckRailVisible: true,
+            compactShowsTerminal: true,
+            compactBackSwipeOffset: 0,
+            compactBackSwipeActive: false
+        )
+        XCTAssertEqual(metrics.terminalRailChrome.bandHeight, 82)
+        XCTAssertEqual(metrics.deckHeaderChrome.bandHeight, 0, "the console deck is below the fold")
+    }
+
     func testLaptopPoseStopsTheTerminalAtTheFoldAndHandsTheRestToTheConsole() {
         let fold = DuoFoldGeometry.syntheticDivision(in: CGSize(width: 669, height: 951))
         XCTAssertEqual(fold, CGRect(x: 0, y: 455.5, width: 669, height: 40))

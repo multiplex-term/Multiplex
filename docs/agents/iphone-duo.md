@@ -77,7 +77,8 @@ Measured on the 27.1 simulator with `MULTIPLEX_DUO_PROBE=1` (log category
   ≥ 60 (inner portrait, laptop top region): content starts at y 0, the
   band is content — the horizontal UMD rail and the deck header sit on the
   glyph line with a 128 pt trailing clearance for the clock cluster. The
-  corner inset and band travel as one `ShellHeaderChrome` per pane.
+  console deck below the fold gets no band. The corner inset and band
+  travel as one `ShellHeaderChrome` per pane.
 - **Rail edge** — `ShellRailPlacement.edge(…)`: a system-reported
   vertical-bar edge wins; else phone + regular × regular + landscape is
   `.leading`; a foldable phone in compact landscape (closed display, no

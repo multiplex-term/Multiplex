@@ -258,9 +258,10 @@ enum SingleWindowShellNativeLayout {
             terminalAvailableWidth: terminalAvailableWidth,
             railOwnsBottomSafeArea: railTakesBottomStrip,
             consoleFrame: consoleFrame,
+            // The console deck sits below the fold, not under the status band.
             deckHeaderChrome: ShellHeaderChrome(
                 cornerInset: deckWidth > 0 && (expanded || !compactShowsTerminal) ? cornerInset : 0,
-                bandHeight: topBand
+                bandHeight: consoleShowsDeck ? 0 : topBand
             ),
             terminalRailChrome: ShellHeaderChrome(
                 cornerInset: terminalX == 0 && (expanded || compactShowsTerminal) ? cornerInset : 0,
@@ -814,11 +815,26 @@ final class SingleWindowShellViewController: UIViewController {
 
     // MARK: Child ownership
 
+    /// The panes are pinned by constraints: a frame the spring writes on the
+    /// container reaches the pane's own constraint tree in the same pass.
+    private func install(_ controller: UIViewController, in container: UIView) {
+        addChild(controller)
+        container.addSubview(controller.view)
+        controller.view.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            controller.view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            controller.view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            controller.view.topAnchor.constraint(equalTo: container.topAnchor),
+            controller.view.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
+        controller.didMove(toParent: self)
+    }
+
     private func mountDeck() {
         guard deckController == nil else { return }
         let controller = deckFactory(shellState, actions)
         deckController = controller
-        embed(controller, in: shellRootView.deckContainer)
+        install(controller, in: shellRootView.deckContainer)
         if let deck = controller as? DeckWindowViewController {
             deck.setAppLocked(appLocked)
             // Deck sheets present from this shell's presenter, so their
@@ -838,7 +854,7 @@ final class SingleWindowShellViewController: UIViewController {
             guard terminalController == nil else { return }
             let controller = terminalFactory(shellState, actions)
             terminalController = controller
-            embed(controller, in: shellRootView.terminalContainer)
+            install(controller, in: shellRootView.terminalContainer)
             (controller as? TerminalWindowViewController)?.setAppLocked(appLocked)
         } else {
             if let controller = terminalController {
