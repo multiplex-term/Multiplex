@@ -479,7 +479,7 @@ final class FleetWallViewController: UIViewController {
         if chrome.bandHeight > 0 {
             fixedHeader.setBandInsets(bandHeight: chrome.bandHeight)
         } else {
-            fixedHeader.setTopInset(min(wallPadding, 16))
+            fixedHeader.setTopInset(chrome.flushTop ? 0 : min(wallPadding, 16))
             fixedHeader.setBottomInset(16)
         }
 

@@ -261,7 +261,8 @@ enum SingleWindowShellNativeLayout {
             // The console deck sits below the fold, not under the status band.
             deckHeaderChrome: ShellHeaderChrome(
                 cornerInset: deckWidth > 0 && (expanded || !compactShowsTerminal) ? cornerInset : 0,
-                bandHeight: consoleShowsDeck ? 0 : topBand
+                bandHeight: consoleShowsDeck ? 0 : topBand,
+                flushTop: consoleShowsDeck
             ),
             terminalRailChrome: ShellHeaderChrome(
                 cornerInset: terminalX == 0 && (expanded || compactShowsTerminal) ? cornerInset : 0,
@@ -1016,7 +1017,13 @@ final class SingleWindowShellViewController: UIViewController {
         }
         currentLayoutMetrics = metrics
         targetLayoutMetrics = metrics
-        updateChildPresentation(metrics)
+        let shouldAnimate = animated
+            && !shellState.reduceMotion
+            && shellRootView.window != nil
+        // The deck rebuilds tiles on a presentation change; content installed
+        // inside the spring keeps in-flight geometry, so the deck waits for
+        // the settled pass.
+        updateChildPresentation(metrics, deferDeck: shouldAnimate)
         updateBackSwipeAvailability(expanded: metrics.expanded)
 
         // Animate only the shell's frame/alpha contract. Forcing
@@ -1045,9 +1052,6 @@ final class SingleWindowShellViewController: UIViewController {
         } else {
             settled = nil
         }
-        let shouldAnimate = animated
-            && !shellState.reduceMotion
-            && shellRootView.window != nil
         guard shouldAnimate else {
             layoutAnimator?.stopAnimation(true)
             layoutAnimator = nil
@@ -1072,12 +1076,13 @@ final class SingleWindowShellViewController: UIViewController {
             // width together.
             self.terminalController?.view.setNeedsLayout()
             self.deckController?.view.setNeedsLayout()
+            self.updateNativeDeckController()
             settled?()
         }
         animator.startAnimation()
     }
 
-    private func updateChildPresentation(_ metrics: SingleWindowShellLayoutMetrics) {
+    private func updateChildPresentation(_ metrics: SingleWindowShellLayoutMetrics, deferDeck: Bool = false) {
         // Orientation comes from the display, not a pane: a laptop-pose pane
         // is landscape-shaped on a portrait display.
         let sideColumn = ShellSideColumn.resolve(
@@ -1116,7 +1121,7 @@ final class SingleWindowShellViewController: UIViewController {
         guard shellState.presentation != presentation else { return }
         shellState.presentation = presentation
         shellRootView.bareChrome = presentation.bareChrome
-        updateNativeDeckController()
+        if !deferDeck { updateNativeDeckController() }
         updateNativeTerminalController()
     }
 

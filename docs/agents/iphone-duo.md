@@ -77,8 +77,9 @@ Measured on the 27.1 simulator with `MULTIPLEX_DUO_PROBE=1` (log category
   ≥ 60 (inner portrait, laptop top region): content starts at y 0, the
   band is content — the horizontal UMD rail and the deck header sit on the
   glyph line with a 128 pt trailing clearance for the clock cluster. The
-  console deck below the fold gets no band. The corner inset and band
-  travel as one `ShellHeaderChrome` per pane.
+  console deck below the fold gets no band and its header hugs the fold
+  (`flushTop`). The corner inset and band travel as one
+  `ShellHeaderChrome` per pane.
 - **Rail edge** — `ShellRailPlacement.edge(…)`: a system-reported
   vertical-bar edge wins; else phone + regular × regular + landscape is
   `.leading`; a foldable phone in compact landscape (closed display, no
@@ -133,6 +134,9 @@ Measured on the 27.1 simulator with `MULTIPLEX_DUO_PROBE=1` (log category
   forced pass, or the key rail keeps its old width under the chip column.
   `TerminalKeyBar.narrowFloor` (32 pt faces below 375) and `keyFrames`
   stay inside the rail's bounds.
+- Content installed inside the fold spring keeps its in-flight geometry
+  (collapsed rows at the origin), so the deck's presentation update runs
+  on the settled pass, not at the animation's start.
 - Orientation comes from the display, not the pane: a laptop-pose pane is
   landscape-shaped on a portrait display.
 - A header inset change must lay the row out itself (`applyPanelWidth`

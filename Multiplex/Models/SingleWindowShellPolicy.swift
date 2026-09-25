@@ -258,6 +258,8 @@ struct ShellHeaderChrome: Equatable {
     var cornerInset: CGFloat = 0
     /// `SingleWindowShellLayout.topBandHeight`; zero elsewhere.
     var bandHeight: CGFloat = 0
+    /// The row hugs the pane's top edge (the console deck under the fold).
+    var flushTop = false
 
     static let none = ShellHeaderChrome()
 

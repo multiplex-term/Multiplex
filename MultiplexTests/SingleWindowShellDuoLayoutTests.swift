@@ -142,6 +142,7 @@ final class SingleWindowShellDuoLayoutTests: XCTestCase {
         )
         XCTAssertEqual(metrics.terminalRailChrome.bandHeight, 82)
         XCTAssertEqual(metrics.deckHeaderChrome.bandHeight, 0, "the console deck is below the fold")
+        XCTAssertTrue(metrics.deckHeaderChrome.flushTop)
     }
 
     func testLaptopPoseStopsTheTerminalAtTheFoldAndHandsTheRestToTheConsole() {
