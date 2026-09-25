@@ -110,7 +110,7 @@ final class UMDBarUIKitTests: XCTestCase {
     func testShellSwitchesBetweenWideAndCompactRowsAndHonorsSafeAreas() throws {
         let wideController = UMDBarViewController(configuration: configuration(
             style: .shell,
-            deckControlLabel: "WALL",
+            deckControl: .hide,
             availableWidth: 700,
             contentSafeArea: UIEdgeInsets(top: 0, left: 20, bottom: 0, right: 12)
         ))
@@ -120,20 +120,23 @@ final class UMDBarUIKitTests: XCTestCase {
         XCTAssertEqual(wideController.fittingContentSize(for: 700).width, 700)
         XCTAssertEqual(wideController.view.layer.cornerRadius, 0)
         XCTAssertEqual(wideController.view.layer.borderWidth, 0)
-        XCTAssertEqual(control("umd.deck", in: wideController.view)?.accessibilityLabel, "Wall")
+        XCTAssertEqual(control("umd.deck", in: wideController.view)?.accessibilityLabel, "◧ Hide")
         XCTAssertNotNil(control("umd.fontDown", in: wideController.view))
         XCTAssertNotNil(control("umd.detach", in: wideController.view))
 
         let compactController = UMDBarViewController(configuration: configuration(
             style: .shell,
-            deckControlLabel: "WALL",
+            deckControl: .back,
             availableWidth: 375,
             keyRailContentWidth: 375
         ))
         compactController.loadViewIfNeeded()
+        // The row drops progressively (RailFit): the font pair and + TAB
+        // go first; DETACH and TMUX outlive them and stay direct here.
         XCTAssertNotNil(view("umd.shell.compact", in: compactController.view))
         XCTAssertNil(control("umd.fontDown", in: compactController.view))
-        XCTAssertNil(control("umd.detach", in: compactController.view))
+        XCTAssertNil(control("umd.fontUp", in: compactController.view))
+        XCTAssertNil(control("umd.newTab", in: compactController.view))
         XCTAssertNotNil(control("umd.overflow", in: compactController.view))
         XCTAssertNotNil(control("umd.tmux", in: compactController.view))
         XCTAssertEqual(compactController.fittingContentSize(for: 375).width, 375)
@@ -251,18 +254,22 @@ final class UMDBarUIKitTests: XCTestCase {
         let overflow = try XCTUnwrap(control("umd.overflow", in: controller.view) as? UIButton)
         let menu = try XCTUnwrap(overflow.menu)
         let allActions = actions(in: menu)
-        XCTAssertEqual(menu.children.compactMap { ($0 as? UIMenu)?.title }, [
-            "Text Size", "New Tab", "Send File…", "Merge Window", "",
-        ])
-        XCTAssertNil(
-            control("umd.guide", in: controller.view),
-            "the compact row displaces every direct action, GUIDE included"
-        )
-        XCTAssertTrue(allActions.map(\.title).contains("Guide"))
+        // Progressive drop: what the row could not keep is what ⋯ carries.
+        let titles = menu.children.compactMap { ($0 as? UIMenu)?.title }
+        XCTAssertEqual(Array(titles.prefix(3)), ["Text Size", "New Tab", "Send File…"])
+        XCTAssertTrue(titles.contains("Merge Window"))
+        let guideStaysDirect = control("umd.guide", in: controller.view) != nil
         XCTAssertEqual(
-            allActions.first { $0.title == "Guide" }?.identifier,
-            UIAction.Identifier("umd.guide.action")
+            allActions.map(\.title).contains("Guide"),
+            !guideStaysDirect,
+            "GUIDE is direct or in ⋯, never both"
         )
+        if !guideStaysDirect {
+            XCTAssertEqual(
+                allActions.first { $0.title == "Guide" }?.identifier,
+                UIAction.Identifier("umd.guide.action")
+            )
+        }
         #if os(visionOS)
         // Keyboard lock is an iPad software-keyboard affordance. The
         // production controller and the SwiftUI surface it replaced both
@@ -277,8 +284,20 @@ final class UMDBarUIKitTests: XCTestCase {
         XCTAssertTrue(allActions.map(\.title).contains("File Viewer"))
         XCTAssertTrue(allActions.map(\.title).contains("Files…"))
         XCTAssertTrue(allActions.map(\.title).contains("OTHER"))
-        XCTAssertTrue(allActions.map(\.title).contains("Detach"))
-        let close = try XCTUnwrap(allActions.first { $0.title == "Close Session" })
+        XCTAssertEqual(
+            allActions.map(\.title).contains("Detach"),
+            control("umd.detach", in: controller.view) == nil,
+            "DETACH is direct or in ⋯, never both"
+        )
+        // DETACH keeps its closing menu when the row keeps the chip.
+        let closingActions: [UIAction] = {
+            if let detach = control("umd.detach", in: controller.view) as? UIButton,
+               let detachMenu = detach.menu {
+                return actions(in: detachMenu)
+            }
+            return allActions
+        }()
+        let close = try XCTUnwrap(closingActions.first { $0.title == "Close Session" })
         XCTAssertTrue(close.attributes.contains(.destructive))
         let files = try XCTUnwrap(allActions.first { $0.title == "Files…" })
         XCTAssertTrue(files.attributes.contains(.disabled))
@@ -534,7 +553,7 @@ final class UMDBarUIKitTests: XCTestCase {
         extraNewTabTarget: TerminalRoute.NewTabTarget? = nil,
         shortcutBackend: Host.SessionBackend? = .tmux,
         style: UMDBarStyle = .regular,
-        deckControlLabel: String = "DECK",
+        deckControl: ShellDeckControl = .back,
         availableWidth: CGFloat? = nil,
         contentSafeArea: UIEdgeInsets = .zero,
         keyRailContentWidth: CGFloat? = nil
@@ -557,7 +576,7 @@ final class UMDBarUIKitTests: XCTestCase {
             extraNewTabTarget: extraNewTabTarget,
             shortcutBackend: shortcutBackend,
             style: style,
-            deckControlLabel: deckControlLabel,
+            deckControl: deckControl,
             availableWidth: availableWidth,
             contentSafeArea: contentSafeArea,
             keyRailContentWidth: keyRailContentWidth

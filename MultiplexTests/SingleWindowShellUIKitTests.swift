@@ -61,6 +61,38 @@ final class SingleWindowShellUIKitTests: XCTestCase {
         XCTAssertNotNil(view("singleWindowShell.stubTerminal", in: controller.view))
     }
 
+    func testCrossingTheBreakpointKeepsTheTerminalAndRestoresTheRail() throws {
+        let harness = makeController(initialRoute: TerminalWindowRoute(
+            tab: terminal("main")
+        ))
+        let controller = harness.controller
+        controller.loadViewIfNeeded()
+        controller.applyTestLayout(size: CGSize(width: 1_024, height: 768))
+        XCTAssertTrue(controller.currentLayoutMetrics?.expanded == true)
+        controller.showDeck()
+        XCTAssertFalse(controller.deckRailVisible)
+
+        // Closing the device: two panes collapse to the attached terminal.
+        controller.applyTestLayout(size: CGSize(width: 390, height: 844))
+        XCTAssertFalse(controller.currentLayoutMetrics?.expanded == true)
+        XCTAssertTrue(controller.compactShowsTerminal)
+
+        // Opening it again: the hidden rail comes back beside the terminal.
+        controller.applyTestLayout(size: CGSize(width: 1_024, height: 768))
+        XCTAssertTrue(controller.currentLayoutMetrics?.expanded == true)
+        XCTAssertTrue(controller.deckRailVisible)
+    }
+
+    func testCrossingTheBreakpointWithNothingAttachedShowsTheDeck() throws {
+        let harness = makeController()
+        let controller = harness.controller
+        controller.loadViewIfNeeded()
+        controller.applyTestLayout(size: CGSize(width: 1_024, height: 768))
+        controller.applyTestLayout(size: CGSize(width: 390, height: 844))
+        XCTAssertFalse(controller.compactShowsTerminal)
+        XCTAssertEqual(controller.currentLayoutMetrics?.deckAlpha, 1)
+    }
+
     func testExpandedShellUsesRailAndRailToggleHandsItsSafeBandToTerminal() throws {
         let harness = makeController(initialRoute: TerminalWindowRoute(
             tab: terminal("main")
@@ -90,7 +122,7 @@ final class SingleWindowShellUIKitTests: XCTestCase {
         XCTAssertEqual(metrics.terminalSafeArea.left, 0)
         XCTAssertEqual(metrics.terminalSafeArea.right, 16)
         XCTAssertEqual(metrics.terminalAvailableWidth, 672)
-        XCTAssertEqual(controller.shellState.presentation.deckControlLabel, "◧ HIDE")
+        XCTAssertEqual(controller.shellState.presentation.deckControl, .hide)
         XCTAssertTrue(metrics.deckInteractive)
         XCTAssertTrue(metrics.terminalInteractive)
 
@@ -104,7 +136,7 @@ final class SingleWindowShellUIKitTests: XCTestCase {
         )
         XCTAssertEqual(metrics.terminalSafeArea.left, 20)
         XCTAssertEqual(metrics.terminalAvailableWidth, 988)
-        XCTAssertEqual(controller.shellState.presentation.deckControlLabel, "◧ DECK")
+        XCTAssertEqual(controller.shellState.presentation.deckControl, .show)
         XCTAssertFalse(metrics.deckInteractive)
         XCTAssertTrue(view("singleWindowShell.divider", in: controller.view)?.isHidden == true)
     }
@@ -114,6 +146,7 @@ final class SingleWindowShellUIKitTests: XCTestCase {
             size: CGSize(width: 600, height: 500),
             safeArea: UIEdgeInsets(top: 12, left: 44, bottom: 21, right: 44),
             verticalSizeClass: .regular,
+            idiom: .phone,
             deckRailVisible: true,
             compactShowsTerminal: true,
             compactBackSwipeOffset: 0,
@@ -132,6 +165,7 @@ final class SingleWindowShellUIKitTests: XCTestCase {
             size: CGSize(width: 600, height: 500),
             safeArea: UIEdgeInsets(top: 12, left: 44, bottom: 21, right: 44),
             verticalSizeClass: .compact,
+            idiom: .phone,
             deckRailVisible: true,
             compactShowsTerminal: true,
             compactBackSwipeOffset: 0,
@@ -146,11 +180,12 @@ final class SingleWindowShellUIKitTests: XCTestCase {
             size: CGSize(width: 600, height: 500),
             safeArea: UIEdgeInsets(top: 12, left: 44, bottom: 21, right: 44),
             verticalSizeClass: .regular,
+            idiom: .pad,
             deckRailVisible: true,
             compactShowsTerminal: true,
             compactBackSwipeOffset: 0,
             compactBackSwipeActive: false,
-            railAlwaysTakesBottomStrip: true
+            foldable: true
         )
         XCTAssertEqual(pad.terminalFrame.height, 488)
         XCTAssertTrue(pad.railOwnsBottomSafeArea)
@@ -214,6 +249,7 @@ final class SingleWindowShellUIKitTests: XCTestCase {
             size: CGSize(width: 390, height: 844),
             safeArea: .zero,
             verticalSizeClass: .regular,
+            idiom: .phone,
             deckRailVisible: true,
             compactShowsTerminal: true,
             compactBackSwipeOffset: 110,
@@ -291,7 +327,7 @@ final class SingleWindowShellUIKitTests: XCTestCase {
             terminalAvailableWidth: 704,
             terminalSafeArea: UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 16),
             railOwnsBottomSafeArea: true,
-            deckControlLabel: "◧ HIDE",
+            deckControl: .hide,
             terminalFocusAllowed: true
         )
         let configuration = SingleWindowShellViewController
@@ -300,7 +336,7 @@ final class SingleWindowShellUIKitTests: XCTestCase {
                 actions: SingleWindowShellActions()
             )
 
-        XCTAssertEqual(configuration.deckControlLabel, "◧ HIDE")
+        XCTAssertEqual(configuration.deckControl, .hide)
         XCTAssertEqual(configuration.availableWidth, 704)
         XCTAssertEqual(
             configuration.contentSafeArea,

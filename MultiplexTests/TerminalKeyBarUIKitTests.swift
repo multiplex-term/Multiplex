@@ -99,6 +99,20 @@ final class TerminalKeyBarUIKitTests: XCTestCase {
             .essentialsFloor
         )
         XCTAssertEqual(specification(width: 390, returns: false).tier, .tightTmux)
+        // iPhone Duo book page beside the 84 pt system column: 371.5 pt.
+        XCTAssertEqual(specification(width: 374.999, returns: true).tier, .narrowFloor)
+        XCTAssertEqual(specification(width: 371.5, returns: false).tier, .essentialsFloor)
+        XCTAssertEqual(specification(width: 371.4, returns: false).tier, .narrowFloor)
+        XCTAssertEqual(
+            specification(width: 455.5, returns: true,
+                          safeArea: UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 84)).tier,
+            .narrowFloor
+        )
+        // The narrow floor never paints outside its bounds down to 333 pt.
+        for width in [333.0, 340.0, 371.4] as [CGFloat] {
+            let narrow = specification(width: width, returns: true)
+            XCTAssertLessThanOrEqual(narrow.idealWidth(includesReturn: true), width + 0.5, "\(width)")
+        }
 
         XCTAssertEqual(
             specification(
@@ -108,6 +122,22 @@ final class TerminalKeyBarUIKitTests: XCTestCase {
             ).tier,
             .essentialsFloor
         )
+    }
+
+    func testKeyFramesNeverLeaveTheRailsBounds() {
+        // iPhone Duo book page: 455.5 pt with the 84 pt column as safe area,
+        // laid out with a tier that only fits 385.
+        let spec = TerminalKeyBarLayout.candidates(showsTmux: true, includesReturn: false)
+            .first { $0.tier == .tightTmux }!
+        let safe = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 84)
+        let frames = TerminalKeyBarLayout.keyFrames(
+            specification: spec, keyCount: 10, includesReturn: false,
+            width: 455.5, contentSafeArea: safe, keyTop: 0, keyHeight: 34
+        )
+        XCTAssertEqual(frames.count, 10)
+        XCTAssertLessThanOrEqual(frames.last!.maxX, 455.5 - 84 + 0.5)
+        XCTAssertGreaterThanOrEqual(frames.first!.minX, spec.edgeInset)
+        XCTAssertTrue(frames.allSatisfy { $0.width >= 24 })
     }
 
     func testNativeRailBuildsTallyControlsWithoutAHostedView() throws {

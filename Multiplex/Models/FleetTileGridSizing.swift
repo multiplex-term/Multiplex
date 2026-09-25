@@ -14,6 +14,12 @@ enum FleetTileGridSizing {
     static let minimumTileWidth: CGFloat = 290
     static let preferredTileWidth: CGFloat = 360
     static let gutter: CGFloat = 14
+    /// The wall's side padding: the classic DECK window and the compact-width
+    /// Shell keep 26; the expanded Shell's deck rail and the single-pane
+    /// Shell on a regular-width display (iPhone Duo's inner display) run 12,
+    /// so two minimum tiles fit there (602 usable ≥ 594).
+    static let compactWallPadding: CGFloat = 26
+    static let railWallPadding: CGFloat = 12
 
     /// The wall's final column count: never more columns than there are tiles
     /// to put in them.

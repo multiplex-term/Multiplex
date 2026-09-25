@@ -16,10 +16,25 @@ struct TerminalWindowDependencies {
 
 @MainActor
 struct TerminalWindowShellConfiguration {
-    var deckControlLabel: String
+    var deckControl: ShellDeckControl
     var availableWidth: CGFloat
     var contentSafeArea: UIEdgeInsets = .zero
+    /// What the UMD rail alone clears beyond the safe area (a bare display
+    /// corner, iPhone Duo's status band); never reaches the pane.
+    var railChrome = ShellHeaderChrome.none
     var railOwnsBottomSafeArea = false
+    /// iPhone Duo: the shell has a column to lend a ▤/⌗ panel — the deck
+    /// rail, a book page, or the laptop console region.
+    var columnAvailable = false
+    /// iPhone Duo: the source strip and key rail drop their bezel slab and
+    /// rule (`SingleWindowShellLayout.chromeIsBare`).
+    var bareChrome = false
+    /// iPhone Duo: the strip the UMD stands in as a column.
+    var sideColumn = ShellSideColumn.none
+    /// Hands a `SidePanelViewController` to the shell's column; the closure
+    /// is what ‹ DECK runs to move the panel into a tab and free the column.
+    var presentColumnPanel: (UIViewController, @escaping () -> Void) -> Void = { _, _ in }
+    var dismissColumnPanel: () -> Void = {}
     var showDeck: () -> Void
     var openTerminalRoute: (TerminalWindowRoute) -> Void
     var revealTab: (UUID) -> Void
@@ -28,18 +43,26 @@ struct TerminalWindowShellConfiguration {
 }
 
 private struct TerminalWindowShellPresentationKey: Equatable {
-    var deckControlLabel: String
+    var deckControl: ShellDeckControl
     var availableWidth: CGFloat
     var contentSafeArea: UIEdgeInsets
+    var railChrome: ShellHeaderChrome
     var railOwnsBottomSafeArea: Bool
+    var columnAvailable: Bool
+    var bareChrome: Bool
+    var sideColumn: ShellSideColumn
     var terminalFocusAllowed: Bool
 
     init?(_ shell: TerminalWindowShellConfiguration?) {
         guard let shell else { return nil }
-        deckControlLabel = shell.deckControlLabel
+        deckControl = shell.deckControl
         availableWidth = shell.availableWidth
         contentSafeArea = shell.contentSafeArea
+        railChrome = shell.railChrome
         railOwnsBottomSafeArea = shell.railOwnsBottomSafeArea
+        columnAvailable = shell.columnAvailable
+        bareChrome = shell.bareChrome
+        sideColumn = shell.sideColumn
         terminalFocusAllowed = shell.terminalFocusAllowed
     }
 }
@@ -207,6 +230,13 @@ final class TerminalWindowViewController: UIViewController,
     private let routeChanged: (TerminalWindowRoute) -> Void
 
     private var fontSize: CGFloat
+    /// A−/A+ pressed in this window: the trait-based default never touches
+    /// a size the user chose.
+    private var userAdjustedFont = false
+    /// Chips the column held at its last render: it re-renders when that
+    /// count moves, not on every keyboard-driven height tick.
+    private var renderedColumnCapacity: Int?
+    private var renderedRailEdge = ShellRailEdge.top
     private var shownAgent: AgentKind?
     private var lastDetectedAgent: AgentKind?
     private var lastObservedActiveTabID: UUID?
@@ -302,7 +332,9 @@ final class TerminalWindowViewController: UIViewController,
         #if os(visionOS)
         fontSize = 14
         #else
-        fontSize = UIDevice.current.userInterfaceIdiom == .phone ? 12 : 14
+        fontSize = TerminalFontDefaults.pointSize(
+            idiom: .device, horizontalSizeClass: .unspecified, verticalSizeClass: .unspecified
+        )
         #endif
         super.init(nibName: nil, bundle: nil)
     }
@@ -440,7 +472,12 @@ final class TerminalWindowViewController: UIViewController,
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        layoutNativeChrome()
+        applyTraitFontDefaultIfNeeded()
+        if resolvedRailEdge != renderedRailEdge {
+            renderNow()
+        } else {
+            layoutNativeChrome()
+        }
     }
 
     override func viewSafeAreaInsetsDidChange() {
@@ -450,11 +487,54 @@ final class TerminalWindowViewController: UIViewController,
 
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
         super.traitCollectionDidChange(previousTraitCollection)
+        applyTraitFontDefaultIfNeeded()
         guard traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection)
             || traitCollection.horizontalSizeClass
                 != previousTraitCollection?.horizontalSizeClass
+            || traitCollection.verticalSizeClass
+                != previousTraitCollection?.verticalSizeClass
         else { return }
         renderNow()
+    }
+
+    // MARK: iPhone Duo rail placement
+
+    /// Only the shell presentation ever leaves the top; a classic window,
+    /// the iPad, and visionOS keep the horizontal rail.
+    private var resolvedRailEdge: ShellRailEdge {
+        shell?.sideColumn.edge ?? .top
+    }
+
+    /// The UMD stands as a column for terminal tabs only; a ▤ / ⌗ tab keeps
+    /// its own horizontal rail.
+    private func usesVerticalRail(edge: ShellRailEdge) -> Bool {
+        edge != .top && activeTab?.isAuxiliaryPane != true
+    }
+
+    /// The column's frame in the root view: the pane's side safe strip on
+    /// the rail's edge, above the keyboard.
+    private func verticalColumnFrame(edge: ShellRailEdge) -> CGRect {
+        guard isViewLoaded, let shell, usesVerticalRail(edge: edge) else { return .zero }
+        return shell.sideColumn.frame(
+            in: rootView.bounds,
+            strip: edge == .trailing ? shell.contentSafeArea.right : shell.contentSafeArea.left,
+            obstruction: activeController?.keyboardObstruction ?? 0
+        )
+    }
+
+    /// The trait-based default size, until A−/A+ is pressed in this window.
+    private func applyTraitFontDefaultIfNeeded() {
+        #if os(iOS)
+        guard shell != nil, !userAdjustedFont else { return }
+        let size = TerminalFontDefaults.pointSize(
+            idiom: .device,
+            horizontalSizeClass: ShellSizeClass(traitCollection.horizontalSizeClass),
+            verticalSizeClass: ShellSizeClass(traitCollection.verticalSizeClass)
+        )
+        guard size != fontSize else { return }
+        fontSize = size
+        renderNow()
+        #endif
     }
 
     func update(
@@ -480,6 +560,9 @@ final class TerminalWindowViewController: UIViewController,
         } else {
             restartObservation()
         }
+        // The shell's column came or went: the column panel follows it
+        // (into the column, or into a tab).
+        if shellChanged, sidePanelStyle == .shellColumn { renderSidePanel() }
     }
 
     /// Propagated by the UIKit scene root. Spatial ornaments live outside
@@ -527,12 +610,12 @@ final class TerminalWindowViewController: UIViewController,
         }
         for controller in paneControllers.values {
             preparePaneForRemoval(controller)
-            unmount(controller)
+            unembed(controller)
         }
         paneControllers.removeAll()
         for controller in sidePanelViewControllers.values {
             controller.prepareForRemoval()
-            if controller.parent === self { unmount(controller) }
+            if controller.parent === self { unembed(controller) }
         }
         sidePanelViewControllers.removeAll()
         mountedSidePanelHostID = nil
@@ -575,7 +658,11 @@ final class TerminalWindowViewController: UIViewController,
         #if os(visionOS)
         shell == nil ? .visionOrnament : .iPadOverlay
         #else
-        sidePanelPlatform == nil ? nil : .iPadOverlay
+        if sidePanelPlatform != nil { return .iPadOverlay }
+        // iPhone Duo: the shell's column (admission gates it to a
+        // regular-width display with a column to give).
+        return shell != nil && ShellModeDecision.Idiom.device == .phone
+            ? .shellColumn : nil
         #endif
     }
     private var sidePanelEnvironmentOverride: String? {
@@ -592,7 +679,8 @@ final class TerminalWindowViewController: UIViewController,
             paneWidth: rootView.paneContainer.bounds.width,
             isCompactWidth: traitCollection.horizontalSizeClass == .compact,
             anchorIsTerminal: !anchor.isAuxiliaryPane,
-            environmentOverride: sidePanelEnvironmentOverride
+            environmentOverride: sidePanelEnvironmentOverride,
+            columnAvailable: shell?.columnAvailable ?? false
         )
     }
     private var terminalFocusAllowed: Bool {
@@ -625,7 +713,11 @@ final class TerminalWindowViewController: UIViewController,
     /// straight through; the classic window adds the window-control pill and
     /// window-edge clearance — see `TerminalClassicRailInsets`.
     private var umdSafeArea: UIEdgeInsets {
-        if let shell { return shell.contentSafeArea }
+        if let shell {
+            var insets = shell.contentSafeArea
+            insets.left += shell.railChrome.cornerInset
+            return insets
+        }
         #if os(visionOS)
         return .zero
         #else
@@ -1769,7 +1861,7 @@ extension TerminalWindowViewController {
                 continue
             }
             preparePaneForRemoval(controller)
-            unmount(controller)
+            unembed(controller)
         }
 
         for tab in route.tabs {
@@ -1778,7 +1870,7 @@ extension TerminalWindowViewController {
             guard let pane else { continue }
             if paneControllers[tab.id] == nil {
                 paneControllers[tab.id] = pane
-                mount(pane, in: rootView.paneContainer)
+                embed(pane, in: rootView.paneContainer)
             }
             pane.view.frame = rootView.paneContainer.bounds
             pane.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -1802,7 +1894,11 @@ extension TerminalWindowViewController {
             guard live !== cached.controller, !(hostID == desiredHost && live != nil) else { continue }
             sidePanelViewControllers.removeValue(forKey: hostID)
             cached.prepareForRemoval()
-            if cached.parent === self { unmount(cached) }
+            if cached.parent === self { unembed(cached) }
+            if hostID == mountedSidePanelHostID, sidePanelStyle == .shellColumn {
+                mountedSidePanelHostID = nil
+                shell?.dismissColumnPanel()
+            }
         }
 
         guard let hostID = desiredHost,
@@ -1822,6 +1918,28 @@ extension TerminalWindowViewController {
             sidePanelViewControllers[hostID] = panel
         }
         let replaced = previousForHost !== panel ? previousForHost : nil
+
+        if sidePanelStyle == .shellColumn {
+            // The shell's column: no card of ours. A column that vanished
+            // (device closed, flat portrait) sends the panel into a tab.
+            guard admitsSidePanel(anchor: hostTab) else {
+                unmountCurrentSidePanel()
+                scheduleSidePanelConversion(hostTabID: hostID)
+                return
+            }
+            panel.setPresented(true)
+            panel.refreshHeader()
+            if let previousID = mountedSidePanelHostID, previousID != hostID {
+                sidePanelViewControllers[previousID]?.setPresented(false)
+            }
+            replaced?.setPresented(false)
+            replaced?.prepareForRemoval()
+            mountedSidePanelHostID = hostID
+            shell?.presentColumnPanel(panel) { [weak self] in
+                self?.splitSidePanelToTab(hostTabID: hostID)
+            }
+            return
+        }
         panel.setPresented(true)
 
         if sidePanelStyle == .visionOrnament {
@@ -1844,9 +1962,9 @@ extension TerminalWindowViewController {
         let changes = { [self] in
             if let oldMounted, oldMounted !== panel, oldMounted.parent === self {
                 oldMounted.setPresented(false)
-                unmount(oldMounted)
+                unembed(oldMounted)
             }
-            if panel.parent !== self { mount(panel, in: rootView.sidePanelContainer) }
+            if panel.parent !== self { embed(panel, in: rootView.sidePanelContainer) }
             panel.view.isHidden = false
             mountedSidePanelHostID = hostID
             rootView.sidePanelContainer.isHidden = false
@@ -1956,11 +2074,13 @@ extension TerminalWindowViewController {
     }
 
     private func unmountCurrentSidePanel() {
-        if sidePanelStyle == .visionOrnament {
+        if sidePanelStyle != .iPadOverlay {
+            // The ornament strip and the shell's column own the container.
             if let hostID = mountedSidePanelHostID {
                 sidePanelViewControllers[hostID]?.setPresented(false)
             }
             mountedSidePanelHostID = nil
+            if sidePanelStyle == .shellColumn { shell?.dismissColumnPanel() }
             return
         }
         guard let hostID = mountedSidePanelHostID else {
@@ -1969,7 +2089,7 @@ extension TerminalWindowViewController {
         }
         if let panel = sidePanelViewControllers[hostID], panel.parent === self {
             panel.setPresented(false)
-            unmount(panel)
+            unembed(panel)
         }
         mountedSidePanelHostID = nil
         rootView.sidePanelContainer.isHidden = true
@@ -1979,6 +2099,7 @@ extension TerminalWindowViewController {
     /// to its pane here; the ornament's card clamps itself to the strip.
     private func resolvedSidePanelWidth() -> CGFloat {
         guard let platform = sidePanelPlatform, let style = sidePanelStyle else { return 0 }
+        if style == .shellColumn { return 0 }
         if let transientSidePanelWidth { return transientSidePanelWidth }
         let stored = SidePanelWidthStore.shared.width(for: platform)
         switch style {
@@ -1986,6 +2107,8 @@ extension TerminalWindowViewController {
             return SidePanelWidth.clamped(stored, paneWidth: rootView.paneContainer.bounds.width)
         case .visionOrnament:
             return stored
+        case .shellColumn:
+            return 0
         }
     }
 
@@ -2004,6 +2127,9 @@ extension TerminalWindowViewController {
             guard phase == .ended else { return }
             SidePanelWidthStore.shared.setVisionGeometry(width: width, overhang: overhang)
             renderNow()
+        case .shellColumn:
+            // The column has no seam to drag.
+            break
         case .iPadOverlay:
             // Only the overlay moves per tick; the rest of the chrome waits
             // for the release's render.
@@ -2145,6 +2271,7 @@ extension TerminalWindowViewController {
             bottomChromeHeight: terminalBottomChromeHeight,
             contentSafeArea: contentSafeArea,
             railOwnsBottomSafeArea: railOwnsBottomSafeArea,
+            bareChrome: shell?.bareChrome ?? false,
             isActive: isActive,
             focusAllowed: terminalFocusAllowed,
             keyCommandPlan: keyCommandPlan,
@@ -2167,20 +2294,6 @@ extension TerminalWindowViewController {
         (pane as? TerminalPaneViewController)?.prepareForRemoval()
         (pane as? ViewportPaneViewController)?.prepareForRemoval()
         (pane as? FileViewerPaneViewController)?.prepareForRemoval()
-    }
-
-    private func mount(_ controller: UIViewController, in container: UIView) {
-        addChild(controller)
-        container.addSubview(controller.view)
-        controller.view.frame = container.bounds
-        controller.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        controller.didMove(toParent: self)
-    }
-
-    private func unmount(_ controller: UIViewController) {
-        controller.willMove(toParent: nil)
-        controller.view.removeFromSuperview()
-        controller.removeFromParent()
     }
 
     private func renderTabStrip() {
@@ -2334,7 +2447,7 @@ extension TerminalWindowViewController {
     /// so the rail can still choose its compact row in a narrow Stage Manager
     /// window (a nil width reads as unlimited and would pin it wide).
     private var umdAvailableWidth: CGFloat? {
-        if let shell { return shell.availableWidth }
+        if let shell { return shell.availableWidth - shell.railChrome.bandTrailingClearance }
         #if os(visionOS)
         return nil
         #else
@@ -2387,6 +2500,7 @@ extension TerminalWindowViewController {
 
     private func renderUMD() {
         let profile = railProfile
+        renderedRailEdge = resolvedRailEdge
         if activeTab?.isAuxiliaryPane == true {
             let activePane = activeTab.flatMap { paneControllers[$0.id] }
             let fileViewer = (activePane as? FileViewerPaneViewController)?
@@ -2403,7 +2517,7 @@ extension TerminalWindowViewController {
                     self?.closeTab(id)
                 },
                 style: profile.auxiliaryStyle,
-                deckControlLabel: shell?.deckControlLabel ?? "DECK",
+                deckControlLabel: shell?.deckControl.label ?? "DECK",
                 contentSafeArea: umdSafeArea,
                 contentVerticalPadding: profile.verticalPadding,
                 minimumContentHeight: profile.minimumHeight,
@@ -2432,6 +2546,11 @@ extension TerminalWindowViewController {
             return
         }
 
+        let edge = resolvedRailEdge
+        let vertical = usesVerticalRail(edge: edge)
+        let chrome = shell?.railChrome ?? .none
+        let column = verticalColumnFrame(edge: edge)
+        let columnCapacity = RailFit.capacity(availableHeight: column.height)
         let configuration = UMDBarConfiguration(
             controller: activeController,
             title: umdTitle,
@@ -2454,18 +2573,48 @@ extension TerminalWindowViewController {
                 ? { [weak self] in self?.presentConnectionStats() } : nil,
             extraNewTabTarget: extraNewTabTarget,
             shortcutBackend: activeTab?.sessionBackend,
-            style: profile.style,
-            deckControlLabel: shell?.deckControlLabel ?? "DECK",
-            availableWidth: umdAvailableWidth,
-            contentSafeArea: umdSafeArea,
+            style: vertical ? .verticalColumn : profile.style,
+            deckControl: shell?.deckControl ?? .back,
+            availableWidth: vertical ? column.width : umdAvailableWidth,
+            contentSafeArea: vertical ? .zero : umdSafeArea,
             contentVerticalPadding: profile.verticalPadding,
             keyRailContentWidth: keyRailContentWidth(profile: profile),
-            minimumContentHeight: profile.minimumHeight
+            minimumContentHeight: chrome.bandHeight > 0 ? chrome.bandHeight : profile.minimumHeight,
+            columnCapacity: columnCapacity,
+            bandRowCenterY: chrome.bandRowCenterY,
+            bandTrailingClearance: chrome.bandTrailingClearance,
+            columnCenterX: vertical ? shell?.sideColumn.centerX(stripWidth: column.width) : nil,
+            columnAnchorsToBottom: vertical && shell?.sideColumn.placement.anchoredToBottom == true
         )
+        renderedColumnCapacity = vertical ? columnCapacity : nil
+        let bar: UMDBarViewController
         if let controller = umdController as? UMDBarViewController {
             controller.update(configuration: configuration)
+            bar = controller
         } else {
-            replaceUMD(with: UMDBarViewController(configuration: configuration))
+            bar = UMDBarViewController(configuration: configuration)
+            replaceUMD(with: bar)
+        }
+        mountSourceStrip(bar.sourceStripView, visible: vertical)
+    }
+
+    /// The source strip rides the column: mounted while the rail stands
+    /// vertical, hidden the moment it lies flat again.
+    private func mountSourceStrip(_ strip: UMDSourceStripView, visible: Bool) {
+        let container = rootView.sourceStripContainer
+        if visible {
+            if strip.superview !== container {
+                container.subviews.forEach { $0.removeFromSuperview() }
+                strip.frame = container.bounds
+                strip.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                container.addSubview(strip)
+            }
+            strip.setInsets(umdSafeArea)
+            strip.bareChrome = shell?.bareChrome ?? false
+            container.isHidden = false
+        } else {
+            container.subviews.forEach { $0.removeFromSuperview() }
+            container.isHidden = true
         }
     }
 
@@ -2474,9 +2623,9 @@ extension TerminalWindowViewController {
         if let existing = umdController {
             (existing as? UMDBarViewController)?.prepareForRemoval()
             #if os(visionOS)
-            if shell != nil { unmount(existing) }
+            if shell != nil { unembed(existing) }
             #else
-            unmount(existing)
+            unembed(existing)
             #endif
         }
         umdController = replacement
@@ -2484,11 +2633,7 @@ extension TerminalWindowViewController {
         #if os(visionOS)
         guard shell != nil else { return }
         #endif
-        addChild(replacement)
-        rootView.umdContainer.addSubview(replacement.view)
-        replacement.view.frame = rootView.umdContainer.bounds
-        replacement.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        replacement.didMove(toParent: self)
+        embed(replacement, in: rootView.umdContainer)
     }
 
     private func renderHelper() {
@@ -2571,9 +2716,9 @@ extension TerminalWindowViewController {
         if let helperController {
             helperController.prepareForRemoval()
             #if os(visionOS)
-            if shell != nil { unmount(helperController) }
+            if shell != nil { unembed(helperController) }
             #else
-            unmount(helperController)
+            unembed(helperController)
             #endif
         }
         helperController = replacement
@@ -2620,7 +2765,7 @@ extension TerminalWindowViewController {
                 // visionOS mounts the composer in the bottom ornament, never
                 // in-window (the shell there is a test-only configuration).
                 #if !os(visionOS)
-                unmount(existing)
+                unembed(existing)
                 #endif
                 talkbackController = nil
                 unfoldHelperAfterTalkback()
@@ -2693,11 +2838,7 @@ extension TerminalWindowViewController {
 
     #if !os(visionOS)
     private func mountTalkback(_ composer: TalkbackComposerViewController) {
-        addChild(composer)
-        rootView.talkbackContainer.addSubview(composer.view)
-        composer.view.frame = rootView.talkbackContainer.bounds
-        composer.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        composer.didMove(toParent: self)
+        embed(composer, in: rootView.talkbackContainer)
     }
     #endif
 
@@ -2725,6 +2866,7 @@ extension TerminalWindowViewController {
     }
 
     private func changeFont(by delta: CGFloat) {
+        userAdjustedFont = true
         fontSize = min(32, max(9, fontSize + delta))
         renderNow()
     }
@@ -2843,11 +2985,7 @@ extension TerminalWindowViewController {
     ) {
         guard let controller else { return }
         if controller.parent !== self {
-            if controller.parent != nil {
-                controller.willMove(toParent: nil)
-                controller.view.removeFromSuperview()
-                controller.removeFromParent()
-            }
+            if controller.parent != nil { unembed(controller) }
             addChild(controller)
             container.addSubview(controller.view)
             controller.didMove(toParent: self)
@@ -2957,18 +3095,42 @@ extension TerminalWindowViewController {
             ).height
         }()
 
-        if shell != nil {
-            rootView.umdContainer.frame = CGRect(
-                x: 0, y: 0, width: bounds.width, height: umdHeight
-            )
+        let railEdge = resolvedRailEdge
+        if let shell {
+            let chromeBottom: CGFloat
+            if usesVerticalRail(edge: railEdge), umdController is UMDBarViewController {
+                // The rail stands in the side strip; the source strip takes
+                // the top.
+                let column = verticalColumnFrame(edge: railEdge)
+                if renderedColumnCapacity != RailFit.capacity(availableHeight: column.height) {
+                    renderUMD()
+                }
+                chromeBottom = UMDSourceStripView.height
+                rootView.umdContainer.frame = column
+                rootView.sourceStripContainer.frame = CGRect(
+                    x: 0, y: 0, width: bounds.width, height: chromeBottom
+                )
+                // Bare chrome: the strip's band wears the pane's ground.
+                rootView.sourceStripContainer.backgroundColor =
+                    shell.bareChrome ? rootView.paneContainer.backgroundColor : .clear
+                rootView.bringSubviewToFront(rootView.umdContainer)
+            } else {
+                // The rail spans the top, or the whole status band on the
+                // inner portrait display (its row centres on the glyph line).
+                let band = shell.railChrome.bandHeight
+                chromeBottom = band > 0 ? band : umdHeight
+                rootView.umdContainer.frame = CGRect(
+                    x: 0, y: 0, width: bounds.width, height: chromeBottom
+                )
+            }
             rootView.tabScrollView.frame = CGRect(
-                x: 0, y: umdHeight, width: bounds.width, height: tabsHeight
+                x: 0, y: chromeBottom, width: bounds.width, height: tabsHeight
             )
             rootView.paneContainer.frame = CGRect(
                 x: 0,
-                y: umdHeight + tabsHeight,
+                y: chromeBottom + tabsHeight,
                 width: contentBounds.width,
-                height: max(0, contentBounds.height - umdHeight - tabsHeight)
+                height: max(0, contentBounds.height - chromeBottom - tabsHeight)
             )
         } else {
             // The classic window's rail is app-owned chrome pinned to the
@@ -3143,8 +3305,13 @@ extension TerminalWindowViewController {
             visionShellKeyCluster.frame = .zero
         }
         #endif
-        for pane in paneControllers.values {
+        for pane in paneControllers.values where pane.view.frame != rootView.paneContainer.bounds {
             pane.view.frame = rootView.paneContainer.bounds
+            // The pane's constraint tree must resolve against the new bounds
+            // in this pass (a fold moves origin and width together).
+            pane.view.setNeedsLayout()
+            for surface in pane.view.subviews { surface.setNeedsLayout() }
+            pane.view.layoutIfNeeded()
         }
         layoutInWindowSidePanel()
     }
@@ -3615,6 +3782,9 @@ final class TerminalWindowUIKitRootView: UIView {
     let sidePanelContainer = UIView()
     let tabScrollView = TerminalTabScrollView()
     let umdContainer = UIView()
+    /// iPhone Duo: the 20 pt source strip over the pane while the UMD stands
+    /// as a column in the system's side bar.
+    let sourceStripContainer = UIView()
     let helperContainer = UIView()
     /// The Talkback card's band on iPad / iPhone (and the visionOS shell):
     /// docked between the pane's chrome and its key rail.
@@ -3655,6 +3825,8 @@ final class TerminalWindowUIKitRootView: UIView {
         addSubview(tabScrollView)
         addSubview(tabDivider)
         addSubview(umdContainer)
+        sourceStripContainer.isHidden = true
+        addSubview(sourceStripContainer)
         addSubview(sidePanelContainer)
         addSubview(talkbackContainer)
         addSubview(helperContainer)
@@ -3663,6 +3835,7 @@ final class TerminalWindowUIKitRootView: UIView {
         sidePanelContainer.accessibilityIdentifier = "terminalWindow.sidePanel"
         tabScrollView.accessibilityIdentifier = "terminalWindow.tabs"
         umdContainer.accessibilityIdentifier = "terminalWindow.umd"
+        sourceStripContainer.accessibilityIdentifier = "terminalWindow.sourceStrip"
         helperContainer.accessibilityIdentifier = "terminalWindow.helpers"
         talkbackContainer.accessibilityIdentifier = "terminalWindow.talkback"
     }

@@ -1,4 +1,5 @@
 import CoreImage
+import OSLog
 import UIKit
 
 @MainActor
@@ -122,6 +123,9 @@ final class SidePanelViewController: UIViewController {
             root.addSubview(leadingSeam)
             configureWidthReadout()
             cardView.addSubview(widthReadout)
+        case .shellColumn:
+            // The shell's column has the width; nothing to drag.
+            break
         case .visionOrnament:
             leadingSeam.pillCenterX = Self.visionHandleReach
             trailingSeam.pillCenterX = Self.visionHandleReach
@@ -162,6 +166,9 @@ final class SidePanelViewController: UIViewController {
                     width: Self.seamOverhang + Self.seamInside,
                     height: bounds.height
                 )
+            case .shellColumn:
+                contentInset = 0
+                cardView.frame = bounds
             case .visionOrnament:
                 contentInset = Self.visionContentInset
                 // The strip starts at the window's leading edge and its
@@ -222,6 +229,11 @@ final class SidePanelViewController: UIViewController {
         }
     }
 
+    /// The header row's clearance for a bare display corner.
+    func updateHeaderCornerInset(_ inset: CGFloat) {
+        headerView.cornerInset = inset
+    }
+
     func updateWidth(_ width: CGFloat) {
         guard panelWidth != width else { return }
         panelWidth = width
@@ -274,6 +286,9 @@ final class SidePanelViewController: UIViewController {
         if phase == .began { beginDrag() }
         guard let start = dragStart else { return }
         switch presentationStyle {
+        case .shellColumn:
+            // No seam: the column's width is the shell's.
+            break
         case .iPadOverlay:
             // The window owns the container: report the wanted width, it
             // clamps and lays out, and `updateWidth` brings the card along.
@@ -451,6 +466,13 @@ final class SidePanelViewController: UIViewController {
             view.layer.shadowOpacity = 0.45
             view.layer.shadowRadius = 24
             view.layer.shadowOffset = CGSize(width: -8, height: 6)
+        case .shellColumn:
+            // A pane in the shell's column, not a card over one: square,
+            // flat, chassis-grounded like the deck it replaces.
+            cardView.backgroundColor = UIKitChassis.bezel
+            cardView.layer.cornerRadius = 0
+            cardView.clipsToBounds = true
+            view.layer.shadowOpacity = 0
         case .visionOrnament:
             // The card IS the slab: smoke under GLASS (the SwiftUI host adds
             // the platter behind it), opaque chassis otherwise; the root is
@@ -543,6 +565,17 @@ final class SidePanelHeaderView: UIView {
     private var renderedKey = RenderKey.none
     private let row = UIStackView()
     private let progressLine = UIView()
+    private var rowLeadingConstraint: NSLayoutConstraint?
+    /// Leading clearance for the row alone, never the pane below.
+    var cornerInset: CGFloat = 0 {
+        didSet {
+            guard cornerInset != oldValue else { return }
+            rowLeadingConstraint?.constant = 8 + cornerInset
+            // The card only re-lays the row on a width change; move it now.
+            setNeedsLayout()
+            layoutIfNeeded()
+        }
+    }
 
     init(edge: SidePanelRowEdge, split: @escaping () -> Void, close: @escaping () -> Void) {
         self.edge = edge
@@ -557,8 +590,9 @@ final class SidePanelHeaderView: UIView {
         row.spacing = Self.gap
         addSubview(row)
         row.translatesAutoresizingMaskIntoConstraints = false
+        rowLeadingConstraint = row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8)
         NSLayoutConstraint.activate([
-            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            rowLeadingConstraint!,
             row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -7),
             row.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
