@@ -205,10 +205,9 @@ struct DeckWindowConfiguration {
     /// What the wall's header row clears beyond the safe area (a bare
     /// display corner, iPhone Duo's status band); see `ShellHeaderChrome`.
     var headerChrome = ShellHeaderChrome.none
-    /// iPhone Duo: the side edge the header's action chips stand on while
-    /// the deck spans the display; `.top` keeps them in the row.
-    var actionColumnEdge = ShellRailEdge.top
-    var displayIsLandscape = false
+    /// iPhone Duo: the strip the header's action chips stand in while the
+    /// deck spans the display; `.none` keeps them in the row.
+    var actionColumn = ShellSideColumn.none
     var sceneIsActive: Bool
     var reduceMotion: Bool
     var lifecycleDriver: DeckWindowLifecycleDriver
@@ -232,8 +231,7 @@ struct DeckWindowConfiguration {
         selectedTerminal: TerminalRoute? = nil,
         shellSafeArea: UIEdgeInsets = .zero,
         headerChrome: ShellHeaderChrome = .none,
-        actionColumnEdge: ShellRailEdge = .top,
-        displayIsLandscape: Bool = false,
+        actionColumn: ShellSideColumn = .none,
         sceneIsActive: Bool,
         reduceMotion: Bool,
         lifecycleDriver: DeckWindowLifecycleDriver? = nil
@@ -256,8 +254,7 @@ struct DeckWindowConfiguration {
         self.selectedTerminal = selectedTerminal
         self.shellSafeArea = shellSafeArea
         self.headerChrome = headerChrome
-        self.actionColumnEdge = actionColumnEdge
-        self.displayIsLandscape = displayIsLandscape
+        self.actionColumn = actionColumn
         self.sceneIsActive = sceneIsActive
         self.reduceMotion = reduceMotion
         self.lifecycleDriver = lifecycleDriver ?? .live(
@@ -565,8 +562,7 @@ final class DeckWindowViewController: UIViewController {
             selectedTerminal: configuration.selectedTerminal,
             shellSafeArea: configuration.shellSafeArea,
             headerChrome: configuration.headerChrome,
-            actionColumnEdge: configuration.actionColumnEdge,
-            displayIsLandscape: configuration.displayIsLandscape,
+            actionColumn: configuration.actionColumn,
             reduceMotion: configuration.reduceMotion,
             sceneIsActive: configuration.sceneIsActive,
             addHost: { [weak self] in self?.requestAddHost() },

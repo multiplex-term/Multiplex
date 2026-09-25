@@ -168,18 +168,30 @@ final class SingleWindowShellPolicyTests: XCTestCase {
     }
 
     func testDeckActionsStandInTheColumnOnlyWhileTheDeckSpansTheShell() {
+        let column = ShellSideColumn(edge: .trailing, placement: .init(top: 12, bottom: 80))
         XCTAssertEqual(
-            SingleWindowShellLayout.deckActionColumnEdge(railEdge: .trailing, deckSpansShell: true),
-            .trailing, "inner landscape, deck alone"
+            SingleWindowShellLayout.deckActionColumn(sideColumn: column, deckSpansShell: true),
+            column, "closed display, deck alone"
         )
         XCTAssertEqual(
-            SingleWindowShellLayout.deckActionColumnEdge(railEdge: .trailing, deckSpansShell: false),
-            .top, "beside a terminal the terminal's column owns the strip"
+            SingleWindowShellLayout.deckActionColumn(sideColumn: column, deckSpansShell: false),
+            .none, "beside a terminal the terminal's column owns the strip"
         )
         XCTAssertEqual(
-            SingleWindowShellLayout.deckActionColumnEdge(railEdge: .top, deckSpansShell: true),
-            .top, "shipped iPhone"
+            SingleWindowShellLayout.deckActionColumn(sideColumn: .none, deckSpansShell: true),
+            .none, "shipped iPhone"
         )
+    }
+
+    func testSideColumnFrameAndCentreFollowTheEdge() {
+        let bounds = CGRect(x: 0, y: 0, width: 466, height: 678)
+        let trailing = ShellSideColumn(edge: .trailing, placement: .init(top: 12, bottom: 80))
+        XCTAssertEqual(trailing.frame(in: bounds, strip: 90), CGRect(x: 376, y: 12, width: 90, height: 586))
+        XCTAssertEqual(trailing.frame(in: bounds, strip: 90, obstruction: 193).height, 473, "keyboard wins")
+        XCTAssertEqual(trailing.centerX(stripWidth: 90), 42)
+        let leading = ShellSideColumn(edge: .leading, placement: .init(top: 80, bottom: 12))
+        XCTAssertEqual(leading.frame(in: bounds, strip: 30), CGRect(x: 0, y: 80, width: 48, height: 586), "48 pt floor")
+        XCTAssertEqual(leading.centerX(stripWidth: 48), 48)
     }
 
     func testBareTopPaddingOnlyOnTheInnerDisplayWithNoTopInset() {

@@ -842,9 +842,7 @@ enum TerminalKeyBarLayout {
         case tightTmux
         case returnAndTmuxFloor
         case essentialsFloor
-        /// Below the 375 pt floor (an iPhone Duo book page beside the 84 pt
-        /// system column keeps 371.5): the same keys on 32 pt faces, so the
-        /// rail never paints past its own bounds.
+        /// Below 375 pt (a Duo book page): the same keys on 32 pt faces.
         case narrowFloor
     }
 
@@ -889,8 +887,7 @@ enum TerminalKeyBarLayout {
             faceInset: 1
         )
         static let compact = Metric(keyWidth: 36, spacing: 4, groupGap: 4)
-        /// 32 pt faces: 9 keys fit 316 pt, 10 (locked, RET) 333 — under any
-        /// page the Duo can cut. Engages only below the 375 floor.
+        /// 32 pt faces: 9 keys fit 316 pt, 10 fit 333.
         static let narrow = Metric(keyWidth: 32, spacing: 2, groupGap: 2, faceInset: 1)
         static let narrowReturn = Metric(keyWidth: 32, spacing: 0, groupGap: 1, faceInset: 1)
     }
@@ -1054,9 +1051,8 @@ enum TerminalKeyBarLayout {
             width - contentSafeArea.left - contentSafeArea.right
                 - specification.edgeInset * 2
         )
-        // A row that cannot fit (a book page beside iPhone Duo's 84 pt
-        // column, or a tier rendered a pass before its replacement) narrows
-        // its faces rather than painting past its own bounds.
+        // A row that cannot fit narrows its faces rather than painting
+        // past its own bounds.
         let overflow = minimumContentWidth - available
         let keyWidth: CGFloat = overflow > 0
             ? max(24, metric.keyWidth - overflow / CGFloat(keyCount))
@@ -1152,8 +1148,7 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback, KeyBarDropSurface 
         }
     }
 
-    /// No bezel slab, no top rule: the faces sit straight on the chassis
-    /// (iPhone Duo). Geometry is untouched.
+    /// No bezel slab, no top rule (iPhone Duo); geometry untouched.
     var bareChrome = false {
         didSet {
             guard bareChrome != oldValue else { return }

@@ -54,31 +54,28 @@ final class RailFitTests: XCTestCase {
         func placement(compact: Bool, landscape: Bool, trailing: Bool) -> RailFit.ColumnPlacement {
             RailFit.columnPlacement(compactWidth: compact, landscape: landscape, trailingEdge: trailing)
         }
+        XCTAssertEqual(placement(compact: false, landscape: true, trailing: true), .init(top: 120, bottom: 0))
         XCTAssertEqual(
-            placement(compact: false, landscape: true, trailing: true),
-            .init(top: 120, bottom: 0, anchoredToBottom: false), "inner: glyphs at the top"
+            placement(compact: true, landscape: false, trailing: true), .init(top: 160, bottom: 0),
+            "closed portrait: glyphs under the camera"
         )
-        XCTAssertEqual(
-            placement(compact: true, landscape: false, trailing: true),
-            .init(top: 160, bottom: 0, anchoredToBottom: false), "closed portrait: glyphs under the camera"
-        )
-        XCTAssertEqual(
-            placement(compact: true, landscape: true, trailing: false),
-            .init(top: 80, bottom: 12, anchoredToBottom: false), "camera top-left: chips hang below it"
-        )
-        XCTAssertEqual(
-            placement(compact: true, landscape: true, trailing: true),
-            .init(top: 12, bottom: 80, anchoredToBottom: true), "camera bottom-right: chips stack up from it"
-        )
+        XCTAssertEqual(placement(compact: true, landscape: true, trailing: false), .init(top: 80, bottom: 12))
+        XCTAssertFalse(placement(compact: true, landscape: true, trailing: false).anchoredToBottom, "camera top")
+        XCTAssertEqual(placement(compact: true, landscape: true, trailing: true), .init(top: 12, bottom: 80))
+        XCTAssertTrue(placement(compact: true, landscape: true, trailing: true).anchoredToBottom, "camera bottom")
+    }
+
+    private func items(_ offered: [RailItem], height: CGFloat) -> [RailItem] {
+        RailFit.columnItems(offered: offered, capacity: RailFit.capacity(availableHeight: height))
     }
 
     func testEverythingFitsOnTheInnerDisplay() {
-        XCTAssertEqual(RailFit.columnItems(offered: column, availableHeight: 549), column)
+        XCTAssertEqual(items(column, height: 549), column)
     }
 
     func testClosedLandscapeWithTheKeyboardUpKeepsDeckAndOverflow() {
         // Closed landscape: 466 − 193 keyboard − 160 top = 113 pt: two chips.
-        let visible = RailFit.columnItems(offered: column, availableHeight: 113)
+        let visible = items(column, height: 113)
         XCTAssertEqual(visible, [.deck, .overflow])
         XCTAssertEqual(
             RailFit.overflowing(offered: column, visible: visible),
@@ -89,27 +86,27 @@ final class RailFitTests: XCTestCase {
     func testColumnFontPairLeavesTogether() {
         // Seven offered (no shortcut), room for six: A− would go alone.
         let offered: [RailItem] = [.deck, .fontDown, .fontUp, .newTab, .file, .overflow, .detach]
-        let visible = RailFit.columnItems(offered: offered, availableHeight: 322)
+        let visible = items(offered, height: 322)
         XCTAssertEqual(visible, [.deck, .newTab, .file, .overflow, .detach])
         XCTAssertEqual(RailFit.overflowing(offered: offered, visible: visible), [.fontDown, .fontUp])
     }
 
     func testFourChipsKeepDeckShortcutOverflowDetach() {
         XCTAssertEqual(
-            RailFit.columnItems(offered: column, availableHeight: 200),
+            items(column, height: 200),
             [.deck, .shortcut, .overflow, .detach]
         )
     }
 
     func testDroppingAddsTheOverflowChipWhenNoneWasOffered() {
         let offered: [RailItem] = [.deck, .fontDown, .fontUp, .newTab, .detach]
-        let visible = RailFit.columnItems(offered: offered, availableHeight: 140)
+        let visible = items(offered, height: 140)
         XCTAssertEqual(visible, [.deck, .overflow, .detach])
         XCTAssertEqual(RailFit.overflowing(offered: offered, visible: visible), [.fontDown, .fontUp, .newTab])
     }
 
     func testDeckAndOverflowSurviveAnyHeight() {
-        XCTAssertEqual(RailFit.columnItems(offered: column, availableHeight: 44), [.deck, .overflow])
-        XCTAssertEqual(RailFit.columnItems(offered: column, availableHeight: 0), [.deck, .overflow])
+        XCTAssertEqual(items(column, height: 44), [.deck, .overflow])
+        XCTAssertEqual(items(column, height: 0), [.deck, .overflow])
     }
 }

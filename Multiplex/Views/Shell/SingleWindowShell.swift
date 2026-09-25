@@ -34,27 +34,19 @@ struct SingleWindowShellPresentation: Equatable {
     var railOwnsBottomSafeArea = false
     var deckControl = ShellDeckControl.back
     var terminalFocusAllowed = false
-    /// The device reports a hinge (iPhone Duo): its closed display in
-    /// landscape moves the rail to the camera's side (`ShellRailPlacement`).
+    /// The device reports a hinge (iPhone Duo).
     var foldable = false
-    /// iPhone Duo: the terminal's strip and key rail go flush
-    /// (`SingleWindowShellLayout.chromeIsBare`).
-    var bareChrome = false
-    /// The display's orientation (the shell spans the display; a pane does
-    /// not — a laptop-pose pane is landscape-shaped on a portrait display).
-    var displayIsLandscape = false
-    /// iPhone Duo: the side edge the deck's + HOST / FAQ / SETTINGS chips
-    /// stand on while the deck spans the display
-    /// (`SingleWindowShellLayout.deckActionColumnEdge`); `.top` keeps them
-    /// in the header row.
-    var deckActionColumnEdge = ShellRailEdge.top
+    /// iPhone Duo: the terminal's UMD column, and the deck's action column
+    /// while the deck spans the display.
+    var sideColumn = ShellSideColumn.none
+    var deckActionColumn = ShellSideColumn.none
     var deckHeaderChrome = ShellHeaderChrome.none
     var terminalRailChrome = ShellHeaderChrome.none
     /// The shell has a column to lend a ▤/⌗ panel (iPhone Duo): the deck
     /// rail, a book page, or the laptop console region.
     var columnAvailable = false
 
-    var deckControlLabel: String { deckControl.label }
+    var bareChrome: Bool { SingleWindowShellLayout.chromeIsBare(idiom: .device, foldable: foldable) }
 }
 
 @MainActor
@@ -111,16 +103,13 @@ struct SingleWindowShellLayoutMetrics: Equatable {
 }
 
 enum SingleWindowShellNativeLayout {
-    /// `division` is an active reserved division region (iPhone Duo's fold)
-    /// in the shell's coordinate space, nil while flat. A vertical one makes
-    /// the shell a book — one page each, the divider IS the region, and the
-    /// rail toggle cannot empty the left page. A horizontal one keeps the
-    /// terminal in the top region and hands the bottom one to the console
-    /// (`consoleFrame`).
+    /// `division` is the active fold region in shell coordinates (nil when
+    /// flat): vertical makes a book, horizontal hands the bottom region to
+    /// the console (`consoleFrame`).
     static func resolve(
         size: CGSize,
         safeArea: UIEdgeInsets,
-        verticalSizeClass: UIUserInterfaceSizeClass?,
+        verticalSizeClass: ShellSizeClass,
         horizontalSizeClass: ShellSizeClass = .unspecified,
         idiom: ShellModeDecision.Idiom,
         division: CGRect? = nil,
@@ -128,7 +117,7 @@ enum SingleWindowShellNativeLayout {
         compactShowsTerminal: Bool,
         compactBackSwipeOffset: CGFloat,
         compactBackSwipeActive: Bool,
-        railAlwaysTakesBottomStrip: Bool = false
+        foldable: Bool = false
     ) -> SingleWindowShellLayoutMetrics {
         let fullWidth = max(0, size.width)
         let usableWidth = max(0, fullWidth - safeArea.left - safeArea.right)
@@ -174,25 +163,20 @@ enum SingleWindowShellNativeLayout {
             topSafeArea: safeArea.top,
             idiom: idiom,
             horizontalSizeClass: horizontalSizeClass,
-            verticalSizeClass: ShellSizeClass(verticalSizeClass)
+            verticalSizeClass: verticalSizeClass
         )
         let topBand = SingleWindowShellLayout.topBandHeight(
             topSafeArea: safeArea.top,
             idiom: idiom,
             horizontalSizeClass: horizontalSizeClass,
-            verticalSizeClass: ShellSizeClass(verticalSizeClass)
+            verticalSizeClass: verticalSizeClass
         )
         // The band is the top safe area itself: content starts at 0 and the
         // rail / header live inside the band.
         let contentOriginY = topBand > 0 ? 0 : safeArea.top + topPadding
         let deckHeight = max(0, size.height - contentOriginY)
-        // The terminal's own key rail is the bottom edge, so it spends the
-        // home-indicator strip rather than parking a backfill band under
-        // itself (`SingleWindowShellLayout.railAlwaysTakesBottomStrip`). The
-        // rail buys back its own daylight below the key faces
-        // (`TerminalKeyBar.keyBottomInset`).
         let railTakesBottomStrip = verticalSizeClass == .compact
-            || railAlwaysTakesBottomStrip
+            || SingleWindowShellLayout.railAlwaysTakesBottomStrip(idiom: idiom, foldable: foldable)
         let terminalHeight: CGFloat
         let consoleFrame: CGRect?
         // Laptop pose: the bottom region is the console, and the deck lives
@@ -376,12 +360,11 @@ final class SingleWindowShellViewController: UIViewController {
     private var testLayoutInput: (
         size: CGSize,
         safeArea: UIEdgeInsets,
-        verticalSizeClass: UIUserInterfaceSizeClass?,
+        verticalSizeClass: ShellSizeClass,
         division: CGRect?
     )?
-    /// iPhone Duo hinge: `partiallyOpen` while the device is folded like a
-    /// book or a laptop. Drives layout only when the reserved-region query
-    /// comes back empty (the 27.1 simulator).
+    /// Hinge `partiallyOpen`: drives layout only while the reserved-region
+    /// query is empty (the 27.1 simulator).
     private var hingePartiallyOpen = false
     private var hingePresent = false
     private var hingeInteraction: (any UIInteraction)?
@@ -389,9 +372,7 @@ final class SingleWindowShellViewController: UIViewController {
     /// and what ‹ DECK runs to send it into a tab.
     private(set) var columnPanel: (controller: UIViewController, moveToTab: () -> Void)?
     #if DEBUG
-    /// `MULTIPLEX_AUTO_HIDE_DECK=1`: hide the expanded deck rail once, as
-    /// ◧ HIDE would, so a headless capture can show the terminal owning the
-    /// leading corner.
+    /// `MULTIPLEX_AUTO_HIDE_DECK=1`: ◧ HIDE once, for headless captures.
     private var autoHideDeckFired = false
     private func autoHideDeckIfRequested() {
         guard !autoHideDeckFired,
@@ -568,6 +549,16 @@ final class SingleWindowShellViewController: UIViewController {
         #endif
     }
 
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        #if os(iOS)
+        if #available(iOS 27.1, *),
+           traitCollection.verticalBarEdge != previousTraitCollection?.verticalBarEdge {
+            shellRootView.setNeedsLayout()
+        }
+        #endif
+    }
+
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         installHingeObservation()
@@ -662,10 +653,9 @@ final class SingleWindowShellViewController: UIViewController {
         focusAfterNavigation(tabID: tabID, deferringColdStart: false)
     }
 
-    /// Resolves the next layout and, when it crosses the expand breakpoint,
-    /// carries the shell across before the frames move. Returns whether it
-    /// crossed; the resolved metrics are cached for the `applyLayout` that
-    /// follows.
+    /// Resolves the next layout and carries the shell across the expand
+    /// breakpoint before the frames move; the metrics are cached for the
+    /// `applyLayout` that follows.
     @discardableResult
     private func continueAcrossBreakpointIfCrossed() -> Bool {
         let next = resolvedLayoutMetrics()
@@ -677,10 +667,8 @@ final class SingleWindowShellViewController: UIViewController {
         return true
     }
 
-    /// A device that opens, closes, or folds keeps the work in front of you:
-    /// the terminal wins on close (the deck only when nothing is attached),
-    /// and a hidden deck rail returns when two panes fit again (iPhone Duo;
-    /// the same rule holds for any phone rotating across the breakpoint).
+    /// Crossing to single pane shows the attached terminal (the deck when
+    /// nothing is attached); crossing to two panes restores a hidden rail.
     private func continueAcrossBreakpoint(expanding: Bool) {
         if expanding {
             deckRailVisible = true
@@ -814,7 +802,7 @@ final class SingleWindowShellViewController: UIViewController {
     func applyTestLayout(
         size: CGSize,
         safeArea: UIEdgeInsets = .zero,
-        verticalSizeClass: UIUserInterfaceSizeClass? = .regular,
+        verticalSizeClass: ShellSizeClass = .regular,
         division: CGRect? = nil
     ) {
         loadViewIfNeeded()
@@ -830,7 +818,7 @@ final class SingleWindowShellViewController: UIViewController {
         guard deckController == nil else { return }
         let controller = deckFactory(shellState, actions)
         deckController = controller
-        install(controller, in: shellRootView.deckContainer)
+        embed(controller, in: shellRootView.deckContainer)
         if let deck = controller as? DeckWindowViewController {
             deck.setAppLocked(appLocked)
             // Deck sheets present from this shell's presenter, so their
@@ -850,7 +838,7 @@ final class SingleWindowShellViewController: UIViewController {
             guard terminalController == nil else { return }
             let controller = terminalFactory(shellState, actions)
             terminalController = controller
-            install(controller, in: shellRootView.terminalContainer)
+            embed(controller, in: shellRootView.terminalContainer)
             (controller as? TerminalWindowViewController)?.setAppLocked(appLocked)
         } else {
             if let controller = terminalController {
@@ -890,19 +878,6 @@ final class SingleWindowShellViewController: UIViewController {
         (terminalController as? TerminalWindowViewController)?.setAppLocked(locked)
     }
 
-    private func install(_ controller: UIViewController, in container: UIView) {
-        addChild(controller)
-        container.addSubview(controller.view)
-        controller.view.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            controller.view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            controller.view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            controller.view.topAnchor.constraint(equalTo: container.topAnchor),
-            controller.view.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-        ])
-        controller.didMove(toParent: self)
-    }
-
     private func observeRoute(generation: Int? = nil) {
         let generation = generation ?? {
             routeObservationGeneration &+= 1
@@ -934,7 +909,7 @@ final class SingleWindowShellViewController: UIViewController {
         let input = testLayoutInput ?? (
             size: shellRootView.bounds.size,
             safeArea: shellRootView.safeAreaInsets,
-            verticalSizeClass: traitCollection.verticalSizeClass,
+            verticalSizeClass: ShellSizeClass(traitCollection.verticalSizeClass),
             division: currentDivisionRegion()
         )
         return SingleWindowShellNativeLayout.resolve(
@@ -948,15 +923,12 @@ final class SingleWindowShellViewController: UIViewController {
             compactShowsTerminal: compactShowsTerminal,
             compactBackSwipeOffset: compactBackSwipeOffset,
             compactBackSwipeActive: compactBackSwipeActive,
-            railAlwaysTakesBottomStrip: SingleWindowShellLayout.railAlwaysTakesBottomStrip(
-                idiom: .device, foldable: hingePresent
-            )
+            foldable: hingePresent
         )
     }
 
-    /// The fold as a rect in the shell's coordinates, or nil when flat. The
-    /// system's division region wins; the hinge status stands in where the
-    /// query is empty (the 27.1 simulator reports none in any pose).
+    /// The fold in shell coordinates, nil when flat: the system's division
+    /// region, else the hinge-derived band.
     private func currentDivisionRegion() -> CGRect? {
         #if os(iOS)
         if #available(iOS 27.1, *) {
@@ -989,9 +961,6 @@ final class SingleWindowShellViewController: UIViewController {
                 let present = update.hinge != nil
                 if present != hingePresent {
                     hingePresent = present
-                    shellRootView.bareChrome = SingleWindowShellLayout.chromeIsBare(
-                        idiom: .device, foldable: present
-                    )
                     if folded == hingePartiallyOpen { applyLayout(animated: false) }
                 }
                 guard folded != hingePartiallyOpen else { return }
@@ -1083,10 +1052,8 @@ final class SingleWindowShellViewController: UIViewController {
             guard let self, self.layoutAnimator === animator else { return }
             self.layoutAnimator = nil
             self.layoutCompletion = nil
-            // The children laid out against in-flight geometry during the
-            // spring (a fold moves the terminal's origin AND width); give
-            // them one settled pass so panes and rails re-frame from the
-            // final bounds.
+            // One settled pass after the spring: a fold moves origin and
+            // width together.
             self.terminalController?.view.setNeedsLayout()
             self.deckController?.view.setNeedsLayout()
             settled?()
@@ -1095,10 +1062,11 @@ final class SingleWindowShellViewController: UIViewController {
     }
 
     private func updateChildPresentation(_ metrics: SingleWindowShellLayoutMetrics) {
-        let displayIsLandscape = shellRootView.bounds.width > shellRootView.bounds.height
-        let railEdge = ShellRailPlacement.edge(
+        // Orientation comes from the display, not a pane: a laptop-pose pane
+        // is landscape-shaped on a portrait display.
+        let sideColumn = ShellSideColumn.resolve(
             traits: traitCollection,
-            isLandscape: displayIsLandscape,
+            isLandscape: shellRootView.bounds.width > shellRootView.bounds.height,
             foldable: hingePresent,
             leadingSafeArea: metrics.deckSafeArea.left,
             trailingSafeArea: metrics.deckSafeArea.right
@@ -1116,10 +1084,9 @@ final class SingleWindowShellViewController: UIViewController {
             terminalFocusAllowed: (metrics.expanded || compactShowsTerminal)
                 && terminalFocusReady,
             foldable: hingePresent,
-            bareChrome: SingleWindowShellLayout.chromeIsBare(idiom: .device, foldable: hingePresent),
-            displayIsLandscape: displayIsLandscape,
-            deckActionColumnEdge: SingleWindowShellLayout.deckActionColumnEdge(
-                railEdge: railEdge,
+            sideColumn: sideColumn,
+            deckActionColumn: SingleWindowShellLayout.deckActionColumn(
+                sideColumn: sideColumn,
                 deckSpansShell: metrics.deckPresentation == .shellCompact
             ),
             deckHeaderChrome: metrics.deckHeaderChrome,
@@ -1132,6 +1099,7 @@ final class SingleWindowShellViewController: UIViewController {
         }
         guard shellState.presentation != presentation else { return }
         shellState.presentation = presentation
+        shellRootView.bareChrome = presentation.bareChrome
         updateNativeDeckController()
         updateNativeTerminalController()
     }
@@ -1172,9 +1140,7 @@ final class SingleWindowShellViewController: UIViewController {
     }
 
     #if DEBUG && os(iOS)
-    /// `MULTIPLEX_DUO_PROBE=1`: the geometry the Duo rules read, once per
-    /// change — size classes, safe areas, the 27.1 vertical-bar edge, and the
-    /// division / occlusion reserved regions.
+    /// `MULTIPLEX_DUO_PROBE=1`: the geometry the Duo rules read, once per change.
     private var lastDuoProbe = ""
     private func logDuoProbe() {
         guard DuoProbe.enabled, let probeView = viewIfLoaded else { return }
@@ -1282,8 +1248,7 @@ final class SingleWindowShellViewController: UIViewController {
             selectedTerminal: state.terminalRoute.activeTab,
             shellSafeArea: presentation.deckSafeArea,
             headerChrome: presentation.deckHeaderChrome,
-            actionColumnEdge: presentation.deckActionColumnEdge,
-            displayIsLandscape: presentation.displayIsLandscape,
+            actionColumn: presentation.deckActionColumn,
             sceneIsActive: state.sceneIsActive,
             reduceMotion: state.reduceMotion
         )
@@ -1301,9 +1266,8 @@ final class SingleWindowShellViewController: UIViewController {
             railChrome: presentation.terminalRailChrome,
             railOwnsBottomSafeArea: presentation.railOwnsBottomSafeArea,
             columnAvailable: presentation.columnAvailable,
-            foldable: presentation.foldable,
             bareChrome: presentation.bareChrome,
-            displayIsLandscape: presentation.displayIsLandscape,
+            sideColumn: presentation.sideColumn,
             presentColumnPanel: actions.presentColumnPanel,
             dismissColumnPanel: actions.dismissColumnPanel,
             showDeck: actions.showDeck,
@@ -1430,9 +1394,8 @@ final class SingleWindowShellRootView: UIView {
     /// iPhone Duo: the ▤/⌗ panel in the deck's column, over the deck wall.
     let columnPanelContainer = UIView()
     var columnPanelPresented = false
-    /// iPhone Duo: the terminal's chrome is bare, so the bands above and
-    /// below it wear the pane's ground — a bezel band there reads as a
-    /// border on the strip (`SingleWindowShellLayout.chromeIsBare`).
+    /// Bare chrome: the backfill bands above and below the terminal wear the
+    /// pane's ground, not the bezel.
     var bareChrome = false {
         didSet {
             guard bareChrome != oldValue else { return }
@@ -1508,9 +1471,7 @@ final class SingleWindowShellRootView: UIView {
         )
         terminalTopBackfill.alpha = metrics.terminalAlpha
         terminalTopBackfill.isHidden = topBackfillHeight == 0
-        // Below the terminal: the home-strip backfill, unless a console
-        // region owns the bottom of the display (laptop pose) — the fold band
-        // between them is the root's own chassis.
+        // The home-strip backfill, unless the console owns the bottom.
         let backfillHeight = metrics.railOwnsBottomSafeArea || metrics.consoleFrame != nil
             ? 0
             : max(0, bounds.height - metrics.terminalFrame.maxY)
@@ -1536,7 +1497,7 @@ final class SingleWindowShellRootView: UIView {
         terminalContainer.isUserInteractionEnabled = metrics.terminalInteractive
         deckContainer.accessibilityElementsHidden = !metrics.deckInteractive || columnShowsPanel
         terminalContainer.accessibilityElementsHidden = !metrics.terminalInteractive
-        divider.isHidden = !(metrics.expanded && metrics.deckFrame.width > 0)
+        divider.isHidden = !metrics.hasDeckColumn
         bringSubviewToFront(terminalContainer)
         bringSubviewToFront(columnPanelContainer)
         bringSubviewToFront(divider)

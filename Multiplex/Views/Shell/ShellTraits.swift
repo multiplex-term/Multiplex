@@ -27,18 +27,17 @@ extension ShellModeDecision.Idiom {
     }
 }
 
-extension ShellRailPlacement {
-    /// The rail's edge from live traits: the iOS 27.1 vertical-bar trait
-    /// when the system reports one, else the pure rule. The shell resolves
-    /// it for the deck's action column, the terminal window for its UMD
-    /// column — one mapping, so the two agree by construction.
-    static func edge(
+extension ShellSideColumn {
+    /// The side column from live traits, resolved once by the shell for
+    /// both panes: the iOS 27.1 vertical-bar trait when the system reports
+    /// one, else `ShellRailPlacement`'s rule; placement from the display.
+    static func resolve(
         traits: UITraitCollection,
         isLandscape: Bool,
         foldable: Bool,
         leadingSafeArea: CGFloat,
         trailingSafeArea: CGFloat
-    ) -> ShellRailEdge {
+    ) -> ShellSideColumn {
         #if os(iOS)
         var systemEdge: ShellRailEdge?
         if #available(iOS 27.1, *) {
@@ -48,7 +47,7 @@ extension ShellRailPlacement {
             default: systemEdge = nil
             }
         }
-        return edge(
+        let edge = ShellRailPlacement.edge(
             systemVerticalBarEdge: systemEdge,
             idiom: .device,
             horizontalSizeClass: ShellSizeClass(traits.horizontalSizeClass),
@@ -58,8 +57,17 @@ extension ShellRailPlacement {
             leadingSafeArea: leadingSafeArea,
             trailingSafeArea: trailingSafeArea
         )
+        guard edge != .top else { return .none }
+        return ShellSideColumn(
+            edge: edge,
+            placement: RailFit.columnPlacement(
+                compactWidth: traits.horizontalSizeClass == .compact,
+                landscape: isLandscape,
+                trailingEdge: edge == .trailing
+            )
+        )
         #else
-        return .top
+        return .none
         #endif
     }
 }

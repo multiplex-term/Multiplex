@@ -122,7 +122,7 @@ final class SingleWindowShellUIKitTests: XCTestCase {
         XCTAssertEqual(metrics.terminalSafeArea.left, 0)
         XCTAssertEqual(metrics.terminalSafeArea.right, 16)
         XCTAssertEqual(metrics.terminalAvailableWidth, 672)
-        XCTAssertEqual(controller.shellState.presentation.deckControlLabel, "◧ HIDE")
+        XCTAssertEqual(controller.shellState.presentation.deckControl, .hide)
         XCTAssertTrue(metrics.deckInteractive)
         XCTAssertTrue(metrics.terminalInteractive)
 
@@ -136,7 +136,7 @@ final class SingleWindowShellUIKitTests: XCTestCase {
         )
         XCTAssertEqual(metrics.terminalSafeArea.left, 20)
         XCTAssertEqual(metrics.terminalAvailableWidth, 988)
-        XCTAssertEqual(controller.shellState.presentation.deckControlLabel, "◧ DECK")
+        XCTAssertEqual(controller.shellState.presentation.deckControl, .show)
         XCTAssertFalse(metrics.deckInteractive)
         XCTAssertTrue(view("singleWindowShell.divider", in: controller.view)?.isHidden == true)
     }
@@ -185,7 +185,7 @@ final class SingleWindowShellUIKitTests: XCTestCase {
             compactShowsTerminal: true,
             compactBackSwipeOffset: 0,
             compactBackSwipeActive: false,
-            railAlwaysTakesBottomStrip: true
+            foldable: true
         )
         XCTAssertEqual(pad.terminalFrame.height, 488)
         XCTAssertTrue(pad.railOwnsBottomSafeArea)

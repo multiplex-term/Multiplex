@@ -53,31 +53,33 @@ enum SingleWindowShellLayout {
     /// the terminal's available width, after its own safe areas.
     static let phoneTerminalMinimumWidth: CGFloat = keyBarTmuxMinimumWidth
 
-    /// The terminal's key rail spends the home-indicator strip instead of
-    /// parking a backfill band under itself: every compact-height phone (the
-    /// row is too precious to give away), and always on iPad and on a
-    /// foldable — the rail reads as floating above the display edge
-    /// otherwise, in every pose of the Duo (Jhen, 2026-09-25). A shipped
-    /// iPhone in portrait keeps its strip.
+    /// The key rail spends the home-indicator strip instead of parking a
+    /// backfill band under itself: every compact-height phone, iPad, and a
+    /// foldable in every pose (the rail floats above the edge otherwise).
+    /// A shipped iPhone in portrait keeps its strip.
     static func railAlwaysTakesBottomStrip(idiom: ShellModeDecision.Idiom, foldable: Bool) -> Bool {
         idiom == .pad || (idiom == .phone && foldable)
     }
 
-    /// iPhone Duo (a foldable phone), every display: the terminal's source
-    /// strip and key rail drop the bezel slab and the 1 pt rule — on the
-    /// Duo's dark ground they read as grey bars around the pane (Jhen,
-    /// 2026-09-25, closed then inner). Shipped iPhones and iPad keep the slab.
+    /// A foldable phone, every display: the source strip and key rail drop
+    /// the bezel slab and rule (they read as grey bars on the Duo's ground).
     static func chromeIsBare(idiom: ShellModeDecision.Idiom, foldable: Bool) -> Bool {
         idiom == .phone && foldable
     }
 
-    /// iPhone Duo: while the deck spans the display, its + HOST / FAQ /
-    /// SETTINGS chips stand in the side column on the rail's edge (Jhen,
-    /// 2026-09-25). Beside a terminal the terminal's own column owns the
-    /// strip, so the chips stay in the header row; a shipped iPhone has no
-    /// side edge and never moves them.
-    static func deckActionColumnEdge(railEdge: ShellRailEdge, deckSpansShell: Bool) -> ShellRailEdge {
-        deckSpansShell ? railEdge : .top
+    /// While the deck spans the display its header chips stand in the side
+    /// column; beside a terminal the terminal's column owns the strip.
+    static func deckActionColumn(sideColumn: ShellSideColumn, deckSpansShell: Bool) -> ShellSideColumn {
+        deckSpansShell ? sideColumn : .none
+    }
+
+    /// The Duo's inner display: regular × regular on the phone idiom.
+    static func isInnerDisplay(
+        idiom: ShellModeDecision.Idiom,
+        horizontalSizeClass: ShellSizeClass,
+        verticalSizeClass: ShellSizeClass
+    ) -> Bool {
+        idiom == .phone && horizontalSizeClass == .regular && verticalSizeClass == .regular
     }
 
     /// The iPad rule: the shell runs full-screen there, so the window's own
@@ -86,12 +88,9 @@ enum SingleWindowShellLayout {
         width >= expandedThreshold
     }
 
-    /// The phone measures the terminal, the iPad the window. Consequences on
-    /// shipped sizes: iPhone 16e landscape (410 pt available beside the rail)
-    /// and Pro Max (440) stay expanded; an SE-class 667-wide landscape (351)
-    /// becomes single-pane; iPhone Duo closed landscape (~292) and open
-    /// portrait (310) stay single-pane while its open landscape (~504)
-    /// expands. A vertical division region overrides this (`resolve`).
+    /// The phone measures the terminal, the iPad the window. Shipped sizes:
+    /// 16e (410) and Pro Max (440) landscape stay expanded, an SE-class 667
+    /// landscape (351) goes single-pane. A vertical division overrides this.
     static func isExpanded(
         usableWidth: CGFloat,
         terminalAvailableWidthIfExpanded: CGFloat,
@@ -105,24 +104,14 @@ enum SingleWindowShellLayout {
         }
     }
 
-    /// iPhone Duo's inner display has 55 pt corners (measured), and its
-    /// landscape poses give the leading top corner no system inset at all:
-    /// the status column sits on the trailing edge and there is no top
-    /// inset. A 44 pt header row with a 12 pt top inset loses ~21 pt of its
-    /// first line to the curve, so the pane that owns that corner (the deck's
-    /// title, or the terminal's ‹ DECK chip once ◧ HIDE hands it the corner)
-    /// insets its header row by this much. Only the header row: the pane
-    /// below it starts under the curve's reach. Every other phone carries a
-    /// notch or status-bar inset there; the iPad shell always has a status
-    /// bar; the outer display's corners are 6 pt.
+    /// The inner display's 55 pt corners have no system inset in landscape,
+    /// so the pane owning the corner insets its header row (only the row:
+    /// the content below starts under the curve's reach).
     static let bareCornerLeadingInset: CGFloat = 24
 
-    /// A phone display edge with no system inset above it (iPhone Duo's
-    /// landscape poses and its closed display): header rows flush with the
-    /// top edge lose their top few points to the display's own edge grab,
-    /// so the shell's content starts this far down. Only the inner display
-    /// (regular × regular): a compact layout — every shipped iPhone in
-    /// landscape, the Duo's closed display — keeps its flush chrome.
+    /// The inner display with no top inset: rows flush with the edge lose
+    /// their top points to the edge grab, so content starts this far down.
+    /// Compact layouts keep their flush chrome.
     static let bareTopPadding: CGFloat = 8
 
     static func bareTopPadding(
@@ -131,25 +120,20 @@ enum SingleWindowShellLayout {
         horizontalSizeClass: ShellSizeClass,
         verticalSizeClass: ShellSizeClass
     ) -> CGFloat {
-        guard idiom == .phone,
-              horizontalSizeClass == .regular,
-              verticalSizeClass == .regular,
-              topSafeArea == 0
+        guard isInnerDisplay(
+            idiom: idiom, horizontalSizeClass: horizontalSizeClass, verticalSizeClass: verticalSizeClass
+        ), topSafeArea == 0
         else { return 0 }
         return bareTopPadding
     }
 
-    /// iPhone Duo's flat inner portrait (and the laptop pose's top region):
-    /// the 82 pt status band holds only the clock and radio cluster at the
-    /// trailing side, so the shell hands the band to the terminal's rail and
-    /// the deck's header. `topBandTrailingClearance` keeps them clear of the
-    /// cluster (measured 120 pt on the 27.1 simulator, plus air).
+    /// Inner portrait (and the laptop top region): the 82 pt status band
+    /// holds only the trailing clock cluster, so the rail and deck header
+    /// live inside it, `topBandTrailingClearance` clear of the cluster.
     static let topBandMinimumHeight: CGFloat = 60
     static let topBandTrailingClearance: CGFloat = 128
-    /// The system draws its status glyphs 48 pt in from the display edge:
-    /// the clock's centre is y = 48 in the top band and x = edge − 48 in the
-    /// side strip. Every row or column of ours in those regions centres on
-    /// that same line.
+    /// The system's status glyphs centre 48 pt in from the display edge;
+    /// our rows and columns in those regions centre on the same line.
     static let systemGlyphLine: CGFloat = 48
 
     /// Centre line for a row inside the top band.
@@ -168,16 +152,14 @@ enum SingleWindowShellLayout {
         horizontalSizeClass: ShellSizeClass,
         verticalSizeClass: ShellSizeClass
     ) -> CGFloat {
-        guard idiom == .phone,
-              horizontalSizeClass == .regular,
-              verticalSizeClass == .regular,
-              topSafeArea >= topBandMinimumHeight
+        guard isInnerDisplay(
+            idiom: idiom, horizontalSizeClass: horizontalSizeClass, verticalSizeClass: verticalSizeClass
+        ), topSafeArea >= topBandMinimumHeight
         else { return 0 }
         return topSafeArea
     }
 
-    /// Regular width only: the inner display's corner measures 55 pt, the
-    /// closed display's 6 — its title sits flush with the pane.
+    /// Regular width only: the closed display's corner is 6 pt.
     static func cornerLeadingInset(
         topSafeArea: CGFloat,
         leadingSafeArea: CGFloat,
@@ -266,7 +248,6 @@ enum ShellSizeClass: Equatable {
     case unspecified
 }
 
-/// Where the shell's app-owned top rail (the UMD strip) sits.
 /// What a pane's header row (the deck header, the terminal's UMD rail, a
 /// column panel's header) must clear beyond its safe area: a bare display
 /// corner on the leading side, and iPhone Duo's inner-portrait status band,
@@ -312,17 +293,43 @@ enum ShellRailEdge: Equatable {
     case trailing
 }
 
+/// The system's side strip as the shell's panes use it: the column's edge
+/// (`.top` = no column) and the chips' placement inside the strip.
+struct ShellSideColumn: Equatable {
+    var edge: ShellRailEdge
+    var placement: RailFit.ColumnPlacement
+
+    static let none = ShellSideColumn(edge: .top, placement: RailFit.ColumnPlacement(top: 0, bottom: 0))
+
+    var isPresent: Bool { edge != .top }
+
+    /// The column's frame in a pane spanning the strip: `strip` is the
+    /// pane's safe inset on the column's edge, `obstruction` the keyboard's
+    /// height from the bottom.
+    func frame(in bounds: CGRect, strip: CGFloat, obstruction: CGFloat = 0) -> CGRect {
+        let width = max(strip, RailFit.chipHeight + RailFit.gap)
+        let bottom = bounds.maxY - max(obstruction, placement.bottom)
+        return CGRect(
+            x: edge == .trailing ? bounds.width - width : 0,
+            y: placement.top,
+            width: width,
+            height: max(0, bottom - placement.top)
+        )
+    }
+
+    /// The chips' centre x inside the strip: the system glyph line.
+    func centerX(stripWidth: CGFloat) -> CGFloat {
+        SingleWindowShellLayout.sideColumnCenterX(stripWidth: stripWidth, trailingEdge: edge == .trailing)
+    }
+}
+
 /// iPhone Duo stacks the system's bars in a side column; the shell's rail is
 /// app-owned, so it follows the same edge by its own rule.
 enum ShellRailPlacement {
-    /// A system-reported edge (the iOS 27.1 vertical-bar trait) wins
-    /// outright, `.top` included. Without one, the size-class pair no other
-    /// iPhone has — regular width AND regular height on the phone idiom, in
-    /// landscape — is the Duo's inner display. Its closed display in
-    /// landscape is compact × compact like a shipped iPhone, so only a
-    /// `foldable` device (one that reports a hinge) moves the rail there:
-    /// the system draws no bar, and the column takes the camera's safe
-    /// strip, whichever side holds it. Nothing moves on a shipped phone.
+    /// A system-reported edge wins. Else regular × regular landscape on the
+    /// phone idiom is the inner display (leading); a foldable's compact
+    /// landscape is the closed display, whose column takes the camera's
+    /// safe strip. Nothing moves on a shipped phone.
     static func edge(
         systemVerticalBarEdge: ShellRailEdge?,
         idiom: ShellModeDecision.Idiom,
@@ -335,16 +342,16 @@ enum ShellRailPlacement {
     ) -> ShellRailEdge {
         if let systemVerticalBarEdge { return systemVerticalBarEdge }
         guard idiom == .phone, isLandscape else { return .top }
-        if horizontalSizeClass == .regular, verticalSizeClass == .regular { return .leading }
+        if SingleWindowShellLayout.isInnerDisplay(
+            idiom: idiom, horizontalSizeClass: horizontalSizeClass, verticalSizeClass: verticalSizeClass
+        ) { return .leading }
         guard foldable else { return .top }
         return leadingSafeArea >= trailingSafeArea ? .leading : .trailing
     }
 }
 
-/// The terminal's default point size per device class. The phone keeps 12;
-/// the Duo's inner display (regular × regular on the phone idiom) takes 13
-/// so a 626 pt pane reads ~86 columns and a 445 pt book page ~61; the iPad
-/// and Vision Pro keep 14. Per-tab A− / A+ still override.
+/// Default terminal point size: 12 on a phone, 13 on the Duo's inner
+/// display, 14 elsewhere. Per-tab A− / A+ override.
 enum TerminalFontDefaults {
     static func pointSize(
         idiom: ShellModeDecision.Idiom,
@@ -353,20 +360,18 @@ enum TerminalFontDefaults {
     ) -> CGFloat {
         switch idiom {
         case .phone:
-            horizontalSizeClass == .regular && verticalSizeClass == .regular ? 13 : 12
+            SingleWindowShellLayout.isInnerDisplay(
+                idiom: idiom, horizontalSizeClass: horizontalSizeClass, verticalSizeClass: verticalSizeClass
+            ) ? 13 : 12
         case .pad, .other:
             14
         }
     }
 }
 
-/// iPhone Duo's fold as the shell reads it. iOS 27.1 reports the fold as a
-/// division reserved region, but the 27.1 simulator returns none in any
-/// pose while its hinge still reports `partiallyOpen`, so the shell
-/// synthesises the band from the measured geometry when the query is empty:
-/// a 40 pt band centred on the display's long axis (inner display 951 × 669,
-/// band 455.5…495.5). Vertical when the display is wider than tall (book
-/// pose), horizontal otherwise (laptop / propped pose).
+/// The fold band when `reservedRegions(kind: .division)` is empty (the 27.1
+/// simulator) but the hinge is `partiallyOpen`: 40 pt centred on the long
+/// axis, vertical in the book pose, horizontal in the laptop pose.
 enum DuoFoldGeometry {
     static let bandWidth: CGFloat = 40
 

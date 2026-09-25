@@ -2,11 +2,8 @@ import UIKit
 import XCTest
 @testable import Multiplex
 
-/// iPhone Duo geometry through the shell's pure layout seam, measured on the
-/// Xcode 27.1 simulator (2026-09-23): outer display 466 × 678, inner display
-/// 951 × 669, the system's side column an 84 pt safe area on the trailing
-/// edge wherever its bars stack vertically, an 82 pt top inset in inner
-/// portrait, 34 pt home strip everywhere, fold band 455.5…495.5.
+/// iPhone Duo geometry through the shell's pure layout seam (facts in
+/// docs/agents/iphone-duo.md).
 final class SingleWindowShellDuoLayoutTests: XCTestCase {
     private let sideColumn = UIEdgeInsets(top: 0, left: 0, bottom: 34, right: 84)
     private let innerPortrait = UIEdgeInsets(top: 82, left: 0, bottom: 34, right: 0)
@@ -45,7 +42,7 @@ final class SingleWindowShellDuoLayoutTests: XCTestCase {
             compactShowsTerminal: true,
             compactBackSwipeOffset: 0,
             compactBackSwipeActive: false,
-            railAlwaysTakesBottomStrip: true
+            foldable: true
         )
         XCTAssertTrue(metrics.expanded)
         XCTAssertEqual(metrics.deckFrame.width, 316)

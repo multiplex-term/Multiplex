@@ -229,8 +229,7 @@ final class SidePanelViewController: UIViewController {
         }
     }
 
-    /// The shell's column may own a bare display corner: the header row
-    /// clears it by this much (`SingleWindowShellLayout.cornerLeadingInset`).
+    /// The header row's clearance for a bare display corner.
     func updateHeaderCornerInset(_ inset: CGFloat) {
         headerView.cornerInset = inset
     }
@@ -567,8 +566,7 @@ final class SidePanelHeaderView: UIView {
     private let row = UIStackView()
     private let progressLine = UIView()
     private var rowLeadingConstraint: NSLayoutConstraint?
-    /// Extra leading clearance for the row alone — a bare display corner
-    /// (iPhone Duo's column) — never the pane below.
+    /// Leading clearance for the row alone, never the pane below.
     var cornerInset: CGFloat = 0 {
         didSet {
             guard cornerInset != oldValue else { return }

@@ -23,27 +23,21 @@ enum RailItem: Equatable, Hashable {
 enum RailFit {
     static let chipHeight: CGFloat = 44
     static let gap: CGFloat = 4
-    /// Room the column keeps at its ends (measured on the 27.1 simulator):
-    /// the inner display stacks the clock and radio glyphs from the top edge
-    /// (~120 pt); the closed display in portrait stacks them under its
-    /// camera (to ~152 pt); in landscape it draws no glyphs, only the camera
-    /// in the strip's end nearest the device's corner — 30…66 pt from the
-    /// top when the strip is leading, the same from the bottom when the
-    /// device is turned around and the strip is trailing.
+    /// Room at the column's ends: inner display glyphs to ~120 pt; closed
+    /// portrait glyphs under the camera to ~152; closed landscape has only
+    /// the camera, 30…66 pt from the corner end (top when leading, bottom
+    /// when trailing).
     static let innerTopInset: CGFloat = 120
     static let closedPortraitTopInset: CGFloat = 160
     static let closedCameraInset: CGFloat = 80
     static let closedCornerInset: CGFloat = 12
 
-    /// Where a column's chips live inside the strip: the room kept at each
-    /// end, and which end the chips gather at. They gather at the camera's
-    /// end (Jhen, 2026-09-25: the closed display turned around left the
-    /// column at the far corner from the camera), so the stack hangs from
-    /// the bottom exactly when the camera is there.
+    /// The room kept at each end. The chips gather at the camera's end,
+    /// which is the end with the larger inset.
     struct ColumnPlacement: Equatable {
         var top: CGFloat
         var bottom: CGFloat
-        var anchoredToBottom: Bool
+        var anchoredToBottom: Bool { bottom > top }
     }
 
     /// The closed display is the compact-width one.
@@ -52,13 +46,11 @@ enum RailFit {
         landscape: Bool,
         trailingEdge: Bool
     ) -> ColumnPlacement {
-        guard compactWidth else { return ColumnPlacement(top: innerTopInset, bottom: 0, anchoredToBottom: false) }
-        guard landscape else {
-            return ColumnPlacement(top: closedPortraitTopInset, bottom: 0, anchoredToBottom: false)
-        }
+        guard compactWidth else { return ColumnPlacement(top: innerTopInset, bottom: 0) }
+        guard landscape else { return ColumnPlacement(top: closedPortraitTopInset, bottom: 0) }
         return trailingEdge
-            ? ColumnPlacement(top: closedCornerInset, bottom: closedCameraInset, anchoredToBottom: true)
-            : ColumnPlacement(top: closedCameraInset, bottom: closedCornerInset, anchoredToBottom: false)
+            ? ColumnPlacement(top: closedCornerInset, bottom: closedCameraInset)
+            : ColumnPlacement(top: closedCameraInset, bottom: closedCornerInset)
     }
 
     /// Drop order: the row-only MERGE and GUIDE first, the shortcut last.
@@ -114,12 +106,6 @@ enum RailFit {
     /// The vertical column: `capacity` whole chips.
     static func columnItems(offered: [RailItem], capacity: Int) -> [RailItem] {
         visibleItems(offered: offered) { $0.count <= capacity }
-    }
-
-    /// The vertical column: whole 44 pt chips with 4 pt gaps in
-    /// `availableHeight`.
-    static func columnItems(offered: [RailItem], availableHeight: CGFloat) -> [RailItem] {
-        columnItems(offered: offered, capacity: capacity(availableHeight: availableHeight))
     }
 
     /// The chips that left the rail and belong in the ⋯ menu.

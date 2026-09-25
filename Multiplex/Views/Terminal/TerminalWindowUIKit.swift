@@ -26,14 +26,11 @@ struct TerminalWindowShellConfiguration {
     /// iPhone Duo: the shell has a column to lend a ▤/⌗ panel — the deck
     /// rail, a book page, or the laptop console region.
     var columnAvailable = false
-    /// The device reports a hinge, and the display's orientation: see
-    /// `ShellRailPlacement.edge`. The shell reports the orientation because
-    /// the screen's bounds lag a rotation's layout pass.
-    var foldable = false
     /// iPhone Duo: the source strip and key rail drop their bezel slab and
     /// rule (`SingleWindowShellLayout.chromeIsBare`).
     var bareChrome = false
-    var displayIsLandscape = false
+    /// iPhone Duo: the strip the UMD stands in as a column.
+    var sideColumn = ShellSideColumn.none
     /// Hands a `SidePanelViewController` to the shell's column; the closure
     /// is what ‹ DECK runs to move the panel into a tab and free the column.
     var presentColumnPanel: (UIViewController, @escaping () -> Void) -> Void = { _, _ in }
@@ -52,9 +49,8 @@ private struct TerminalWindowShellPresentationKey: Equatable {
     var railChrome: ShellHeaderChrome
     var railOwnsBottomSafeArea: Bool
     var columnAvailable: Bool
-    var foldable: Bool
     var bareChrome: Bool
-    var displayIsLandscape: Bool
+    var sideColumn: ShellSideColumn
     var terminalFocusAllowed: Bool
 
     init?(_ shell: TerminalWindowShellConfiguration?) {
@@ -65,9 +61,8 @@ private struct TerminalWindowShellPresentationKey: Equatable {
         railChrome = shell.railChrome
         railOwnsBottomSafeArea = shell.railOwnsBottomSafeArea
         columnAvailable = shell.columnAvailable
-        foldable = shell.foldable
         bareChrome = shell.bareChrome
-        displayIsLandscape = shell.displayIsLandscape
+        sideColumn = shell.sideColumn
         terminalFocusAllowed = shell.terminalFocusAllowed
     }
 }
@@ -238,8 +233,6 @@ final class TerminalWindowViewController: UIViewController,
     /// A−/A+ pressed in this window: the trait-based default never touches
     /// a size the user chose.
     private var userAdjustedFont = false
-    /// The column height the vertical rail was last rendered for; a
-    /// keyboard or rotation that changes it refits the chips.
     /// Chips the column held at its last render: it re-renders when that
     /// count moves, not on every keyboard-driven height tick.
     private var renderedColumnCapacity: Int?
@@ -480,8 +473,11 @@ final class TerminalWindowViewController: UIViewController,
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         applyTraitFontDefaultIfNeeded()
-        if resolvedRailEdge != renderedRailEdge { renderNow() }
-        layoutNativeChrome()
+        if resolvedRailEdge != renderedRailEdge {
+            renderNow()
+        } else {
+            layoutNativeChrome()
+        }
     }
 
     override func viewSafeAreaInsetsDidChange() {
@@ -497,35 +493,16 @@ final class TerminalWindowViewController: UIViewController,
                 != previousTraitCollection?.horizontalSizeClass
             || traitCollection.verticalSizeClass
                 != previousTraitCollection?.verticalSizeClass
-            || verticalBarEdgeChanged(from: previousTraitCollection)
         else { return }
         renderNow()
     }
 
     // MARK: iPhone Duo rail placement
 
-    private func verticalBarEdgeChanged(from previous: UITraitCollection?) -> Bool {
-        #if os(iOS)
-        if #available(iOS 27.1, *) {
-            return traitCollection.verticalBarEdge != previous?.verticalBarEdge
-        }
-        #endif
-        return false
-    }
-
-    /// Where the shell's UMD rail sits: the system's vertical-bar edge when
-    /// it reports one, else `ShellRailPlacement`'s size-class rule. Only the
-    /// shell presentation ever leaves the top; a classic window, the iPad,
-    /// and visionOS keep the horizontal rail.
+    /// Only the shell presentation ever leaves the top; a classic window,
+    /// the iPad, and visionOS keep the horizontal rail.
     private var resolvedRailEdge: ShellRailEdge {
-        guard let shell else { return .top }
-        return ShellRailPlacement.edge(
-            traits: traitCollection,
-            isLandscape: shell.displayIsLandscape,
-            foldable: shell.foldable,
-            leadingSafeArea: shell.contentSafeArea.left,
-            trailingSafeArea: shell.contentSafeArea.right
-        )
+        shell?.sideColumn.edge ?? .top
     }
 
     /// The UMD stands as a column for terminal tabs only; a ▤ / ⌗ tab keeps
@@ -534,34 +511,18 @@ final class TerminalWindowViewController: UIViewController,
         edge != .top && activeTab?.isAuxiliaryPane != true
     }
 
-    /// The column's frame in the root view: the pane's side safe strip on the
-    /// rail's edge, below the system's clock glyphs, above the keyboard.
+    /// The column's frame in the root view: the pane's side safe strip on
+    /// the rail's edge, above the keyboard.
     private func verticalColumnFrame(edge: ShellRailEdge) -> CGRect {
         guard isViewLoaded, let shell, usesVerticalRail(edge: edge) else { return .zero }
-        let bounds = rootView.bounds
-        let strip = edge == .trailing ? shell.contentSafeArea.right : shell.contentSafeArea.left
-        let width = max(strip, UMDColumnChip.side + 4)
-        let obstruction = activeController?.keyboardObstruction ?? 0
-        let placement = columnPlacement(edge: edge)
-        let bottom = bounds.maxY - max(obstruction, placement.bottom)
-        return CGRect(
-            x: edge == .trailing ? bounds.width - width : 0,
-            y: placement.top,
-            width: width,
-            height: max(0, bottom - placement.top)
+        return shell.sideColumn.frame(
+            in: rootView.bounds,
+            strip: edge == .trailing ? shell.contentSafeArea.right : shell.contentSafeArea.left,
+            obstruction: activeController?.keyboardObstruction ?? 0
         )
     }
 
-    private func columnPlacement(edge: ShellRailEdge) -> RailFit.ColumnPlacement {
-        RailFit.columnPlacement(
-            compactWidth: traitCollection.horizontalSizeClass == .compact,
-            landscape: shell?.displayIsLandscape ?? false,
-            trailingEdge: edge == .trailing
-        )
-    }
-
-    /// iPhone Duo's inner display starts at 13 pt, the outer at 12, and the
-    /// iPad at 14 — until A−/A+ says otherwise in this window.
+    /// The trait-based default size, until A−/A+ is pressed in this window.
     private func applyTraitFontDefaultIfNeeded() {
         #if os(iOS)
         guard shell != nil, !userAdjustedFont else { return }
@@ -2539,6 +2500,7 @@ extension TerminalWindowViewController {
 
     private func renderUMD() {
         let profile = railProfile
+        renderedRailEdge = resolvedRailEdge
         if activeTab?.isAuxiliaryPane == true {
             let activePane = activeTab.flatMap { paneControllers[$0.id] }
             let fileViewer = (activePane as? FileViewerPaneViewController)?
@@ -2621,16 +2583,10 @@ extension TerminalWindowViewController {
             columnCapacity: columnCapacity,
             bandRowCenterY: chrome.bandRowCenterY,
             bandTrailingClearance: chrome.bandTrailingClearance,
-            columnCenterX: vertical
-                ? SingleWindowShellLayout.sideColumnCenterX(
-                    stripWidth: column.width,
-                    trailingEdge: edge == .trailing
-                )
-                : nil,
-            columnAnchorsToBottom: vertical && columnPlacement(edge: edge).anchoredToBottom
+            columnCenterX: vertical ? shell?.sideColumn.centerX(stripWidth: column.width) : nil,
+            columnAnchorsToBottom: vertical && shell?.sideColumn.placement.anchoredToBottom == true
         )
         renderedColumnCapacity = vertical ? columnCapacity : nil
-        renderedRailEdge = edge
         let bar: UMDBarViewController
         if let controller = umdController as? UMDBarViewController {
             controller.update(configuration: configuration)
@@ -2654,7 +2610,7 @@ extension TerminalWindowViewController {
                 container.addSubview(strip)
             }
             strip.setInsets(umdSafeArea)
-            strip.isBare = shell?.bareChrome ?? false
+            strip.bareChrome = shell?.bareChrome ?? false
             container.isHidden = false
         } else {
             container.subviews.forEach { $0.removeFromSuperview() }
@@ -2882,11 +2838,7 @@ extension TerminalWindowViewController {
 
     #if !os(visionOS)
     private func mountTalkback(_ composer: TalkbackComposerViewController) {
-        addChild(composer)
-        rootView.talkbackContainer.addSubview(composer.view)
-        composer.view.frame = rootView.talkbackContainer.bounds
-        composer.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        composer.didMove(toParent: self)
+        embed(composer, in: rootView.talkbackContainer)
     }
     #endif
 
@@ -3033,11 +2985,7 @@ extension TerminalWindowViewController {
     ) {
         guard let controller else { return }
         if controller.parent !== self {
-            if controller.parent != nil {
-                controller.willMove(toParent: nil)
-                controller.view.removeFromSuperview()
-                controller.removeFromParent()
-            }
+            if controller.parent != nil { unembed(controller) }
             addChild(controller)
             container.addSubview(controller.view)
             controller.didMove(toParent: self)
@@ -3148,54 +3096,33 @@ extension TerminalWindowViewController {
         }()
 
         let railEdge = resolvedRailEdge
-        if shell != nil, usesVerticalRail(edge: railEdge), umdController is UMDBarViewController {
-            // iPhone Duo: the rail stands in the side bar; the source strip
-            // takes the top; the pane starts under the strip.
-            let column = verticalColumnFrame(edge: railEdge)
-            if renderedColumnCapacity != RailFit.capacity(availableHeight: column.height) {
-                renderUMD()
-            }
-            let stripHeight = UMDSourceStripView.height
-            rootView.umdContainer.frame = column
-            rootView.sourceStripContainer.frame = CGRect(
-                x: 0, y: 0, width: bounds.width, height: stripHeight
-            )
-            // Bare chrome: the strip reads as part of the pane, so its band
-            // wears the pane's ground rather than the chassis behind it.
-            rootView.sourceStripContainer.backgroundColor =
-                shell?.bareChrome == true ? rootView.paneContainer.backgroundColor : .clear
-            rootView.tabScrollView.frame = CGRect(
-                x: 0, y: stripHeight, width: bounds.width, height: tabsHeight
-            )
-            rootView.paneContainer.frame = CGRect(
-                x: 0,
-                y: stripHeight + tabsHeight,
-                width: contentBounds.width,
-                height: max(0, contentBounds.height - stripHeight - tabsHeight)
-            )
-            rootView.bringSubviewToFront(rootView.umdContainer)
-            #if DEBUG
-            if DuoProbe.enabled {
-                let pane = String(describing: rootView.paneContainer.frame)
-                DuoProbe.log.notice(
-                    "chrome pane=\(pane, privacy: .public) column=\(String(describing: column), privacy: .public)"
+        if let shell {
+            let chromeBottom: CGFloat
+            if usesVerticalRail(edge: railEdge), umdController is UMDBarViewController {
+                // The rail stands in the side strip; the source strip takes
+                // the top.
+                let column = verticalColumnFrame(edge: railEdge)
+                if renderedColumnCapacity != RailFit.capacity(availableHeight: column.height) {
+                    renderUMD()
+                }
+                chromeBottom = UMDSourceStripView.height
+                rootView.umdContainer.frame = column
+                rootView.sourceStripContainer.frame = CGRect(
+                    x: 0, y: 0, width: bounds.width, height: chromeBottom
+                )
+                // Bare chrome: the strip's band wears the pane's ground.
+                rootView.sourceStripContainer.backgroundColor =
+                    shell.bareChrome ? rootView.paneContainer.backgroundColor : .clear
+                rootView.bringSubviewToFront(rootView.umdContainer)
+            } else {
+                // The rail spans the top, or the whole status band on the
+                // inner portrait display (its row centres on the glyph line).
+                let band = shell.railChrome.bandHeight
+                chromeBottom = band > 0 ? band : umdHeight
+                rootView.umdContainer.frame = CGRect(
+                    x: 0, y: 0, width: bounds.width, height: chromeBottom
                 )
             }
-            #endif
-        } else if let shell {
-            // iPhone Duo inner portrait: the rail rides inside the status
-            // band beside the clock cluster; the pane starts under the band.
-            let band = shell.railChrome.bandHeight
-            // The band is one slab: the rail's bezel spans the whole band;
-            // its row centres on the system's glyph line and stops before
-            // the clock (`bandTrailingClearance` in the rail's configuration).
-            let chromeBottom = band > 0 ? band : umdHeight
-            rootView.umdContainer.frame = CGRect(
-                x: 0,
-                y: 0,
-                width: bounds.width,
-                height: chromeBottom
-            )
             rootView.tabScrollView.frame = CGRect(
                 x: 0, y: chromeBottom, width: bounds.width, height: tabsHeight
             )
@@ -3380,9 +3307,8 @@ extension TerminalWindowViewController {
         #endif
         for pane in paneControllers.values where pane.view.frame != rootView.paneContainer.bounds {
             pane.view.frame = rootView.paneContainer.bounds
-            // A fold moves origin AND width in one spring: the pane's
-            // constraint tree (key rail pinned to its edges) must resolve
-            // against the new bounds in this pass, not the next lazy one.
+            // The pane's constraint tree must resolve against the new bounds
+            // in this pass (a fold moves origin and width together).
             pane.view.setNeedsLayout()
             for surface in pane.view.subviews { surface.setNeedsLayout() }
             pane.view.layoutIfNeeded()

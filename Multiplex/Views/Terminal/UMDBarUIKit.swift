@@ -10,9 +10,8 @@ enum UMDBarStyle: Equatable {
     case regular
     /// The adaptive single-window shell's slim full-width top rail.
     case shell
-    /// iPhone Duo: the shell's chips stand as a column of 44 pt faces inside
-    /// the system's side bar; the title and lamp move to the source strip
-    /// (`UMDBarViewController.sourceStripView`) over the pane.
+    /// iPhone Duo: 44 pt column chips in the system's side strip; the title
+    /// and lamp move to `sourceStripView` over the pane.
     case verticalColumn
 }
 
@@ -391,10 +390,8 @@ final class UMDBarViewController: UIViewController,
         preferredContentSize = fittingContentSize()
     }
 
-    /// iPhone Duo's column: the shell row's chips as 44 pt faces, top to
-    /// bottom in the HIG's order — navigation first, the prominent DETACH
-    /// last — trimmed by `RailFit` when the keyboard shortens the column,
-    /// with the dropped chips folded into ⋯.
+    /// The column: navigation first, DETACH last, trimmed by `RailFit` with
+    /// the dropped chips folded into ⋯.
     private func makeColumnContent(state: UMDBarObservedState) -> UIView {
         var offered: [RailItem] = [.deck, .fontDown, .fontUp, .newTab]
         if FileAttachAvailability.canOffer(for: configuration.controller) {
@@ -1553,28 +1550,29 @@ final class UMDBarRootView: UIView {
                 contentContainer.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -11),
             ]
         case .verticalColumn:
-            // The column sits in the system's side bar on the chassis: no
-            // bezel slab, no rule; the chips carry their own borders.
+            // No slab, no rule: 44 pt chips on the strip's glyph line,
+            // gathered at the camera's end.
             layer.cornerRadius = 0
             layer.borderWidth = 0
             clipsToBounds = false
             bottomRule.isHidden = true
-            // One column, one width: every chip is a fixed 44 pt square on
-            // the strip's own centre line (the clock and radio glyphs are
-            // centred in the same strip), 4 pt apart.
-            // The chips gather at the camera's end of the strip.
             containerEdgeConstraints = [
-                columnAnchorsToBottom
-                    ? contentContainer.bottomAnchor.constraint(equalTo: bottomAnchor)
-                    : contentContainer.topAnchor.constraint(equalTo: topAnchor),
                 columnCenterX.map {
                     contentContainer.centerXAnchor.constraint(equalTo: leadingAnchor, constant: $0)
                 } ?? contentContainer.centerXAnchor.constraint(equalTo: centerXAnchor),
                 contentContainer.widthAnchor.constraint(equalToConstant: UMDColumnChip.side),
-                columnAnchorsToBottom
-                    ? contentContainer.topAnchor.constraint(greaterThanOrEqualTo: topAnchor)
-                    : contentContainer.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
             ]
+            if columnAnchorsToBottom {
+                containerEdgeConstraints += [
+                    contentContainer.bottomAnchor.constraint(equalTo: bottomAnchor),
+                    contentContainer.topAnchor.constraint(greaterThanOrEqualTo: topAnchor),
+                ]
+            } else {
+                containerEdgeConstraints += [
+                    contentContainer.topAnchor.constraint(equalTo: topAnchor),
+                    contentContainer.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
+                ]
+            }
         case .shell:
             layer.cornerRadius = 0
             layer.borderWidth = 0
@@ -1683,9 +1681,7 @@ final class UMDBarRootView: UIView {
     }
 }
 
-/// A 44 × 44 face for iPhone Duo's vertical column: a symbol (or a text
-/// glyph such as A−) over a tiny caption, in the chip grammar of
-/// `UMDBarButton`.
+/// A 44 × 44 column face: a symbol or text glyph over a tiny caption.
 @MainActor
 final class UMDColumnChip: UMDChipBase {
     static let side: CGFloat = RailFit.chipHeight
@@ -1772,13 +1768,14 @@ final class UMDSourceStripView: UIView {
     private let row = UIStackView()
     private let rule = UIView()
     private var edgeConstraints: [NSLayoutConstraint] = []
+    private var renderedInsets: UIEdgeInsets?
 
     /// No bezel slab, no rule under the row (iPhone Duo).
-    var isBare = false {
+    var bareChrome = false {
         didSet {
-            guard isBare != oldValue else { return }
-            backgroundColor = isBare ? .clear : UIKitChassis.bezel
-            rule.isHidden = isBare
+            guard bareChrome != oldValue else { return }
+            backgroundColor = bareChrome ? .clear : UIKitChassis.bezel
+            rule.isHidden = bareChrome
         }
     }
 
@@ -1810,6 +1807,8 @@ final class UMDSourceStripView: UIView {
     /// Leading/trailing room the strip keeps: the pane's side safe areas plus
     /// the display-corner inset the shell hands the rail.
     func setInsets(_ insets: UIEdgeInsets) {
+        guard insets != renderedInsets else { return }
+        renderedInsets = insets
         NSLayoutConstraint.deactivate(edgeConstraints)
         edgeConstraints = [
             row.leadingAnchor.constraint(
@@ -1838,8 +1837,8 @@ final class UMDSourceStripView: UIView {
 
 /// The chip ground both rails share: the GLASS-prototype chassis with a
 /// 1 pt border, a dimmed disabled face, and a press that rests back on the
-/// ground the init chose (or the first press permanently flips the chip
-/// opaque on the glass bar — user report: "press TMUX breaks the button").
+/// ground the init chose (never on an opaque colour: that flips the chip
+/// opaque on the glass bar for good).
 @MainActor
 class UMDChipBase: UIButton {
     let prominent: Bool
