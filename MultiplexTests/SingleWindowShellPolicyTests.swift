@@ -161,10 +161,20 @@ final class SingleWindowShellPolicyTests: XCTestCase {
         XCTAssertFalse(SingleWindowShellLayout.railAlwaysTakesBottomStrip(idiom: .other, foldable: false))
     }
 
-    func testTheFoldableGoesBareEveryOtherDeviceKeepsTheSlab() {
-        XCTAssertTrue(SingleWindowShellLayout.chromeIsBare(idiom: .phone, foldable: true), "iPhone Duo")
-        XCTAssertFalse(SingleWindowShellLayout.chromeIsBare(idiom: .phone, foldable: false), "shipped iPhone")
-        XCTAssertFalse(SingleWindowShellLayout.chromeIsBare(idiom: .pad, foldable: false))
+    func testOnlyTheFoldablesClosedDisplayGoesBare() {
+        XCTAssertTrue(
+            SingleWindowShellLayout.chromeIsBare(idiom: .phone, foldable: true, compactWidth: true),
+            "iPhone Duo closed"
+        )
+        XCTAssertFalse(
+            SingleWindowShellLayout.chromeIsBare(idiom: .phone, foldable: true, compactWidth: false),
+            "the inner display keeps the slab"
+        )
+        XCTAssertFalse(
+            SingleWindowShellLayout.chromeIsBare(idiom: .phone, foldable: false, compactWidth: true),
+            "shipped iPhone"
+        )
+        XCTAssertFalse(SingleWindowShellLayout.chromeIsBare(idiom: .pad, foldable: false, compactWidth: true))
     }
 
     func testDeckActionsStandInTheColumnOnlyWhileTheDeckSpansTheShell() {

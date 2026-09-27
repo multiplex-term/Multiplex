@@ -61,10 +61,11 @@ enum SingleWindowShellLayout {
         idiom == .pad || (idiom == .phone && foldable)
     }
 
-    /// A foldable phone, every display: the source strip and key rail drop
-    /// the bezel slab and rule (they read as grey bars on the Duo's ground).
-    static func chromeIsBare(idiom: ShellModeDecision.Idiom, foldable: Bool) -> Bool {
-        idiom == .phone && foldable
+    /// A foldable phone's closed (compact-width) display: the source strip,
+    /// tab row, and key rail drop the bezel slab and rule (they read as grey
+    /// bars on the Duo's outer ground). The inner display keeps the slab.
+    static func chromeIsBare(idiom: ShellModeDecision.Idiom, foldable: Bool, compactWidth: Bool) -> Bool {
+        idiom == .phone && foldable && compactWidth
     }
 
     /// While the deck spans the display its header chips stand in the side

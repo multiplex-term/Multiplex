@@ -232,6 +232,13 @@ final class TerminalWindowUIKitTests: XCTestCase {
         XCTAssertFalse(controllerTree(fixture.controller).contains {
             String(describing: type(of: $0)).contains("UIHostingController")
         })
+
+        // The tab row keeps out of the side strips the pane insets for.
+        fixture.controller.view.frame = CGRect(x: 0, y: 0, width: 736, height: 500)
+        fixture.controller.view.layoutIfNeeded()
+        let scroller = try XCTUnwrap(strip.superview as? UIScrollView)
+        XCTAssertEqual(scroller.frame.minX, 8)
+        XCTAssertEqual(scroller.frame.maxX, 728)
     }
 
     func testTabRailScrollerTracksPressesAtOnceAndSizesWithItsLayoutPass() throws {

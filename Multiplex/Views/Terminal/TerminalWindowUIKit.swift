@@ -3136,8 +3136,14 @@ extension TerminalWindowViewController {
                     x: 0, y: 0, width: bounds.width, height: chromeBottom
                 )
             }
+            rootView.bareChrome = shell.bareChrome
+            // The tab row keeps out of the side strips (camera, chip column).
+            let sideInsets = shell.contentSafeArea
             rootView.tabScrollView.frame = CGRect(
-                x: 0, y: chromeBottom, width: bounds.width, height: tabsHeight
+                x: sideInsets.left,
+                y: chromeBottom,
+                width: max(0, bounds.width - sideInsets.left - sideInsets.right),
+                height: tabsHeight
             )
             rootView.paneContainer.frame = CGRect(
                 x: 0,
@@ -3868,7 +3874,22 @@ final class TerminalWindowUIKitRootView: UIView {
 
     func setTabsVisible(_ visible: Bool) {
         tabScrollView.isHidden = !visible
-        tabDivider.isHidden = !visible
+        tabDivider.isHidden = !visible || bareChrome
+    }
+
+    /// Bare chrome (iPhone Duo): the tab row and the window's own ground
+    /// (the tab-row band beside the side strip) wear the pane's ground, no
+    /// rule, like the source strip and the key rail.
+    var bareChrome = false {
+        didSet {
+            guard bareChrome != oldValue else { return }
+            let ground = bareChrome
+                ? paneContainer.backgroundColor
+                : (GlassPrototype.enabled ? GlassPrototype.clearedChassis : UIKitChassis.chassis)
+            backgroundColor = ground
+            tabScrollView.backgroundColor = ground
+            tabDivider.isHidden = tabScrollView.isHidden || bareChrome
+        }
     }
 
     static func contentBounds(

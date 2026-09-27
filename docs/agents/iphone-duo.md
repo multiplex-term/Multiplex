@@ -69,11 +69,12 @@ Measured on the 27.1 simulator with `MULTIPLEX_DUO_PROBE=1` (log category
 - **Home strip** — `railAlwaysTakesBottomStrip`: a foldable (the shell saw
   a hinge) or iPad spends the 34 pt home strip under the key rail in every
   pose; a shipped iPhone in portrait keeps its backfill band.
-- **Bare chrome** — `chromeIsBare` (foldable phone, every display): source
-  strip and key rail drop the bezel slab and 1 pt rule; the shell's
-  backfill bands above and below the terminal wear the pane's ground. On
-  the Duo's dark ground the slabs read as grey bars. Geometry unchanged;
-  shipped iPhones and iPad keep the slab.
+- **Bare chrome** — `chromeIsBare` (foldable phone, closed display only):
+  source strip, tab row, key rail, and the window ground beside the strip
+  drop the bezel slab and 1 pt rule; the shell's backfill bands wear the
+  pane's ground. On the outer display's dark ground the slabs read as grey
+  bars. Geometry unchanged; the inner display, shipped iPhones, and iPad
+  keep the slab.
 - **Bare top padding** — `bareTopPadding` 8 pt on the content origin of
   the inner display with no top inset (the top edge itself was not
   reliably pressable); nothing on a compact layout.
@@ -106,7 +107,8 @@ Measured on the 27.1 simulator with `MULTIPLEX_DUO_PROBE=1` (log category
   and ⋯ never — into the ⋯ menu. The row fits by measured widths, the
   column by whole chips (`capacity`), re-rendered only when the count
   changes. `UMDSourceStripView` (20 pt) over the pane carries the title
-  and lamp. The key rail stays horizontal.
+  and lamp. The key rail stays horizontal. The tab row is inset by the
+  side safe areas (camera strip, chip column), like the pane.
 - **Deck action column** — `deckActionColumnEdge`: while the deck spans
   the display on a side edge, its + HOST / FAQ / SETTINGS chips stand in
   the strip (`FleetActionColumnView`, same placement as the UMD column)

@@ -39,6 +39,8 @@ struct SingleWindowShellPresentation: Equatable {
     var terminalFocusAllowed = false
     /// The device reports a hinge (iPhone Duo).
     var foldable = false
+    /// Compact width: the Duo's closed display, or a Split View half.
+    var compactWidth = false
     /// iPhone Duo: the terminal's UMD column, and the deck's action column
     /// while the deck spans the display.
     var sideColumn = ShellSideColumn.none
@@ -49,7 +51,9 @@ struct SingleWindowShellPresentation: Equatable {
     /// rail, a book page, or the laptop console region.
     var columnAvailable = false
 
-    var bareChrome: Bool { SingleWindowShellLayout.chromeIsBare(idiom: .device, foldable: foldable) }
+    var bareChrome: Bool {
+        SingleWindowShellLayout.chromeIsBare(idiom: .device, foldable: foldable, compactWidth: compactWidth)
+    }
 }
 
 @MainActor
@@ -1124,6 +1128,7 @@ final class SingleWindowShellViewController: UIViewController {
             terminalFocusAllowed: (metrics.expanded || compactShowsTerminal)
                 && terminalFocusReady,
             foldable: hingePresent,
+            compactWidth: traitCollection.horizontalSizeClass == .compact,
             sideColumn: sideColumn,
             deckActionColumn: SingleWindowShellLayout.deckActionColumn(
                 sideColumn: sideColumn,
