@@ -47,7 +47,10 @@ Measured on the 27.1 simulator with `MULTIPLEX_DUO_PROBE=1` (log category
   single pane. Duo: closed landscape and open portrait single, open
   landscape 316 | 635.
 - **Fold** — `resolve(…, division:)` takes the active division region
-  (nil when flat). Vertical: expanded regardless of width; deck = 0…minX,
+  (nil when flat). `DuoFoldGeometry.division(_:in:)` keeps a band only
+  with window on both sides: a Split View half is reported the band
+  clipped to its edge (13.5 pt), and the synthetic band is placed on the
+  screen, then mapped into the window. Vertical: expanded regardless of width; deck = 0…minX,
   terminal from maxX, the divider is the region. Horizontal: single pane,
   terminal in the top region, `consoleFrame` the bottom one — key rail on
   the fold, below it the first of keyboard, composer, ▤/⌗ panel, C/B or
@@ -89,9 +92,14 @@ Measured on the 27.1 simulator with `MULTIPLEX_DUO_PROBE=1` (log category
   vertical-bar edge wins; else phone + regular × regular + landscape is
   `.leading`; a foldable phone in compact landscape (closed display, no
   system bar) takes the camera's safe strip, whichever side is wider. A
-  shipped iPhone never moves. Resolved from live traits by
-  `ShellRailPlacement.edge(traits:…)`, once in the shell (deck) and once
-  in the terminal window. Shell presentation only.
+  side edge needs a safe strip in the window on that side, else `.top`:
+  a Split View half beside the system column keeps the column, the other
+  half gets the iPhone's top rail and the deck header chips. A shipped
+  iPhone never moves. Resolved once in the shell from the window's safe
+  area (`ShellSideColumn.resolve`). Shell presentation only.
+- **Split View** — the half is compact width on a regular display: single
+  pane, ‹ DECK back control, no fold, slabs kept (bare chrome reads the
+  screen's width class, not the window's).
 - **Column** — on a side edge the UMD renders as
   `UMDBarStyle.verticalColumn`: 44 pt symbol-over-caption chips 4 pt
   apart, centred on the glyph line, ending above the keyboard. Placement

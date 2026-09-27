@@ -215,6 +215,63 @@ final class SingleWindowShellDuoLayoutTests: XCTestCase {
         XCTAssertFalse(metrics.columnAvailable)
     }
 
+    func testAFoldCountsOnlyWhenItCrossesTheWindow() {
+        let screen = CGSize(width: 951, height: 669)
+        XCTAssertEqual(
+            DuoFoldGeometry.syntheticDivision(screen: screen, window: CGRect(origin: .zero, size: screen)),
+            CGRect(x: 455.5, y: 0, width: 40, height: 669),
+            "the whole display: the book fold"
+        )
+        XCTAssertNil(
+            DuoFoldGeometry.syntheticDivision(screen: screen, window: CGRect(x: 0, y: 0, width: 455.5, height: 669)),
+            "Split View's left half ends at the fold"
+        )
+        let rightHalf = CGRect(x: 495.5, y: 0, width: 455.5, height: 669)
+        XCTAssertNil(
+            DuoFoldGeometry.syntheticDivision(screen: screen, window: rightHalf),
+            "and the right half starts after it"
+        )
+        let runsOff = CGRect(x: 440, y: 0, width: 40, height: 669)
+        XCTAssertNil(
+            DuoFoldGeometry.division(runsOff, in: CGRect(x: 0, y: 0, width: 455, height: 669)),
+            "a reported band that runs off the window is not a fold across it"
+        )
+        XCTAssertNil(
+            DuoFoldGeometry.division(
+                CGRect(x: 0, y: 0, width: 13.5, height: 669),
+                in: CGRect(x: 0, y: 0, width: 469, height: 669)
+            ),
+            "the right half is reported the band clipped to its edge"
+        )
+        XCTAssertEqual(
+            DuoFoldGeometry.division(
+                CGRect(x: 455.5, y: 0, width: 40, height: 669),
+                in: CGRect(x: 0, y: 0, width: 951, height: 669)
+            ),
+            CGRect(x: 455.5, y: 0, width: 40, height: 669)
+        )
+    }
+
+    func testSplitViewHalfOnTheInnerDisplayIsASinglePaneShell() {
+        let metrics = SingleWindowShellNativeLayout.resolve(
+            size: CGSize(width: 455, height: 669),
+            safeArea: UIEdgeInsets(top: 0, left: 0, bottom: 34, right: 0),
+            verticalSizeClass: .regular,
+            horizontalSizeClass: .compact,
+            idiom: .phone,
+            division: nil,
+            deckRailVisible: true,
+            compactShowsTerminal: true,
+            compactBackSwipeOffset: 0,
+            compactBackSwipeActive: false,
+            foldable: true
+        )
+        XCTAssertFalse(metrics.expanded)
+        XCTAssertFalse(metrics.deckToggles, "‹ DECK, the iPhone's back control")
+        XCTAssertEqual(metrics.terminalFrame.width, 455, "the terminal takes the whole half")
+        XCTAssertEqual(metrics.terminalAlpha, 1)
+    }
+
     func testTheDeckAloneMaySpanTheFold() {
         let fold = DuoFoldGeometry.syntheticDivision(in: CGSize(width: 669, height: 951))
         let metrics = SingleWindowShellNativeLayout.resolve(

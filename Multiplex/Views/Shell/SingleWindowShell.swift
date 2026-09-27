@@ -39,7 +39,8 @@ struct SingleWindowShellPresentation: Equatable {
     var terminalFocusAllowed = false
     /// The device reports a hinge (iPhone Duo).
     var foldable = false
-    /// Compact width: the Duo's closed display, or a Split View half.
+    /// The display is compact width: the Duo's closed display (a Split View
+    /// half on the inner display is not).
     var compactWidth = false
     /// iPhone Duo: the terminal's UMD column, and the deck's action column
     /// while the deck spans the display.
@@ -967,20 +968,39 @@ final class SingleWindowShellViewController: UIViewController {
         )
     }
 
-    /// The fold in shell coordinates, nil when flat: the system's division
-    /// region, else the hinge-derived band.
+    /// The fold in shell coordinates, nil when flat or when it does not
+    /// cross this window (a Split View half): the system's division region,
+    /// else the hinge-derived band placed on the screen.
     private func currentDivisionRegion() -> CGRect? {
         #if os(iOS)
+        let bounds = shellRootView.bounds
         if #available(iOS 27.1, *) {
             if let region = shellRootView.reservedRegions(kind: .division).first {
-                return region.frame
+                return DuoFoldGeometry.division(region.frame, in: bounds)
             }
         }
         guard hingePartiallyOpen else { return nil }
-        return DuoFoldGeometry.syntheticDivision(in: shellRootView.bounds.size)
+        guard let screen = shellRootView.window?.windowScene?.screen else {
+            return DuoFoldGeometry.syntheticDivision(in: bounds.size)
+        }
+        return DuoFoldGeometry.syntheticDivision(
+            screen: screen.bounds.size,
+            window: shellRootView.convert(bounds, to: screen.coordinateSpace)
+        )
         #else
         return nil
         #endif
+    }
+
+    /// The display's width class, not the window's: a Split View half on the
+    /// inner display is compact but is not the closed display.
+    private var displayIsCompact: Bool {
+        #if os(iOS)
+        if let screen = shellRootView.window?.windowScene?.screen {
+            return screen.traitCollection.horizontalSizeClass == .compact
+        }
+        #endif
+        return traitCollection.horizontalSizeClass == .compact
     }
 
     private func installHingeObservation() {
@@ -1108,12 +1128,15 @@ final class SingleWindowShellViewController: UIViewController {
     private func updateChildPresentation(_ metrics: SingleWindowShellLayoutMetrics, deferDeck: Bool = false) {
         // Orientation comes from the display, not a pane: a laptop-pose pane
         // is landscape-shaped on a portrait display.
+        // The window's own strips: a Split View half away from the system
+        // column has none and keeps the top rail.
+        let windowSafeArea = testLayoutInput?.safeArea ?? shellRootView.safeAreaInsets
         let sideColumn = ShellSideColumn.resolve(
             traits: traitCollection,
             isLandscape: shellRootView.bounds.width > shellRootView.bounds.height,
             foldable: hingePresent,
-            leadingSafeArea: metrics.deckSafeArea.left,
-            trailingSafeArea: metrics.deckSafeArea.right
+            leadingSafeArea: windowSafeArea.left,
+            trailingSafeArea: windowSafeArea.right
         )
         let presentation = SingleWindowShellPresentation(
             expanded: metrics.expanded,
@@ -1128,7 +1151,7 @@ final class SingleWindowShellViewController: UIViewController {
             terminalFocusAllowed: (metrics.expanded || compactShowsTerminal)
                 && terminalFocusReady,
             foldable: hingePresent,
-            compactWidth: traitCollection.horizontalSizeClass == .compact,
+            compactWidth: displayIsCompact,
             sideColumn: sideColumn,
             deckActionColumn: SingleWindowShellLayout.deckActionColumn(
                 sideColumn: sideColumn,

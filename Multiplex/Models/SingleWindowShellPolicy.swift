@@ -332,7 +332,9 @@ enum ShellRailPlacement {
     /// A system-reported edge wins. Else regular × regular landscape on the
     /// phone idiom is the inner display (leading); a foldable's compact
     /// landscape is the closed display, whose column takes the camera's
-    /// safe strip. Nothing moves on a shipped phone.
+    /// safe strip. Nothing moves on a shipped phone. A side edge holds the
+    /// column only where the window has a safe strip: a Split View half away
+    /// from the system column keeps the top rail.
     static func edge(
         systemVerticalBarEdge: ShellRailEdge?,
         idiom: ShellModeDecision.Idiom,
@@ -342,6 +344,33 @@ enum ShellRailPlacement {
         foldable: Bool = false,
         leadingSafeArea: CGFloat = 0,
         trailingSafeArea: CGFloat = 0
+    ) -> ShellRailEdge {
+        let edge = preferredEdge(
+            systemVerticalBarEdge: systemVerticalBarEdge,
+            idiom: idiom,
+            horizontalSizeClass: horizontalSizeClass,
+            verticalSizeClass: verticalSizeClass,
+            isLandscape: isLandscape,
+            foldable: foldable,
+            leadingSafeArea: leadingSafeArea,
+            trailingSafeArea: trailingSafeArea
+        )
+        switch edge {
+        case .top: return .top
+        case .leading: return leadingSafeArea > 0 ? .leading : .top
+        case .trailing: return trailingSafeArea > 0 ? .trailing : .top
+        }
+    }
+
+    private static func preferredEdge(
+        systemVerticalBarEdge: ShellRailEdge?,
+        idiom: ShellModeDecision.Idiom,
+        horizontalSizeClass: ShellSizeClass,
+        verticalSizeClass: ShellSizeClass,
+        isLandscape: Bool,
+        foldable: Bool,
+        leadingSafeArea: CGFloat,
+        trailingSafeArea: CGFloat
     ) -> ShellRailEdge {
         if let systemVerticalBarEdge { return systemVerticalBarEdge }
         guard idiom == .phone, isLandscape else { return .top }
@@ -377,6 +406,24 @@ enum TerminalFontDefaults {
 /// axis, vertical in the book pose, horizontal in the laptop pose.
 enum DuoFoldGeometry {
     static let bandWidth: CGFloat = 40
+
+    /// A fold crosses this window only when its band lies inside the bounds
+    /// with window on both sides. A Split View half ends at the fold: the
+    /// system reports it the band clipped to its edge (13.5 pt measured).
+    static func division(_ fold: CGRect, in bounds: CGRect) -> CGRect? {
+        guard !fold.isEmpty, bounds.contains(fold) else { return nil }
+        let splitsTheWindow = fold.height >= fold.width
+            ? fold.minX > bounds.minX && fold.maxX < bounds.maxX
+            : fold.minY > bounds.minY && fold.maxY < bounds.maxY
+        return splitsTheWindow ? fold : nil
+    }
+
+    /// The synthetic band on the screen, in the coordinates of a window
+    /// whose frame in screen space is `window`; nil unless it crosses it.
+    static func syntheticDivision(screen: CGSize, window: CGRect) -> CGRect? {
+        let fold = syntheticDivision(in: screen).offsetBy(dx: -window.minX, dy: -window.minY)
+        return division(fold, in: CGRect(origin: .zero, size: window.size))
+    }
 
     static func syntheticDivision(in size: CGSize) -> CGRect {
         if size.width >= size.height {
