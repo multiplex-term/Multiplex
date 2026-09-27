@@ -101,30 +101,50 @@ final class SingleWindowShellDuoLayoutTests: XCTestCase {
         XCTAssertNil(metrics.consoleFrame)
     }
 
+    private func bookPose(deckRailVisible: Bool) -> SingleWindowShellLayoutMetrics {
+        SingleWindowShellNativeLayout.resolve(
+            size: CGSize(width: 951, height: 669),
+            safeArea: sideColumn,
+            verticalSizeClass: .regular,
+            horizontalSizeClass: .regular,
+            idiom: .phone,
+            division: DuoFoldGeometry.syntheticDivision(in: CGSize(width: 951, height: 669)),
+            deckRailVisible: deckRailVisible,
+            compactShowsTerminal: true,
+            compactBackSwipeOffset: 0,
+            compactBackSwipeActive: false,
+            foldable: true
+        )
+    }
+
     func testBookPoseGivesOnePageEachAndTheFoldIsTheDivider() {
-        let fold = DuoFoldGeometry.syntheticDivision(in: CGSize(width: 951, height: 669))
-        XCTAssertEqual(fold, CGRect(x: 455.5, y: 0, width: 40, height: 669))
-        for railVisible in [true, false] {
-            let metrics = SingleWindowShellNativeLayout.resolve(
-                size: CGSize(width: 951, height: 669),
-                safeArea: sideColumn,
-                verticalSizeClass: .regular,
-                idiom: .phone,
-                division: fold,
-                deckRailVisible: railVisible,
-                compactShowsTerminal: true,
-                compactBackSwipeOffset: 0,
-                compactBackSwipeActive: false
-            )
-            XCTAssertTrue(metrics.expanded, "railVisible=\(railVisible)")
-            XCTAssertEqual(metrics.deckFrame.width, 455.5)
-            XCTAssertEqual(metrics.terminalFrame.minX, 495.5)
-            XCTAssertEqual(metrics.terminalFrame.width, 455.5)
-            XCTAssertEqual(metrics.terminalAvailableWidth, 371.5)
-            XCTAssertEqual(metrics.dividerFrame.minX, 455.5)
-            XCTAssertEqual(metrics.dividerFrame.width, 40)
-            XCTAssertTrue(metrics.deckInteractive)
-        }
+        XCTAssertEqual(
+            DuoFoldGeometry.syntheticDivision(in: CGSize(width: 951, height: 669)),
+            CGRect(x: 455.5, y: 0, width: 40, height: 669)
+        )
+        let metrics = bookPose(deckRailVisible: true)
+        XCTAssertTrue(metrics.expanded)
+        XCTAssertTrue(metrics.deckToggles)
+        XCTAssertEqual(metrics.deckFrame.width, 455.5)
+        XCTAssertEqual(metrics.terminalFrame.minX, 495.5)
+        XCTAssertEqual(metrics.terminalFrame.width, 455.5)
+        XCTAssertEqual(metrics.terminalAvailableWidth, 371.5)
+        XCTAssertEqual(metrics.dividerFrame.minX, 455.5)
+        XCTAssertEqual(metrics.dividerFrame.width, 40)
+        XCTAssertTrue(metrics.deckInteractive)
+        XCTAssertTrue(metrics.hasDeckColumn)
+    }
+
+    func testBookPoseHidesTheDeckAndTheTerminalSpansTheFold() {
+        let metrics = bookPose(deckRailVisible: false)
+        XCTAssertTrue(metrics.expanded)
+        XCTAssertTrue(metrics.deckToggles)
+        XCTAssertEqual(metrics.deckFrame.width, 0)
+        XCTAssertEqual(metrics.terminalFrame, CGRect(x: 0, y: 8, width: 951, height: 661))
+        XCTAssertEqual(metrics.terminalAvailableWidth, 867)
+        XCTAssertFalse(metrics.hasDeckColumn, "no divider on the fold")
+        XCTAssertFalse(metrics.deckInteractive)
+        XCTAssertFalse(metrics.columnAvailable)
     }
 
     func testLaptopPoseKeepsTheStatusBandOffTheConsoleDeck() {
@@ -166,10 +186,33 @@ final class SingleWindowShellDuoLayoutTests: XCTestCase {
         // The console region is the deck's (a column panel takes it over).
         XCTAssertEqual(metrics.deckFrame, metrics.consoleFrame)
         XCTAssertEqual(metrics.deckAlpha, 1)
+        XCTAssertTrue(metrics.deckToggles)
         XCTAssertTrue(metrics.deckInteractive)
         XCTAssertTrue(metrics.terminalInteractive)
         XCTAssertEqual(metrics.deckSafeArea.bottom, 34)
         XCTAssertEqual(metrics.deckHeaderChrome.cornerInset, 0)
+    }
+
+    func testLaptopPoseHidesTheConsoleDeckAndTheTerminalSpansTheFold() {
+        let metrics = SingleWindowShellNativeLayout.resolve(
+            size: CGSize(width: 669, height: 951),
+            safeArea: innerPortrait,
+            verticalSizeClass: .regular,
+            horizontalSizeClass: .regular,
+            idiom: .phone,
+            division: DuoFoldGeometry.syntheticDivision(in: CGSize(width: 669, height: 951)),
+            deckRailVisible: false,
+            compactShowsTerminal: true,
+            compactBackSwipeOffset: 0,
+            compactBackSwipeActive: false,
+            foldable: true
+        )
+        XCTAssertTrue(metrics.deckToggles)
+        XCTAssertNil(metrics.consoleFrame)
+        XCTAssertEqual(metrics.terminalFrame, CGRect(x: 0, y: 0, width: 669, height: 951))
+        XCTAssertEqual(metrics.deckAlpha, 0)
+        XCTAssertFalse(metrics.deckInteractive)
+        XCTAssertFalse(metrics.columnAvailable)
     }
 
     func testTheDeckAloneMaySpanTheFold() {
@@ -187,5 +230,6 @@ final class SingleWindowShellDuoLayoutTests: XCTestCase {
         )
         XCTAssertEqual(metrics.deckFrame.height, 951 - 82)
         XCTAssertNil(metrics.consoleFrame)
+        XCTAssertFalse(metrics.deckToggles, "‹ BACK, not ◧ SHOW: no terminal to return to")
     }
 }

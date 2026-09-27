@@ -1,6 +1,9 @@
 import Observation
 import OSLog
 import UIKit
+#if DEBUG
+import notify
+#endif
 #if os(iOS)
 import SwiftTerm
 #endif
@@ -77,6 +80,9 @@ struct SingleWindowShellLayoutMetrics: Equatable {
     var dividerFrame: CGRect
     var deckAlpha: CGFloat
     var terminalAlpha: CGFloat
+    /// ◧ toggles the deck rail: beside the terminal, or in the console
+    /// below a fold. Elsewhere it is ‹ BACK to the deck.
+    var deckToggles: Bool
     var deckInteractive: Bool
     var terminalInteractive: Bool
     var deckSafeArea: UIEdgeInsets
@@ -137,15 +143,17 @@ enum SingleWindowShellNativeLayout {
                 idiom: idiom
             )
         }
+        // A hidden rail hands the whole display to the terminal, across a
+        // book fold too.
         let deckWidth: CGFloat
         if let verticalDivision {
-            deckWidth = max(0, min(verticalDivision.minX, fullWidth))
+            deckWidth = deckRailVisible ? max(0, min(verticalDivision.minX, fullWidth)) : 0
         } else if expanded {
             deckWidth = deckRailVisible ? railWidth : 0
         } else {
             deckWidth = fullWidth
         }
-        let terminalOriginX: CGFloat = if let verticalDivision {
+        let terminalOriginX: CGFloat = if let verticalDivision, deckRailVisible {
             max(0, min(verticalDivision.maxX, fullWidth))
         } else if expanded {
             deckWidth
@@ -179,12 +187,12 @@ enum SingleWindowShellNativeLayout {
             || SingleWindowShellLayout.railAlwaysTakesBottomStrip(idiom: idiom, foldable: foldable)
         let terminalHeight: CGFloat
         let consoleFrame: CGRect?
-        // Laptop pose: the bottom region is the console, and the deck lives
-        // there (a column panel takes its place when one is open).
+        // Laptop pose: the terminal stops at the fold and the deck lives in
+        // the console below it (a column panel takes its place when one is
+        // open); ◧ HIDE hands the whole display to the terminal.
         let consoleShowsDeck = horizontalDivision != nil && compactShowsTerminal && !expanded
-        if let horizontalDivision, compactShowsTerminal {
-            // Laptop pose: the terminal stops at the fold; the console owns
-            // everything below it.
+            && deckRailVisible
+        if let horizontalDivision, consoleShowsDeck {
             terminalHeight = max(0, horizontalDivision.minY - contentOriginY)
             consoleFrame = CGRect(
                 x: 0,
@@ -239,8 +247,9 @@ enum SingleWindowShellNativeLayout {
                 || consoleShowsDeck
                 ? 1 : 0,
             terminalAlpha: expanded || compactShowsTerminal ? 1 : 0,
+            deckToggles: expanded || (horizontalDivision != nil && compactShowsTerminal),
             deckInteractive: expanded
-                ? (deckRailVisible || verticalDivision != nil)
+                ? deckRailVisible
                 : (!compactShowsTerminal || consoleShowsDeck),
             terminalInteractive: expanded || compactShowsTerminal,
             deckSafeArea: UIEdgeInsets(
@@ -374,12 +383,21 @@ final class SingleWindowShellViewController: UIViewController {
     /// and what ‹ DECK runs to send it into a tab.
     private(set) var columnPanel: (controller: UIViewController, moveToTab: () -> Void)?
     #if DEBUG
-    /// `MULTIPLEX_AUTO_HIDE_DECK=1`: ◧ HIDE once, for headless captures.
+    /// `MULTIPLEX_AUTO_HIDE_DECK=1`: ◧ HIDE once, for headless captures;
+    /// `notifyutil -p app.multiplexterm.multiplex.debug.deck` presses ◧.
     private var autoHideDeckFired = false
+    private var deckHookToken: Int32 = 0
     private func autoHideDeckIfRequested() {
+        if deckHookToken == 0 {
+            notify_register_dispatch(
+                "app.multiplexterm.multiplex.debug.deck", &deckHookToken, .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.showDeck() }
+            }
+        }
         guard !autoHideDeckFired,
               ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_HIDE_DECK"] == "1",
-              currentLayoutMetrics?.expanded == true,
+              currentLayoutMetrics?.deckToggles == true,
               deckRailVisible
         else { return }
         autoHideDeckFired = true
@@ -718,7 +736,7 @@ final class SingleWindowShellViewController: UIViewController {
             columnPanel.moveToTab()
             return
         }
-        if currentLayoutMetrics?.expanded == true {
+        if currentLayoutMetrics?.deckToggles == true {
             deckRailVisible.toggle()
             applyLayout(animated: true)
         } else {
@@ -1099,7 +1117,7 @@ final class SingleWindowShellViewController: UIViewController {
             terminalAvailableWidth: metrics.terminalAvailableWidth,
             terminalSafeArea: metrics.terminalSafeArea,
             railOwnsBottomSafeArea: metrics.railOwnsBottomSafeArea,
-            deckControl: metrics.expanded && columnPanel == nil
+            deckControl: metrics.deckToggles && columnPanel == nil
                 ? (deckRailVisible ? .hide : .show)
                 : .back,
             terminalFocusAllowed: (metrics.expanded || compactShowsTerminal)

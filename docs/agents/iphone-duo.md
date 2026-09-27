@@ -34,7 +34,8 @@ Measured on the 27.1 simulator with `MULTIPLEX_DUO_PROBE=1` (log category
   screenshots need `--display=<port UUID from simctl io enumerate>`.
   `./Tools/build.sh build duo -configuration Debug` (Release lands
   otherwise). DEBUG env: `MULTIPLEX_DUO_PROBE=1`, `MULTIPLEX_AUTO_HIDE_DECK=1`
-  (◧ HIDE once), with the `SIMCTL_CHILD_` prefix.
+  (◧ HIDE once), with the `SIMCTL_CHILD_` prefix; `notifyutil -p
+  app.multiplexterm.multiplex.debug.deck` presses ◧.
 
 ## Rules (pure models, unit-tested)
 
@@ -46,12 +47,15 @@ Measured on the 27.1 simulator with `MULTIPLEX_DUO_PROBE=1` (log category
   single pane. Duo: closed landscape and open portrait single, open
   landscape 316 | 635.
 - **Fold** — `resolve(…, division:)` takes the active division region
-  (nil when flat). Vertical: expanded regardless of width and ◧ HIDE (the
-  left page is never empty); deck = 0…minX, terminal from maxX, the
-  divider is the region. Horizontal: single pane, terminal in the top
-  region, `consoleFrame` the bottom one — key rail on the fold, below it
-  the first of keyboard, composer, ▤/⌗ panel, C/B or Key Commands slabs,
-  else the deck rail.
+  (nil when flat). Vertical: expanded regardless of width; deck = 0…minX,
+  terminal from maxX, the divider is the region. Horizontal: single pane,
+  terminal in the top region, `consoleFrame` the bottom one — key rail on
+  the fold, below it the first of keyboard, composer, ▤/⌗ panel, C/B or
+  Key Commands slabs, else the deck rail. In both poses ◧ toggles the
+  deck (`deckToggles`): HIDE hands the whole inner display to the
+  terminal, across the fold band, no divider, no console; SHOW brings the
+  deck back to its page or the console. ‹ BACK only where no fold and no
+  rail.
 - **Corner inset** — `cornerLeadingInset(…)`: 24 pt on the header row of
   the pane owning a bare display corner (inner landscape: no top inset,
   55 pt corners). Regular width only: the closed corner is 6 pt. Deck
@@ -116,8 +120,8 @@ Measured on the 27.1 simulator with `MULTIPLEX_DUO_PROBE=1` (log category
   column's frame over the hidden deck. ‹ DECK moves the panel into a tab;
   losing the column converts it to a tab. The iPad overlay is never used.
 - **Console region** — a horizontal division with the terminal showing
-  makes `deckFrame == consoleFrame` (`.shellRail`, two columns), or the
-  column panel there. Deviation from the board: the composer stays docked
+  and the deck on makes `deckFrame == consoleFrame` (`.shellRail`, two
+  columns), or the column panel there. Deviation from the board: the composer stays docked
   above the key rail.
 - **Deck** — the single-pane wall takes the rail's 12 pt padding on regular
   width so two 290 pt columns fit at 669.
