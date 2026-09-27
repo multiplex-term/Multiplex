@@ -83,6 +83,28 @@ final class SingleWindowShellUIKitTests: XCTestCase {
         XCTAssertTrue(controller.deckRailVisible)
     }
 
+    func testRotatingBetweenTheFoldedPosesKeepsAHiddenDeckHidden() throws {
+        let harness = makeController(initialRoute: TerminalWindowRoute(
+            tab: terminal("main")
+        ))
+        let controller = harness.controller
+        controller.loadViewIfNeeded()
+        let book = CGSize(width: 951, height: 669)
+        let laptop = CGSize(width: 669, height: 951)
+        controller.applyTestLayout(size: book, division: DuoFoldGeometry.syntheticDivision(in: book))
+        controller.showDeck()
+        XCTAssertFalse(controller.deckRailVisible)
+
+        controller.applyTestLayout(size: laptop, division: DuoFoldGeometry.syntheticDivision(in: laptop))
+        XCTAssertTrue(controller.compactShowsTerminal, "the terminal stays up")
+        XCTAssertFalse(controller.deckRailVisible)
+        XCTAssertNil(controller.currentLayoutMetrics?.consoleFrame)
+
+        controller.applyTestLayout(size: book, division: DuoFoldGeometry.syntheticDivision(in: book))
+        XCTAssertFalse(controller.deckRailVisible, "◧ hid it; the book page stays the terminal's")
+        XCTAssertEqual(controller.currentLayoutMetrics?.deckFrame.width, 0)
+    }
+
     func testCrossingTheBreakpointWithNothingAttachedShowsTheDeck() throws {
         let harness = makeController()
         let controller = harness.controller

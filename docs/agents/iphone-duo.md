@@ -127,9 +127,10 @@ Measured on the 27.1 simulator with `MULTIPLEX_DUO_PROBE=1` (log category
   width so two 290 pt columns fit at 669.
 - **Font** — `TerminalFontDefaults.pointSize`: 13 inner, 12 outer, 14 iPad,
   applied until the user touches A−/A+ in that window.
-- **Continuity** — `continueAcrossBreakpoint(expanding:)`: to single pane
-  shows the attached terminal (deck when nothing is attached); to two
-  panes restores a hidden deck rail. Divider and key rail move on one
+- **Continuity** — `continueAcrossBreakpoint(expanding:deckToggled:)`: to
+  single pane shows the attached terminal (deck when nothing is attached);
+  to two panes restores a hidden deck rail unless ◧ hid it in the pose
+  being left, so a hidden deck survives the laptop ↔ book rotation. Divider and key rail move on one
   spring; hinge angle drives nothing.
 
 ## Traps

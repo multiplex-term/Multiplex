@@ -683,15 +683,16 @@ final class SingleWindowShellViewController: UIViewController {
             pendingLayoutMetrics = next
             return false
         }
-        continueAcrossBreakpoint(expanding: next.expanded)
+        continueAcrossBreakpoint(expanding: next.expanded, deckToggled: current.deckToggles)
         return true
     }
 
     /// Crossing to single pane shows the attached terminal (the deck when
-    /// nothing is attached); crossing to two panes restores a hidden rail.
-    private func continueAcrossBreakpoint(expanding: Bool) {
+    /// nothing is attached); crossing to two panes restores a hidden rail,
+    /// unless ◧ hid it in the pose being left (laptop → book keeps it hidden).
+    private func continueAcrossBreakpoint(expanding: Bool, deckToggled: Bool) {
         if expanding {
-            deckRailVisible = true
+            if !deckToggled { deckRailVisible = true }
         } else {
             let hasTabs = !shellState.terminalRoute.tabs.isEmpty
             if compactShowsTerminal != hasTabs {
@@ -1209,6 +1210,7 @@ final class SingleWindowShellViewController: UIViewController {
             + "h=\(traitCollection.horizontalSizeClass.rawValue) v=\(traitCollection.verticalSizeClass.rawValue) "
             + "idiom=\(traitCollection.userInterfaceIdiom.rawValue) edge=\(edge) orient=\(orientation) "
             + "screen=\(screen) hingeFolded=\(hingePartiallyOpen) "
+            + "deckRail=\(deckRailVisible) showsTerminal=\(compactShowsTerminal) "
             + "division=[\(division)] occlusion=[\(occlusion)]"
         guard line != lastDuoProbe else { return }
         lastDuoProbe = line
