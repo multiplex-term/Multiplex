@@ -100,7 +100,9 @@ final class TerminalKeyBarUIKitTests: XCTestCase {
         )
         XCTAssertEqual(specification(width: 390, returns: false).tier, .tightTmux)
         // iPhone Duo book page beside the 84 pt system column: 371.5 pt.
-        XCTAssertEqual(specification(width: 374.999, returns: true).tier, .narrowFloor)
+        // The fit check spends half a point of slack: 375 holds to 374.5.
+        XCTAssertEqual(specification(width: 374.5, returns: true).tier, .essentialsFloor)
+        XCTAssertEqual(specification(width: 374.499, returns: true).tier, .narrowFloor)
         XCTAssertEqual(specification(width: 371.5, returns: false).tier, .essentialsFloor)
         XCTAssertEqual(specification(width: 371.4, returns: false).tier, .narrowFloor)
         XCTAssertEqual(
