@@ -47,7 +47,7 @@ on:
       - "Tools/metadata_limits.rb"
   workflow_dispatch:
 
-# A newer push to the same branch supersedes this run; a ~40-minute macOS job
+# A newer push to the same branch supersedes this run; a macOS run
 # is not worth spending on a commit that has already been replaced. `main` is
 # exempt so its history keeps a result per commit.
 concurrency:
@@ -58,10 +58,38 @@ permissions:
   contents: read
 
 jobs:
-  xcode:
-    name: Lint, build, test
+  # SwiftLint reads the sources directly; it needs neither the generated
+  # project nor a build, so it runs beside the platform legs, not ahead of them.
+  lint:
+    name: Lint
     runs-on: xcode-27
-    timeout-minutes: 90
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install SwiftLint
+        run: brew install swiftlint
+
+      - name: Lint
+        run: ./Tools/build.sh lint
+
+  # One runner per platform: each leg has its own DerivedData, so the build-DB
+  # lock that keeps a laptop's visionOS and iPad builds sequential does not
+  # apply here. `test` builds the app target too, but building first keeps a
+  # compile error reported as a build failure.
+  xcode:
+    name: Build, test (${{ matrix.name }})
+    runs-on: xcode-27
+    timeout-minutes: 60
+    strategy:
+      # A failure on one platform should not hide the other's result.
+      fail-fast: false
+      matrix:
+        include:
+          - platform: vos
+            name: visionOS
+          - platform: ipad
+            name: iPad
     steps:
       - uses: actions/checkout@v5
 
@@ -76,8 +104,8 @@ jobs:
       - name: Install the Metal Toolchain
         run: xcodebuild -downloadComponent MetalToolchain
 
-      - name: Install XcodeGen and SwiftLint
-        run: brew install xcodegen swiftlint
+      - name: Install XcodeGen
+        run: brew install xcodegen
 
       # Citadel is the one dependency fetched over the network (SwiftTerm and
       # swift-nio-ssh are vendored in-tree). Cache its checkout so a CI run is
@@ -92,21 +120,8 @@ jobs:
       - name: Generate the Xcode project
         run: ./Tools/build.sh gen
 
-      - name: Lint
-        run: ./Tools/build.sh lint
+      - name: Build (${{ matrix.name }})
+        run: ./Tools/build.sh build ${{ matrix.platform }}
 
-      # visionOS and iPad must not run concurrently against the shared
-      # DerivedData (the build DB locks), so these stay four sequential steps
-      # rather than a matrix. `test` builds the app target too, but building
-      # first keeps a compile error reported as a build failure.
-      - name: Build (visionOS)
-        run: ./Tools/build.sh build vos
-
-      - name: Test (visionOS)
-        run: ./Tools/build.sh test vos
-
-      - name: Build (iPad)
-        run: ./Tools/build.sh build ipad
-
-      - name: Test (iPad)
-        run: ./Tools/build.sh test ipad
+      - name: Test (${{ matrix.name }})
+        run: ./Tools/build.sh test ${{ matrix.platform }}
