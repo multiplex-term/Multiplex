@@ -272,6 +272,31 @@ final class SingleWindowShellDuoLayoutTests: XCTestCase {
         XCTAssertEqual(metrics.terminalAlpha, 1)
     }
 
+    func testTheLeftSplitHalfOwnsTheDisplayCornerTheRightHalfDoesNot() {
+        func half(ownsCorner: Bool) -> SingleWindowShellLayoutMetrics {
+            SingleWindowShellNativeLayout.resolve(
+                size: CGSize(width: 469, height: 669),
+                safeArea: UIEdgeInsets(top: 0, left: 0, bottom: 34, right: ownsCorner ? 0 : 84),
+                verticalSizeClass: .regular,
+                horizontalSizeClass: .compact,
+                idiom: .phone,
+                deckRailVisible: true,
+                compactShowsTerminal: true,
+                compactBackSwipeOffset: 0,
+                compactBackSwipeActive: false,
+                foldable: true,
+                displayHorizontalSizeClass: .regular,
+                ownsLeadingDisplayCorner: ownsCorner
+            )
+        }
+        let left = half(ownsCorner: true)
+        XCTAssertEqual(left.terminalRailChrome.cornerInset, 24, "the rail clears the rounded corner")
+        XCTAssertEqual(left.terminalFrame.minY, 8, "the display's bare top edge")
+        let right = half(ownsCorner: false)
+        XCTAssertEqual(right.terminalRailChrome.cornerInset, 0, "its leading edge is the fold")
+        XCTAssertEqual(right.terminalFrame.minY, 8)
+    }
+
     func testTheDeckAloneMaySpanTheFold() {
         let fold = DuoFoldGeometry.syntheticDivision(in: CGSize(width: 669, height: 951))
         let metrics = SingleWindowShellNativeLayout.resolve(

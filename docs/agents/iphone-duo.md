@@ -98,8 +98,10 @@ Measured on the 27.1 simulator with `MULTIPLEX_DUO_PROBE=1` (log category
   iPhone never moves. Resolved once in the shell from the window's safe
   area (`ShellSideColumn.resolve`). Shell presentation only.
 - **Split View** — the half is compact width on a regular display: single
-  pane, ‹ DECK back control, no fold, slabs kept (bare chrome reads the
-  screen's width class, not the window's).
+  pane, ‹ DECK back control, no fold. Bare chrome, the corner inset, the
+  bare top padding, and the status band read the screen's width class,
+  not the window's; only the half at the display's left edge takes the
+  corner inset.
 - **Column** — on a side edge the UMD renders as
   `UMDBarStyle.verticalColumn`: 44 pt symbol-over-caption chips 4 pt
   apart, centred on the glyph line, ending above the keyboard. Placement

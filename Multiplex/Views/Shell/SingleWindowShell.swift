@@ -128,7 +128,9 @@ enum SingleWindowShellNativeLayout {
         compactShowsTerminal: Bool,
         compactBackSwipeOffset: CGFloat,
         compactBackSwipeActive: Bool,
-        foldable: Bool = false
+        foldable: Bool = false,
+        displayHorizontalSizeClass: ShellSizeClass? = nil,
+        ownsLeadingDisplayCorner: Bool = true
     ) -> SingleWindowShellLayoutMetrics {
         let fullWidth = max(0, size.width)
         let usableWidth = max(0, fullWidth - safeArea.left - safeArea.right)
@@ -166,22 +168,28 @@ enum SingleWindowShellNativeLayout {
             0
         }
         let terminalWidth = max(0, fullWidth - terminalOriginX)
-        let cornerInset = SingleWindowShellLayout.cornerLeadingInset(
-            topSafeArea: safeArea.top,
-            leadingSafeArea: safeArea.left,
-            idiom: idiom,
-            horizontalSizeClass: horizontalSizeClass
-        )
+        // Corners, the top edge, and the status band are the display's: a
+        // Split View half is compact but sits on the regular inner display,
+        // and only the half at the display's left edge owns its corner.
+        let displayClass = displayHorizontalSizeClass ?? horizontalSizeClass
+        let cornerInset = ownsLeadingDisplayCorner
+            ? SingleWindowShellLayout.cornerLeadingInset(
+                topSafeArea: safeArea.top,
+                leadingSafeArea: safeArea.left,
+                idiom: idiom,
+                horizontalSizeClass: displayClass
+            )
+            : 0
         let topPadding = SingleWindowShellLayout.bareTopPadding(
             topSafeArea: safeArea.top,
             idiom: idiom,
-            horizontalSizeClass: horizontalSizeClass,
+            horizontalSizeClass: displayClass,
             verticalSizeClass: verticalSizeClass
         )
         let topBand = SingleWindowShellLayout.topBandHeight(
             topSafeArea: safeArea.top,
             idiom: idiom,
-            horizontalSizeClass: horizontalSizeClass,
+            horizontalSizeClass: displayClass,
             verticalSizeClass: verticalSizeClass
         )
         // The band is the top safe area itself: content starts at 0 and the
@@ -964,7 +972,9 @@ final class SingleWindowShellViewController: UIViewController {
             compactShowsTerminal: compactShowsTerminal,
             compactBackSwipeOffset: compactBackSwipeOffset,
             compactBackSwipeActive: compactBackSwipeActive,
-            foldable: hingePresent
+            foldable: hingePresent,
+            displayHorizontalSizeClass: testLayoutInput == nil ? displayHorizontalSizeClass : nil,
+            ownsLeadingDisplayCorner: testLayoutInput == nil ? (windowFrameOnScreen.map { $0.minX < 1 } ?? true) : true
         )
     }
 
@@ -980,27 +990,38 @@ final class SingleWindowShellViewController: UIViewController {
             }
         }
         guard hingePartiallyOpen else { return nil }
-        guard let screen = shellRootView.window?.windowScene?.screen else {
+        guard let screen = shellRootView.window?.windowScene?.screen, let window = windowFrameOnScreen else {
             return DuoFoldGeometry.syntheticDivision(in: bounds.size)
         }
-        return DuoFoldGeometry.syntheticDivision(
-            screen: screen.bounds.size,
-            window: shellRootView.convert(bounds, to: screen.coordinateSpace)
-        )
+        return DuoFoldGeometry.syntheticDivision(screen: screen.bounds.size, window: window)
+        #else
+        return nil
+        #endif
+    }
+
+    /// The shell's frame on its screen; nil off-screen or on visionOS.
+    private var windowFrameOnScreen: CGRect? {
+        #if os(iOS)
+        guard let screen = shellRootView.window?.windowScene?.screen else { return nil }
+        return shellRootView.convert(shellRootView.bounds, to: screen.coordinateSpace)
         #else
         return nil
         #endif
     }
 
     /// The display's width class, not the window's: a Split View half on the
-    /// inner display is compact but is not the closed display.
-    private var displayIsCompact: Bool {
+    /// inner display is compact but sits on a regular display.
+    private var displayHorizontalSizeClass: ShellSizeClass? {
         #if os(iOS)
-        if let screen = shellRootView.window?.windowScene?.screen {
-            return screen.traitCollection.horizontalSizeClass == .compact
-        }
+        guard let screen = shellRootView.window?.windowScene?.screen else { return nil }
+        return ShellSizeClass(screen.traitCollection.horizontalSizeClass)
+        #else
+        return nil
         #endif
-        return traitCollection.horizontalSizeClass == .compact
+    }
+
+    private var displayIsCompact: Bool {
+        (displayHorizontalSizeClass ?? ShellSizeClass(traitCollection.horizontalSizeClass)) == .compact
     }
 
     private func installHingeObservation() {
