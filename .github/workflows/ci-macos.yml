@@ -70,6 +70,12 @@ jobs:
           xcodebuild -version
           xcrun simctl list runtimes | grep -E 'iOS|visionOS'
 
+      # The xcode-27 image ships Xcode without the Metal Toolchain, which the
+      # vendored SwiftTerm's Shaders.metal needs
+      # (https://github.com/actions/runner-images/issues/14548).
+      - name: Install the Metal Toolchain
+        run: xcodebuild -downloadComponent MetalToolchain
+
       - name: Install XcodeGen and SwiftLint
         run: brew install xcodegen swiftlint
 
