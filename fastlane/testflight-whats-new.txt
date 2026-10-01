@@ -2,6 +2,7 @@ NEW SINCE 1.4.2
 • iPhone landscape: the deck rail steps aside whenever it would leave the terminal under 390 pt, so SE-size phones get the full-width terminal (edge-swipe back to the deck).
 • iPhone Duo: the shell follows the phone. On the closed display the chips stack beside the clock, on the camera's side in landscape, with no bars behind them. Folded as a book, the deck takes the left page and the terminal the right; folded as a laptop, the terminal sits above the fold and the deck below it. In both, the deck's HIDE control hands the whole display to the terminal and stays hidden when you rotate. The deck's + HOST / FAQ / SETTINGS stand beside the clock while the deck spans the display, and a viewer opened from the terminal takes the deck's column.
 • iPhone Duo Split View: a half behaves like an iPhone (deck and terminal in turn, title bar on top); the half beside the clock keeps its chip column.
+• Deck: the NO TMUX / NO HERDR tile's hint wraps across the tile instead of one character per line.
 
 PLEASE TRY
 1. iPhone Duo, closed: attach two sessions, rotate both ways; the chips should follow the camera, and the tabs and title should never sit under it.

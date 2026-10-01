@@ -3823,6 +3823,9 @@ private final class FleetTmuxMissingTileView: UIKitTallyBorderedView {
             stack.topAnchor.constraint(greaterThanOrEqualTo: topAnchor, constant: 10),
             stack.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -10),
             stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            // A wrapping label in a center-aligned stack has no width of its
+            // own and collapses to one glyph per line (CJK breaks anywhere).
+            body.widthAnchor.constraint(equalTo: stack.widthAnchor),
             heightConstraint!,
         ])
         isAccessibilityElement = false
