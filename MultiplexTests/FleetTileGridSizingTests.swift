@@ -40,6 +40,21 @@ final class FleetTileGridSizingTests: XCTestCase {
         #endif
     }
 
+    func testDuoInnerDisplayFitsTwoColumnsOnlyWithTheRailPadding() {
+        // 626 pt open portrait: 12 pt sides leave 602 (two minimum tiles need
+        // 594); the compact 26 leaves 574 and one column.
+        XCTAssertEqual(FleetTileGridSizing.railWallPadding, 12)
+        XCTAssertEqual(FleetTileGridSizing.compactWallPadding, 26)
+        XCTAssertEqual(
+            FleetTileGridSizing.columnCount(current: nil, availableWidth: 626 - 12 * 2),
+            2
+        )
+        XCTAssertEqual(
+            FleetTileGridSizing.columnCount(current: nil, availableWidth: 626 - 26 * 2),
+            1
+        )
+    }
+
     func testDefaultDeckWidthStartsWithTwoPreferredWidthColumns() {
         let width = FleetTileGridSizing.requiredWidth(
             columnCount: 2,

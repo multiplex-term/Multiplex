@@ -652,7 +652,12 @@ final class ThemeEditorUIKitTests: XCTestCase {
         XCTAssertEqual(previews.last??.cursor, ThemeColor(0xFFEEDD))
 
         navigation.popViewController(animated: false)
-        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        // viewDidDisappear lands on a later run-loop pass; a loaded CI
+        // runner needs more than one.
+        let deadline = Date().addingTimeInterval(3)
+        while previews.count < 2, Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        }
         XCTAssertEqual(previews.count, 2)
         XCTAssertNil(previews.last ?? nil, "Back ends the preview")
         XCTAssertEqual(saved, 0)

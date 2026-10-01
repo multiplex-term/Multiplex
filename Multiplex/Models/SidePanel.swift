@@ -9,10 +9,15 @@ enum SidePanelPlatform: CaseIterable, Equatable {
 
 /// How a window presents the panel: the visionOS classic window hangs it
 /// from a trailing ornament; iPad and the visionOS Shell lay a card over the
-/// pane inside the window.
+/// pane inside the window; iPhone Duo's Shell gives it the leading deck
+/// column (or the laptop-pose console region) — no stored width, the
+/// column's geometry is the shell's.
 enum SidePanelPresentationStyle: Equatable {
     case iPadOverlay
     case visionOrnament
+    /// The shell mounts the panel in its column (deck rail, book page, or
+    /// console region): no card, no seam, the column's own width.
+    case shellColumn
 }
 
 /// Pure side-panel geometry shared by the in-window iPad overlay and the
@@ -177,12 +182,16 @@ enum SidePanelWidth {
 enum SidePanelPolicy {
     static let minimumPaneWidth: CGFloat = 660
 
+    /// `columnAvailable`: the Duo shell has a column to give — the expanded
+    /// deck rail, a book page, or the laptop console region. A flat inner
+    /// portrait display has none, so the panel takes the tab road there.
     static func admitsPanel(
         style: SidePanelPresentationStyle,
         paneWidth: CGFloat,
         isCompactWidth: Bool,
         anchorIsTerminal: Bool,
-        environmentOverride: String?
+        environmentOverride: String?,
+        columnAvailable: Bool = false
     ) -> Bool {
         guard environmentOverride != "0", anchorIsTerminal else { return false }
 
@@ -194,6 +203,11 @@ enum SidePanelPolicy {
                 && !isCompactWidth
         case .visionOrnament:
             return true
+        case .shellColumn:
+            // The column exists only on a regular-width display (the Duo's
+            // inner display) and only while the shell shows one; the closed
+            // display and flat inner portrait keep the tab route.
+            return !isCompactWidth && columnAvailable
         }
     }
 }

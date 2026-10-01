@@ -44,10 +44,10 @@ Where one line genuinely can't comply, use a scoped
 the code.
 
 **CI** is split by platform and filters out unrelated paths. The macOS workflow
-(`.github/workflows/ci-macos.yml`, macos-26 — Xcode 26 and the visionOS 26
-simulator runtime) is `Tools/build.sh gen`, `lint`, then `build` + `test` for
-visionOS and iPad in sequence, sequential because of the DerivedData lock
-above. The Linux workflow (`.github/workflows/ci-linux.yml`) runs only when its
+(`.github/workflows/ci-macos.yml`, the `xcode-27` runner) runs three parallel
+jobs: `Tools/build.sh lint`, and one runner each for visionOS and iPad doing
+`gen`, `build`, `test` — separate runners, so the DerivedData lock above does
+not apply. The Linux workflow (`.github/workflows/ci-linux.yml`) runs only when its
 metadata inputs change. It executes `ruby Tools/check-metadata.rb`, which needs
 neither Xcode nor gems and so answers in seconds: it holds the TestFlight
 changelog and the App Store listing files to the App Store Connect caps and
@@ -103,6 +103,8 @@ approaches. Don't re-litigate a recorded decision without new facts.
   metadata duties. Before committing a user-visible change, append it to
   `fastlane/testflight-whats-new.txt` and reconcile store metadata per that
   doc.
+- `iphone-duo.md` — the foldable iPhone: display facts, the pose matrix,
+  and the expand / fold / rail-edge / panel-home rules the shell follows.
 - `design-conventions.md` — TALLY tokens, appearance system, type scaling,
   platform splits. Color is state, never decoration.
 - `i18n.md` — String Catalogs (zh-Hant, ja), the A/B/C string tiers (TALLY
