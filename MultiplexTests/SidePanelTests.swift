@@ -107,6 +107,7 @@ final class SidePanelTests: XCTestCase {
             let terminal: Bool
             let override: String?
             let expected: Bool
+            var column = true
         }
         let cases = [
             Case(style: .iPadOverlay, width: 659.999, compact: false,
@@ -129,6 +130,19 @@ final class SidePanelTests: XCTestCase {
                  terminal: true, override: "1", expected: true),
             Case(style: .iPadOverlay, width: 600, compact: false,
                  terminal: true, override: "unknown", expected: false),
+            // iPhone Duo: the shell's column exists on the regular-width inner
+            // display whatever the pane width; the closed display keeps tabs.
+            Case(style: .shellColumn, width: 0, compact: false,
+                 terminal: true, override: nil, expected: true),
+            Case(style: .shellColumn, width: 2_000, compact: true,
+                 terminal: true, override: nil, expected: false),
+            Case(style: .shellColumn, width: 890, compact: false,
+                 terminal: false, override: nil, expected: false),
+            Case(style: .shellColumn, width: 890, compact: false,
+                 terminal: true, override: "0", expected: false),
+            // Flat inner portrait: regular width but no column to give.
+            Case(style: .shellColumn, width: 669, compact: false,
+                 terminal: true, override: nil, expected: false, column: false),
         ]
 
         for testCase in cases {
@@ -139,7 +153,8 @@ final class SidePanelTests: XCTestCase {
                     paneWidth: testCase.width,
                     isCompactWidth: testCase.compact,
                     anchorIsTerminal: testCase.terminal,
-                    environmentOverride: testCase.override
+                    environmentOverride: testCase.override,
+                    columnAvailable: testCase.column
                 ),
                 testCase.expected,
                 "\(testCase.style), width=\(testCase.width), compact=\(testCase.compact), "

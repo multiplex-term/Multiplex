@@ -177,4 +177,14 @@ final class KeyboardAvoidanceTests: XCTestCase {
     func testRepeatedDockedFrameChangeStillRemeasuresMovingWindow() {
         XCTAssertTrue(KeyboardAvoidance.shouldReapplyFrameChange(from: .docked, to: .docked))
     }
+
+    func testPaneObstructionStopsAtThePaneBottom() {
+        // A pane reaching the window's bottom takes the whole keyboard.
+        XCTAssertEqual(KeyboardAvoidance.paneObstruction(reported: 311, restingBottom: 951, paneBottom: 951), 311)
+        // The laptop pose: the pane ends at the fold, the keyboard covers the console.
+        XCTAssertEqual(KeyboardAvoidance.paneObstruction(reported: 311, restingBottom: 951, paneBottom: 455.5), 0)
+        // A pane the keyboard partly reaches keeps only the covered part.
+        XCTAssertEqual(KeyboardAvoidance.paneObstruction(reported: 311, restingBottom: 951, paneBottom: 800), 160)
+        XCTAssertEqual(KeyboardAvoidance.paneObstruction(reported: 0, restingBottom: 951, paneBottom: 455.5), 0)
+    }
 }

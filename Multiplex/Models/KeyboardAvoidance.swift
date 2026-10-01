@@ -25,6 +25,15 @@ enum KeyboardAvoidance {
     /// container's on-screen width: the accessory bar tracks the window in
     /// windowed iPadOS, so a keyboard as wide as either the screen or the
     /// container counts as spanning; a floating pill is far narrower.
+    /// The keyboard's reach into one pane. `reported` is measured against
+    /// the window's resting bottom; a pane that stops `paneBottom` short of
+    /// `restingBottom` (iPhone Duo's laptop pose, above the fold) subtracts
+    /// the gap, so a keyboard over the console below never lifts the chrome
+    /// of a pane it does not cover.
+    static func paneObstruction(reported: CGFloat, restingBottom: CGFloat, paneBottom: CGFloat) -> CGFloat {
+        max(0, reported - max(0, restingBottom - paneBottom))
+    }
+
     static func isDocked(keyboard: CGRect, screen: CGRect, containerWidth: CGFloat) -> Bool {
         guard keyboard.width > 0, keyboard.height > 0 else { return false }
         let pinnedToBottom = keyboard.maxY >= screen.maxY - 2
