@@ -55,7 +55,7 @@ Some features require Multiplex Pro; see [`docs/store-metadata.md`](docs/store-m
 
 ## Building
 
-Requires Xcode with the visionOS SDK and [XcodeGen](https://github.com/yonaskolb/XcodeGen). Install the command-line prerequisites with [Homebrew](https://brew.sh/):
+Requires Xcode 27.1 or later (the iPhone Duo simulator and the reserved-region SDK the shell builds against) with the visionOS SDK, and [XcodeGen](https://github.com/yonaskolb/XcodeGen). Install the command-line prerequisites with [Homebrew](https://brew.sh/):
 
 ```sh
 brew install xcodegen swiftlint
