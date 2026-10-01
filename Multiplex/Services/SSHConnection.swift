@@ -159,6 +159,7 @@ enum SSHConnectionError: Error {
     case keyPassphraseRequired
     case incorrectKeyPassphrase
     case unsupportedKey
+    case tailscaleUnavailable
     case connectFailed(String)
     case commandFailed(exitCode: Int, stderr: String)
     case notConnected
@@ -171,8 +172,9 @@ enum SSHConnectionError: Error {
         switch self {
         case .keyPassphraseRequired: .required
         case .incorrectKeyPassphrase: .incorrect
-        case .missingCredentials, .unsupportedKey, .connectFailed, .notConnected,
-             .hostKeyRefused, .commandFailed: nil
+        case .missingCredentials, .unsupportedKey, .tailscaleUnavailable,
+             .connectFailed, .notConnected, .hostKeyRefused, .commandFailed:
+            nil
         }
     }
 
@@ -186,6 +188,8 @@ enum SSHConnectionError: Error {
             String(localized: "The passphrase didn't unlock the private key for \(host.name). Try again.")
         case .unsupportedKey:
             String(localized: "The private key for \(host.name) couldn't be read. Paste an OpenSSH ed25519 or RSA key.")
+        case .tailscaleUnavailable:
+            String(localized: "The Tailscale backend isn't available in this build.")
         case .connectFailed(let detail):
             String(localized: "Couldn't reach \(host.name) (\(detail)).")
         case .commandFailed(let exitCode, let stderr):
@@ -303,13 +307,51 @@ actor SSHConnection {
             task = inFlight
             generation = connectGeneration
         } else {
+            #if !canImport(CTailscaleRS)
+            if host.useTailscale {
+                throw SSHConnectionError.tailscaleUnavailable
+            }
+            #endif
             let method = try Self.makeAuthenticationMethod(host: host, secrets: secrets)
             let (verifier, outcome) = HostKeyTrust.verifier(for: host)
             hostKeyOutcome = outcome
             connectGeneration &+= 1
             generation = connectGeneration
             task = Task {
-                try await SSHClient.connect(
+                if host.useTailscale {
+                    #if canImport(CTailscaleRS)
+                    let remote = try await TailscaleTunnel.shared.dial(
+                        hostname: host.hostname,
+                        port: host.port
+                    )
+                    // Citadel's channel-injection overload asserts
+                    // inEventLoop in its synchronous prefix, so the tailnet
+                    // connection is spliced through a one-shot localhost
+                    // relay and Citadel dials it via its ordinary bootstrap.
+                    // The relay tears itself down when either side closes, so
+                    // the client's own close() is its lifetime owner. The
+                    // host-key pin is keyed by host id, so it still binds
+                    // through the 127.0.0.1 hop.
+                    let relay = TailscaleLoopbackRelay()
+                    let relayPort = try relay.start(spliceTo: remote)
+                    do {
+                        return try await SSHClient.connect(
+                            host: "127.0.0.1",
+                            port: Int(relayPort),
+                            authenticationMethod: method,
+                            hostKeyValidator: .custom(verifier),
+                            reconnect: .never
+                        )
+                    } catch {
+                        relay.close()
+                        throw error
+                    }
+                    #else
+                    throw SSHConnectionError.tailscaleUnavailable
+                    #endif
+                }
+
+                return try await SSHClient.connect(
                     host: host.hostname,
                     port: host.port,
                     authenticationMethod: method,
