@@ -242,8 +242,18 @@ routing, tab moves, keyboard avoidance, or secret fields.
   navigation controller, rail heights 54/41/31 all left it exactly there).
   `.minimalStyle` — "occupy as little of the scene's space as possible" —
   lifts it to 6–27.5 pt, in line with the rail's own chips. It is scoped
-  to terminal scenes: the deck and shell still host system navigation
-  bars, and `.unified` is what insets THOSE bars around the pill. Total
+  to terminal and shell scenes: the classic deck still hosts a system
+  navigation bar, and `.unified` is what insets THAT bar around the pill
+  (the shell's deck header is FleetWall's own row). The iPad Shell
+  (Settings → Window mode) follows the same geometry rule through
+  `ShellWindowChrome`: its top strip is the part of the window under the
+  status bar (a resized window spent the reported 32 pt as an empty
+  title-bar band above both panes, reported on device 2026-10-04), the
+  leading header row — MULTIPLEX beside a terminal, the rail when the deck
+  is hidden or single-pane — clears the pill through `ShellHeaderChrome
+  .cornerInset`, a 0.5 s position watch catches drags, and the rail's
+  `padShell` profile is 45 pt so its rule meets the deck header's
+  (44 pt row + hairline below; the rail's hairline is inside). Total
   chrome: 44 pt in a window — the rail matches `TerminalKeyBar.barHeight`
   at the pane's other end (`minimumContentHeight`; the faces keep their
   size and centre in it, and the padding becomes a floor) — pill

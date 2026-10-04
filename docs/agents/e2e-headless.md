@@ -116,8 +116,13 @@ app.multiplexterm.multiplex`):
   attempt so the veil can be captured. Shipping toggle: Settings → App lock
   (`AppLockStore`).
 - `MULTIPLEX_FORCE_SHELL=1|0` — force the single-window shell on/off.
-  Default: iPhone always shell, iPad only when `UIWindowScene.isFullScreen`,
-  visionOS never. Logged under category `shell`.
+  Default: iPhone always shell, iPad only when `UIWindowScene.isFullScreen`
+  (Catalyst-only, so in practice never) or the Settings → Window mode
+  opt-in (`SingleWindowShellSetting`, defaults key
+  `MultiplexSingleWindowShellOnPad`, latched per launch — seed it with
+  `xcrun simctl spawn <udid> defaults write app.multiplexterm.multiplex
+  MultiplexSingleWindowShellOnPad -bool YES`), visionOS never. The env var
+  beats the opt-in. Logged under category `shell` (`padOptIn=`).
 - `MULTIPLEX_SIDE_PANEL=0` — DEBUG-only legacy road: terminal-confirmed ▤/⌗
   viewers dock as tabs instead of side panels. Pass
   `SIMCTL_CHILD_MULTIPLEX_SIDE_PANEL=0` to preserve older recipes.

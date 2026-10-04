@@ -3,6 +3,7 @@ NEW SINCE 1.4.2
 • iPhone Duo: the shell follows the phone. On the closed display the chips stack beside the clock, on the camera's side in landscape, with no bars behind them. Folded as a book, the deck takes the left page and the terminal the right; folded as a laptop, the terminal sits above the fold and the deck below it. In both, the deck's HIDE control hands the whole display to the terminal and stays hidden when you rotate. The deck's + HOST / FAQ / SETTINGS stand beside the clock while the deck spans the display, and a viewer opened from the terminal takes the deck's column.
 • iPhone Duo Split View: a half behaves like an iPhone (deck and terminal in turn, title bar on top); the half beside the clock keeps its chip column.
 • Deck: the NO TMUX / NO HERDR tile's hint wraps across the tile instead of one character per line.
+• iPad: Settings → Window mode → Single-window mode runs Multiplex in one window, as on iPhone — the deck beside the terminal, sessions as tabs. Off by default; takes effect the next time Multiplex launches. In a resized window the title row starts at the window's top edge, clear of the window controls, and the deck header and terminal title bar line up.
 
 PLEASE TRY
 1. iPhone Duo, closed: attach two sessions, rotate both ways; the chips should follow the camera, and the tabs and title should never sit under it.
@@ -10,5 +11,6 @@ PLEASE TRY
 3. In the laptop pose, open the composer with the software keyboard; it should stay above the key rail.
 4. Split View with Multiplex on the left, then on the right: a normal iPhone layout on the left (title bar, DECK back button), the chip column on the right.
 5. SE-size iPhone in landscape: the terminal should fill the width, with an edge swipe returning to the deck.
+6. iPad: turn on Single-window mode, quit Multiplex from the app switcher and reopen it; the deck and an attached session should share one window. Turn it off and relaunch to get the deck and terminal windows back. Resize and drag the window: there should be no empty band above MULTIPLEX, and the window controls should never cover it.
 
 Feedback: screenshot in TestFlight

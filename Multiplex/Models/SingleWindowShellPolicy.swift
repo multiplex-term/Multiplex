@@ -3,6 +3,8 @@ import CoreGraphics
 /// Pure, UIKit-free policy for choosing Multiplex's single-window shell.
 /// UIKit supplies the scene idiom and the connected scene's full-screen bit;
 /// tests can cover the complete matrix without constructing a UIWindowScene.
+/// `padPrefersShell` is the person's Settings opt-in
+/// (`SingleWindowShellSetting`); only the iPad idiom consults it.
 enum ShellModeDecision {
     enum Platform: Equatable {
         case iOS
@@ -19,6 +21,7 @@ enum ShellModeDecision {
         platform: Platform,
         idiom: Idiom,
         isFullScreen: Bool,
+        padPrefersShell: Bool,
         environmentOverride: String?
     ) -> Bool {
         if environmentOverride == "1" { return true }
@@ -29,7 +32,7 @@ enum ShellModeDecision {
         case .phone:
             return true
         case .pad:
-            return isFullScreen
+            return isFullScreen || padPrefersShell
         case .other:
             return false
         }

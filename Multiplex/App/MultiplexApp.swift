@@ -300,14 +300,20 @@ final class MultiplexSceneDelegate: UIResponder, UIWindowSceneDelegate {
     func preferredWindowingControlStyle(
         for windowScene: UIWindowScene
     ) -> UIWindowScene.WindowingControlStyle {
-        // Terminal scenes only. The deck and the shell still host system
-        // navigation bars, and `.unified` is what insets those bars' leading
-        // items around the pill for them; a terminal window owns its whole
-        // title row and clears the pill itself
-        // (`TerminalClassicRailInsets.windowControlsClearance`).
-        if case .terminal = mountedContent { return .minimal }
-        if case .terminal = payload { return .minimal }
-        return .automatic
+        // Only the classic deck keeps `.unified`, which insets its system
+        // navigation bar around the pill; terminal windows and the shell own
+        // their title row and clear the pill themselves. Before anything
+        // mounts, the plan decides — a shell scene carries the deck payload.
+        switch mountedContent {
+        case .terminal, .shell: return .minimal
+        case .deck: return .automatic
+        case nil: break
+        }
+        guard let payload else { return .automatic }
+        if case .deck = presentationPlan(for: payload, in: windowScene) {
+            return .automatic
+        }
+        return .minimal
     }
     #endif
 
@@ -732,6 +738,7 @@ final class MultiplexSceneDelegate: UIResponder, UIWindowSceneDelegate {
             platform: platform,
             idiom: idiom,
             isFullScreen: isFullScreen,
+            padPrefersShell: SingleWindowShellSetting.enabledForThisLaunch,
             environmentOverride: override
         )
     }
@@ -861,7 +868,7 @@ final class MultiplexSceneDelegate: UIResponder, UIWindowSceneDelegate {
         let override = "none"
         #endif
         Self.logger.info(
-            "connected plan=\(String(describing: plan), privacy: .public) idiom=\(String(describing: scene.traitCollection.userInterfaceIdiom), privacy: .public) isFullScreen=\(scene.isFullScreen, privacy: .public) override=\(override, privacy: .public)"
+            "connected plan=\(String(describing: plan), privacy: .public) idiom=\(String(describing: scene.traitCollection.userInterfaceIdiom), privacy: .public) isFullScreen=\(scene.isFullScreen, privacy: .public) padOptIn=\(SingleWindowShellSetting.enabledForThisLaunch, privacy: .public) override=\(override, privacy: .public)"
         )
     }
 

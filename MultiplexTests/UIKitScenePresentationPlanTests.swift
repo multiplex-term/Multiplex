@@ -36,6 +36,32 @@ final class UIKitScenePresentationPlanTests: XCTestCase {
         )
     }
 
+    func testIPadOptInMapsBothPayloadKindsIntoOneShell() {
+        let route = TerminalWindowRoute(tab: TerminalRoute(
+            hostID: UUID(),
+            mode: .attach(sessionName: "build")
+        ))
+
+        assertEmptyShell(resolve(.deck(.main), idiom: .pad, padPrefersShell: true))
+        XCTAssertEqual(
+            resolve(.terminal(route), idiom: .pad, padPrefersShell: true),
+            .shell(route)
+        )
+        XCTAssertEqual(
+            resolve(.deck(.main), platform: .visionOS, padPrefersShell: true),
+            .deck
+        )
+        XCTAssertEqual(
+            resolve(
+                .deck(.main),
+                idiom: .pad,
+                padPrefersShell: true,
+                environmentOverride: "0"
+            ),
+            .deck
+        )
+    }
+
     func testEnvironmentOverrideStillWins() {
         assertEmptyShell(resolve(
             .deck(.main),
@@ -423,6 +449,7 @@ final class UIKitScenePresentationPlanTests: XCTestCase {
         platform: ShellModeDecision.Platform = .iOS,
         idiom: ShellModeDecision.Idiom = .pad,
         isFullScreen: Bool = false,
+        padPrefersShell: Bool = false,
         environmentOverride: String? = nil
     ) -> UIKitScenePresentationPlan {
         UIKitScenePresentationPlan.resolve(
@@ -430,6 +457,7 @@ final class UIKitScenePresentationPlanTests: XCTestCase {
             platform: platform,
             idiom: idiom,
             isFullScreen: isFullScreen,
+            padPrefersShell: padPrefersShell,
             environmentOverride: environmentOverride
         )
     }

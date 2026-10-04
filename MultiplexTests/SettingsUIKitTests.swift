@@ -44,11 +44,15 @@ final class SettingsUIKitTests: XCTestCase {
             of: UIKitChassisLabel.self,
             in: fixture.controller.view
         ).filter { $0.accessibilityTraits.contains(.header) }
+        // Window mode is the iPad's single-window opt-in; the iPhone is
+        // always the Shell and visionOS never is, so neither shows it.
+        let windowMode = ShellModeDecision.Idiom.device == .pad ? ["Window mode"] : []
         XCTAssertEqual(headers.compactMap(\.accessibilityLabel), [
             "Appearance",
             "Current theme",
             "Built-in themes",
             "Your themes",
+        ] + windowMode + [
             "Terminal renderer",
             "Connection stats",
             "Agent alerts",

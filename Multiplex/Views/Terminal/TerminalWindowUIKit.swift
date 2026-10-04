@@ -122,6 +122,10 @@ enum TerminalClassicRailInsets {
     /// pill ends at 59.5 pt, and the first chip owes it visible daylight.
     static let windowControlsClearance: CGFloat = 72
 
+    /// The same clearance for a header row that adds its own rail padding —
+    /// the inset the adaptive shell hands its leading header.
+    static var windowControlsLeadingInset: CGFloat { windowControlsClearance - railPadding }
+
     /// Trailing clearance for the last chip, likewise inclusive of the rail's
     /// 10 pt padding. The window's rounded corner crowds a chip parked at the
     /// bare padding; the retired navigation bar spent the same daylight
@@ -171,27 +175,63 @@ enum TerminalClassicRailInsets {
         max(0, statusBarHeight - windowFrameOnScreen.minY)
     }
 
+    /// The top band a window owes the system: only the part actually under
+    /// the status bar, and none on the Mac, whose scene already sits below a
+    /// real title bar. Shared by the classic rail and the adaptive shell.
+    static func topStrip(
+        sceneTopSafeArea: CGFloat,
+        hostsWindowControls: Bool,
+        systemTopChromeOverlap: CGFloat
+    ) -> CGFloat {
+        hostsWindowControls
+            ? min(max(0, systemTopChromeOverlap), max(0, sceneTopSafeArea))
+            : 0
+    }
+
+    /// A scene spanning the display wears the status bar but hides its pill;
+    /// a floating scene shows the pill wherever it sits.
+    static func floatsWithPill(hostsWindowControls: Bool, spansDisplay: Bool) -> Bool {
+        hostsWindowControls && !spansDisplay
+    }
+
+    #if !os(visionOS)
+    /// The live geometry both rules read: how much of the window sits under
+    /// the status bar, and whether it spans the display.
+    static func reading(
+        for window: UIWindow
+    ) -> (systemTopChromeOverlap: CGFloat, spansDisplay: Bool) {
+        let screen = window.screen
+        return (
+            systemTopChromeOverlap(
+                windowFrameOnScreen: window.convert(window.bounds, to: screen.coordinateSpace),
+                statusBarHeight: window.windowScene?.statusBarManager?.statusBarFrame.height ?? 0
+            ),
+            meetsSystemTopChrome(sceneSize: window.bounds.size, screenSize: screen.bounds.size)
+        )
+    }
+    #endif
+
     /// The rail spends exactly the band the system's top chrome covers, and
-    /// clears the window-control pill only where one is drawn. An iOS app on
-    /// the Mac has neither: its scene already sits below a real title bar.
+    /// clears the window-control pill only where one is drawn.
     static func safeArea(
         sceneSafeArea: UIEdgeInsets,
         hostsWindowControls: Bool,
         systemTopChromeOverlap: CGFloat,
         spansDisplay: Bool
     ) -> UIEdgeInsets {
-        // A scene spanning the display wears the status bar but hides its
-        // pill, so DECK keeps the leading corner there; a floating scene
-        // shows the pill wherever it sits, and only owes a top strip when it
-        // is parked under the status bar.
-        let strip = hostsWindowControls
-            ? min(max(0, systemTopChromeOverlap), max(0, sceneSafeArea.top))
-            : 0
-        let floatsWithPill = hostsWindowControls && !spansDisplay
+        // DECK keeps the leading corner on a scene spanning the display.
+        let floatsWithPill = floatsWithPill(
+            hostsWindowControls: hostsWindowControls,
+            spansDisplay: spansDisplay
+        )
         return UIEdgeInsets(
-            top: strip,
+            top: topStrip(
+                sceneTopSafeArea: sceneSafeArea.top,
+                hostsWindowControls: hostsWindowControls,
+                systemTopChromeOverlap: systemTopChromeOverlap
+            ),
             left: floatsWithPill
-                ? max(sceneSafeArea.left, windowControlsClearance - railPadding)
+                ? max(sceneSafeArea.left, windowControlsLeadingInset)
                 : sceneSafeArea.left,
             bottom: 0,
             right: max(sceneSafeArea.right, windowEdgeClearance - railPadding)
@@ -202,6 +242,33 @@ enum TerminalClassicRailInsets {
     /// above the scene instead.
     static let deviceHostsWindowControls = !ProcessInfo.processInfo.isiOSAppOnMac
 }
+
+#if !os(visionOS)
+/// The window-position poll the classic rail and the iPad shell share. A pure
+/// window DRAG fires no UIKit callback — scene geometry models no origin — yet
+/// it moves the window under or out from the status bar, so the owner's tick
+/// re-checks its inputs and relayouts only when the answer moved. Ticks once
+/// on start.
+@MainActor
+final class WindowPositionWatch {
+    private var timer: Timer?
+
+    func start(tick: @escaping @MainActor () -> Void) {
+        guard timer == nil, TerminalClassicRailInsets.deviceHostsWindowControls else { return }
+        let timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+            MainActor.assumeIsolated { tick() }
+        }
+        timer.tolerance = 0.2
+        self.timer = timer
+        tick()
+    }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+    }
+}
+#endif
 
 /// UIKit owner of one classic terminal scene or the terminal side of the
 /// adaptive shell. It owns route reconciliation, child pane lifetimes,
@@ -249,7 +316,7 @@ final class TerminalWindowViewController: UIViewController,
     /// `layoutNativeChrome`. Both halves matter: the width picks the compact
     /// row, and the insets decide the strip the rail spends.
     private var renderedClassicRailGeometry: ClassicRailGeometry?
-    private var windowPositionWatch: Timer?
+    private let windowPositionWatch = WindowPositionWatch()
 
     private struct ClassicRailGeometry: Equatable {
         var width: CGFloat?
@@ -427,34 +494,16 @@ final class TerminalWindowViewController: UIViewController,
 
     #if !os(visionOS)
     /// The rail's insets depend on where the window sits on the display, and
-    /// UIKit reports no such thing: a scene's geometry models no origin, so
-    /// `didUpdateEffectiveGeometry` covers resizes and screen moves but a
-    /// pure DRAG fires nothing at all and the rail keeps a stale inset (user
-    /// report: "doesn't always expand or collapse when the window is
-    /// moved"). Watching is polling, the deck's way — one rect conversion a
-    /// tick, and layout is invalidated only when the answer actually moves.
+    /// a pure drag reports nothing (user report: "doesn't always expand or
+    /// collapse when the window is moved") — see `WindowPositionWatch`.
     private func startWindowPositionWatchIfNeeded() {
-        // Only where window position feeds the rail at all: the Mac's scene
-        // sits below a real title bar and draws no pill, so its insets do
-        // not move with the window.
-        guard shell == nil,
-              TerminalClassicRailInsets.deviceHostsWindowControls,
-              windowPositionWatch == nil
-        else { return }
-        let timer = Timer.scheduledTimer(
-            withTimeInterval: 0.5,
-            repeats: true
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.checkWindowPosition() }
-        }
-        timer.tolerance = 0.2
-        windowPositionWatch = timer
-        checkWindowPosition()
+        // Only where window position feeds the rail at all.
+        guard shell == nil else { return }
+        windowPositionWatch.start { [weak self] in self?.checkWindowPosition() }
     }
 
     private func stopWindowPositionWatch() {
-        windowPositionWatch?.invalidate()
-        windowPositionWatch = nil
+        windowPositionWatch.stop()
     }
 
     private func checkWindowPosition() {
@@ -722,24 +771,13 @@ final class TerminalWindowViewController: UIViewController,
         return .zero
         #else
         guard isViewLoaded else { return .zero }
-        let hostsWindowControls = TerminalClassicRailInsets.deviceHostsWindowControls
         guard let window = rootView.window else { return .zero }
-        let screen = window.screen
+        let reading = TerminalClassicRailInsets.reading(for: window)
         return TerminalClassicRailInsets.safeArea(
             sceneSafeArea: rootView.safeAreaInsets,
-            hostsWindowControls: hostsWindowControls,
-            systemTopChromeOverlap: TerminalClassicRailInsets.systemTopChromeOverlap(
-                windowFrameOnScreen: window.convert(
-                    window.bounds,
-                    to: screen.coordinateSpace
-                ),
-                statusBarHeight: window.windowScene?.statusBarManager?
-                    .statusBarFrame.height ?? 0
-            ),
-            spansDisplay: TerminalClassicRailInsets.meetsSystemTopChrome(
-                sceneSize: window.bounds.size,
-                screenSize: screen.bounds.size
-            )
+            hostsWindowControls: TerminalClassicRailInsets.deviceHostsWindowControls,
+            systemTopChromeOverlap: reading.systemTopChromeOverlap,
+            spansDisplay: reading.spansDisplay
         )
         #endif
     }
@@ -2435,14 +2473,27 @@ extension TerminalWindowViewController {
             minimumHeight: TerminalKeyBar.barHeight,
             hasKeyRail: true
         )
+
+        /// Beside the deck's MULTIPLEX header — a 44 pt row with its hairline
+        /// below (measured 2026-10-04) — so the rail is 45 pt: its hairline
+        /// sits inside its height, and the two rules meet across the divider.
+        static let padShell = RailProfile(
+            style: .shell,
+            auxiliaryStyle: .shell,
+            verticalPadding: 8,
+            minimumHeight: TerminalKeyBar.barHeight + 1,
+            hasKeyRail: true
+        )
         #endif
     }
 
     private var railProfile: RailProfile {
-        guard shell == nil else { return .shell }
         #if os(visionOS)
-        return .ornament
+        return shell == nil ? .ornament : .shell
         #else
+        guard shell == nil else {
+            return ShellModeDecision.Idiom.device == .pad ? .padShell : .shell
+        }
         return .titleBar
         #endif
     }

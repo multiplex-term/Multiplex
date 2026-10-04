@@ -12212,6 +12212,22 @@
         }
       }
     },
+    "Runs Multiplex in one window, as on iPhone: the deck beside the attached terminal, with sessions opening as tabs instead of new windows. Takes effect the next time Multiplex launches; windows already open each reopen in this mode." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhoneと同じように、Multiplexを1つのウインドウで使います。Deckはアタッチ中のターミナルの横に並び、セッションは新しいウインドウではなくタブで開きます。次回Multiplexを起動したときに有効になり、開いているウインドウもそれぞれこのモードで開き直します。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "讓 Multiplex 像在 iPhone 上一樣只用一個視窗：Deck 位於已連接的終端機旁，工作階段以標籤頁開啟，而不是開新視窗。下次啟動 Multiplex 時生效；目前開著的視窗都會以此模式重新開啟。"
+          }
+        }
+      }
+    },
     "Runs on" : {
       "localizations" : {
         "ja" : {
@@ -13312,6 +13328,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "使用上面的設定透過 SSH 登入，然後在主機上尋找 %@。"
+          }
+        }
+      }
+    },
+    "Single-window mode" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "シングルウインドウモード"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "單一視窗模式"
           }
         }
       }
@@ -16560,6 +16592,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "視窗"
+          }
+        }
+      }
+    },
+    "Window mode" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ウインドウモード"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "視窗模式"
           }
         }
       }

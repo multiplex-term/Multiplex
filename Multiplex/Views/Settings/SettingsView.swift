@@ -241,6 +241,7 @@ final class SettingsViewController: UIViewController {
                 selectedTheme: selectedTheme,
                 selectedID: selectedTheme.id
             ),
+            makeWindowModeSection(),
             makeRendererSection(),
             makeConnectionStatsSection(),
             makeAlertsSection(state),
@@ -249,7 +250,7 @@ final class SettingsViewController: UIViewController {
             makeLanguageSection(),
             makeAboutSection(),
             makePrivacyLink(),
-        ]
+        ].compactMap { $0 }
         replaceContent(with: sections)
 
         view.layoutIfNeeded()
@@ -443,6 +444,28 @@ final class SettingsViewController: UIViewController {
             title: String(localized: "Your themes"),
             detail: detail,
             rows: rows
+        )
+    }
+
+    /// iPad only: the iPhone is always the Shell and visionOS never is. The
+    /// plan is latched per launch, so the row only records intent.
+    private func makeWindowModeSection() -> UIView? {
+        guard ShellModeDecision.Idiom.device == .pad else { return nil }
+        let control = SettingsBooleanRow(
+            title: String(localized: "Single-window mode"),
+            isOn: SingleWindowShellSetting.isEnabled()
+        ) { enabled in
+            SingleWindowShellSetting.setEnabled(enabled)
+        }
+        control.accessibilityIdentifier = "settings.singleWindowShell"
+        return SettingsSectionView(
+            title: String(localized: "Window mode"),
+            detail: String(localized: """
+                Runs Multiplex in one window, as on iPhone: the deck beside the attached terminal, \
+                with sessions opening as tabs instead of new windows. Takes effect the next time \
+                Multiplex launches; windows already open each reopen in this mode.
+                """),
+            rows: [control]
         )
     }
 
