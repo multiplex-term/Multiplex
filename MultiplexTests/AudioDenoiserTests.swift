@@ -17,7 +17,10 @@ final class AudioDenoiserTests: XCTestCase {
     }
 
     func testAHeadsetRateInputComesOutAt48kWithTheNoiseSuppressed() throws {
-        let denoiser = try XCTUnwrap(AudioDenoiser(weightsURL: weightsURL()))
+        // Outside XCTUnwrap: a skip thrown inside its autoclosure is reported
+        // as a failure, not a skip.
+        let url = try weightsURL()
+        let denoiser = try XCTUnwrap(AudioDenoiser(weightsURL: url))
         XCTAssertEqual(denoiser.outputFormat.sampleRate, 48_000)
         XCTAssertEqual(denoiser.outputFormat.channelCount, 1)
 
