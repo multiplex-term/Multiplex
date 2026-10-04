@@ -102,19 +102,19 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Multiplex listens only while you hold a dictation going from the terminal key bar."
+            "value" : "Multiplex listens only while you dictate from the terminal key bar or the message box."
           }
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "translated",
-            "value" : "Multiplex がマイクを使うのは、ターミナルのキーバーから音声入力を押し続けている間だけです。"
+            "state" : "needs_review",
+            "value" : "Multiplexがマイクを使うのは、ターミナルのキーバーまたはメッセージボックスから音声入力している間だけです。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "translated",
-            "value" : "只有在你從終端機按鍵列按住聽寫時，Multiplex 才會使用麥克風。"
+            "state" : "needs_review",
+            "value" : "只有在你從終端機按鍵列或訊息框聽寫時，Multiplex 才會使用麥克風。"
           }
         }
       }
@@ -125,19 +125,19 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Multiplex transcribes your dictation so the words can be typed into the terminal session you are attached to. Recognition stays on device wherever your language supports it."
+            "value" : "Multiplex transcribes your dictation into the terminal session you are attached to, or into the message you are writing. Recognition stays on device wherever your language supports it."
           }
         },
         "ja" : {
           "stringUnit" : {
-            "state" : "translated",
-            "value" : "Multiplex は音声入力を文字に起こし、接続中のターミナルセッションに入力します。お使いの言語が対応していれば、認識はデバイス上で行われます。"
+            "state" : "needs_review",
+            "value" : "Multiplexは音声入力を文字に起こし、接続中のターミナルセッション、または作成中のメッセージに入力します。お使いの言語が対応していれば、認識はデバイス上で行われます。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "translated",
-            "value" : "Multiplex 會轉寫你的聽寫內容，好把文字輸入到你目前連接的終端機工作階段。只要你的語言支援，辨識就會在裝置上完成。"
+            "state" : "needs_review",
+            "value" : "Multiplex 會轉寫你的聽寫內容，輸入到你目前連接的終端機工作階段，或你正在撰寫的訊息。只要你的語言支援，辨識就會在裝置上完成。"
           }
         }
       }

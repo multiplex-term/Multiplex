@@ -3,7 +3,11 @@
 Load-bearing decisions split from AGENTS.md — read before touching `Vendor/`,
 input encoding, or terminal rendering.
 
-- **Vendored packages, both same-identity local overrides** (`Vendor/`):
+- **Vendored packages** (`Vendor/`) — `rnnoise` is the C noise suppressor
+  behind dictation (library only, built `USE_WEIGHTS_FILE`, one local patch;
+  the model is downloaded and SHA-256-pinned at runtime — its
+  `README.md` is the bump recipe); the other two are same-identity local
+  overrides:
   - `swift-nio-ssh` — Citadel 0.12.0's resolved fork (`Joannis` 0.3.5),
     patched to declare the `NIO` product it imports (Xcode 27 rejects the
     undeclared import); also freezes the SSH transport supply chain.

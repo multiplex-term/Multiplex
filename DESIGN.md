@@ -174,7 +174,10 @@ its own slab hanging below the console row, on iPad and iPhone the same card
 docked between the pane and the key rail. Its eyebrow names the target in
 mono (`TO MAIN · DEVBOX`) beside the agent's mark and name, with RUNNING as
 grey telemetry and NEEDS YOU as the amber lamp; a round paperclip, a native
-text field, and a filled ↑ that sends the message as one paste — attached
+text field, a round mic (latched in secondary ink while engaged — the red
+stays on the eyebrow's captioned LISTENING lamp, which takes the eyebrow
+with the heard-not-yet-typed queue), and a filled ↑ that sends the message
+as one paste — attached
 files upload on pick and show as 46 pt previews (28 pt thumbs and compact
 document chips on the phone), their paths typed first. Chat grammar on the
 chassis: rounded, hairlined, chassis-grounded, so it still belongs to the

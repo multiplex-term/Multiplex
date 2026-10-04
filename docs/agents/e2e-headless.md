@@ -221,6 +221,22 @@ app.multiplexterm.multiplex.<name>`:
   text file through the real upload queue, press ↑. Proof: `tmux
   capture-pane -t agent:0 -p` shows the paths and both lines land as one
   paste + CR; the uploads sit in the pane cwd's `.multiplex-drops/`.
+  `debug.talkbackmic` presses the composer's mic (needs mic + speech
+  permission — the alerts block a headless run until granted);
+  `debug.talkbackdictated` inserts one settled chunk at the caret through the
+  mic's own delivery path, no microphone needed.
+- `debug.rnnoisedownload` — start the noise-reduction model download (hook
+  installed once a Talkback composer has opened). Proof: log category `rnnoise`
+  → `rnnoise-installed`, Settings → Voice input shows the switch; dictation
+  then logs `denoise=true` on `dictation-start`. `AudioDenoiserTests` runs
+  against a real blob only with `TEST_RUNNER_RNNOISE_WEIGHTS=<path>`.
+  ⚠ Neither simulator can RECOGNIZE: the analyzer gets no audio format
+  (`dictation-analyzer-no-format`) and on-device `SFSpeechRecognizer` says
+  "Failed to initialize recognizer", with or without the denoiser. The sim
+  proves the mic + denoise path and the UI; words need a device. Mic and
+  speech permission pre-grant: `simctl privacy <udid> grant microphone`,
+  plus a `kTCCServiceSpeechRecognition` row (auth_value 2) in the sim's
+  `data/Library/TCC/TCC.db`, then reboot.
 - `debug.keycommands` / `debug.keycommandsetup` / `debug.keycommandcompose` —
   the hold-CTRL KEY COMMANDS popover (iPad rail or visionOS cluster) on its
   COMMANDS grid / CUSTOM SETUP list / with a fresh row's composer expanded.

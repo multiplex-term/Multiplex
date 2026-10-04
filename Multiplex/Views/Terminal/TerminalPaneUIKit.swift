@@ -1125,29 +1125,23 @@ extension TerminalContextBarView {
     ) -> TerminalContextBarView {
         switch state {
         case .listening(let pending):
-            var items: [UIView] = [
-                UIKitTallyLamp(caption: "LISTENING", color: TallyPalette.tally),
-            ]
+            var items: [UIView] = [DictationChrome.listeningLamp()]
             if let language {
                 // The language lives in the bar, visible every take — a
                 // long-press on the mic was tried first and nobody would
                 // ever find it. The rows are the system's own menu: it
                 // does not need TALLY dress, and native padding beats a
                 // hand-built popover fighting iOS 26's corner curves.
-                items.append(Self.languageMenuButton(
+                items.append(DictationChrome.languageButton(
                     language: language,
                     choices: choices,
+                    on: .paneBar,
                     select: selectLanguage
                 ))
             }
             if !pending.isEmpty {
-                let pendingLabel = UILabel()
-                pendingLabel.text = pending
-                pendingLabel.font = UIKitChassis.monoFont(12)
-                pendingLabel.textColor = UIKitChassis.signal3
-                pendingLabel.lineBreakMode = .byTruncatingHead
-                pendingLabel.numberOfLines = 1
-                pendingLabel.accessibilityLabel = String(localized: "Heard, not typed yet: \(pending)")
+                let pendingLabel = DictationPendingLabel(on: .paneBar)
+                pendingLabel.pending = pending
                 pendingLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 320).isActive = true
                 items.append(pendingLabel)
             }
@@ -1171,81 +1165,8 @@ extension TerminalContextBarView {
             messageLabel.textColor = UIKitChassis.signal2
             messageLabel.numberOfLines = 2
             messageLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 320).isActive = true
-            return TerminalContextBarView(items: [
-                UIKitTallyLamp(caption: "DICTATION", color: TallyPalette.caution),
-                messageLabel,
-            ])
+            return TerminalContextBarView(items: [DictationChrome.failureLamp(), messageLabel])
         }
-    }
-
-    /// The bar's language control: a TALLY-bordered face over a native
-    /// `UIMenu` — the rows are the system's, so padding, checkmarks, and
-    /// dismissal come for free.
-    private static func languageMenuButton(
-        language: DictationLanguageChoice,
-        choices: [DictationLanguageChoice],
-        select: @escaping (DictationLanguageChoice) -> Void
-    ) -> UIView {
-        let button = UIButton(type: .custom)
-        button.accessibilityIdentifier = "terminalPane.dictation.language"
-        button.accessibilityLabel = String(
-            localized: "Dictation language: \(language.name) \(language.region). Change"
-        )
-        button.showsMenuAsPrimaryAction = true
-        button.menu = UIMenu(
-            title: String(localized: "Dictation language"),
-            options: .singleSelection,
-            children: choices.map { choice in
-                UIAction(
-                    title: choice.region.isEmpty
-                        ? choice.name
-                        : "\(choice.name) (\(choice.region))",
-                    state: choice.id == language.id ? .on : .off
-                ) { _ in select(choice) }
-            }
-        )
-
-        var config = UIButton.Configuration.plain()
-        config.image = UIImage(
-            systemName: "globe",
-            withConfiguration: UIImage.SymbolConfiguration(
-                pointSize: 9 * Theme.typeScale,
-                weight: .semibold
-            )
-        )
-        config.imagePadding = 5
-        config.contentInsets = NSDirectionalEdgeInsets(
-            top: 5, leading: 9, bottom: 5, trailing: 9
-        )
-        var title = AttributedString(language.tag)
-        title.font = UIKitChassis.monoFont(9, weight: .semibold)
-        title.kern = 0.7
-        title.foregroundColor = UIKitChassis.signal2
-        config.attributedTitle = title
-        button.configuration = config
-        button.tintColor = UIKitChassis.signal2
-        button.hoverStyle = UIHoverStyle(
-            effect: .highlight,
-            shape: .rect(cornerRadius: 2)
-        )
-
-        // The chip family's dress: one-point border on strata ground.
-        let shell = UIKitTallyBorderedView()
-        shell.backgroundColor = GlassPrototype.enabled
-            ? GlassPrototype.material(
-                GlassPrototype.strataMaterial,
-                fallback: TallyPalette.chassis
-            )
-            : UIKitChassis.chassis
-        shell.addSubview(button)
-        button.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            button.leadingAnchor.constraint(equalTo: shell.leadingAnchor),
-            button.trailingAnchor.constraint(equalTo: shell.trailingAnchor),
-            button.topAnchor.constraint(equalTo: shell.topAnchor),
-            button.bottomAnchor.constraint(equalTo: shell.bottomAnchor),
-        ])
-        return shell
     }
     #endif
 
