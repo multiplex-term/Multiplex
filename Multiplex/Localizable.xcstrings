@@ -133,13 +133,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : " はメッセージボックスを開きます。自動修正で書くか、マイクをタップして音声入力し、写真やファイルを添付して、"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : " 會開啟訊息框：用自動修正撰寫或點麥克風聽寫、附加照片或檔案，然後 "
           }
         }
@@ -3242,13 +3242,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "モデルのダウンロードをキャンセル"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "取消下載模型"
           }
         }
@@ -5282,13 +5282,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ノイズ低減モデルを削除"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "刪除降噪模型"
           }
         }
@@ -5712,13 +5712,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ノイズ低減モデルをダウンロード、%@"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "下載降噪模型，%@"
           }
         }
@@ -5728,13 +5728,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "モデルをダウンロード中"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "正在下載模型"
           }
         }
@@ -6288,13 +6288,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "音声入力が聞き取る前に、RNNoiseでマイクの定常的な背景ノイズ — ファン、車の音、ヘッドセットのヒスノイズ — を取り除きます。メッセージボックスとキーバーの両方で有効です。モデルはxiph.orgから一度だけダウンロードし（%@）、公開されているSHA-256と照合して、このデバイスにのみ保存します。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "在聽寫收音前，先用 RNNoise 濾掉麥克風中持續的背景噪音 — 風扇、車流、耳機的嘶嘶聲；訊息框和按鍵列的聽寫都適用。模型只需從 xiph.org 下載一次（%@），會比對其公布的 SHA-256，且只保存在這部裝置上。"
           }
         }
@@ -9636,13 +9636,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ノイズ低減"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "降噪"
           }
         }
@@ -12168,13 +12168,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "モデルのダウンロードを再試行"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "重試下載模型"
           }
         }
@@ -12700,13 +12700,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "送信（音声入力の完了待ち）"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "傳送，等待聽寫完成"
           }
         }
@@ -14994,13 +14994,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ダウンロードしたファイルがモデルの公開チェックサムと一致しませんでした"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "下載的檔案與模型公布的校驗碼不符"
           }
         }
@@ -15306,13 +15306,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ノイズ低減モデルをダウンロードできませんでした"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "無法下載降噪模型"
           }
         }
@@ -15322,13 +15322,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ノイズ低減モデルを準備できませんでした"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "無法準備降噪模型"
           }
         }
@@ -15338,13 +15338,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "ノイズ低減モデルを保存できませんでした"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "無法儲存降噪模型"
           }
         }
@@ -15804,13 +15804,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "この言語の音声モデルがまだこのデバイスにありません"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "這部裝置上還沒有此語言的語音模型"
           }
         }
@@ -16417,13 +16417,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "モデルを検証中"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "正在驗證模型"
           }
         }
@@ -16545,13 +16545,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "音声入力"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "語音輸入"
           }
         }
@@ -16984,13 +16984,13 @@
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "話した内容をメッセージに書き込みます。送信するまで何も送られません"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "把你說的話寫進訊息；在你傳送前不會送出任何內容"
           }
         }
