@@ -1,4 +1,3 @@
-#if !os(visionOS)
 import Foundation
 import Speech
 
@@ -71,4 +70,3 @@ enum DictationLanguageSetting {
         }
     }
 }
-#endif

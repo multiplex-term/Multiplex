@@ -98,8 +98,9 @@ Install and usage: [multiplex-term/mpx-cli](https://github.com/multiplex-term/mp
 | [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) | 1.18.0, vendored | Terminal emulator |
 | [Citadel](https://github.com/orlandos-nl/Citadel) | 0.12.0, exact | SSH, exec, SFTP, and key parsing |
 | [swift-nio-ssh](https://github.com/apple/swift-nio-ssh) | 0.3.5, vendored | SSH transport dependency |
+| [RNNoise](https://github.com/xiph/rnnoise) | 0.2 (rev 70f1d25), vendored | Dictation noise suppression |
 
-Citadel 0.12.0 is pinned because 0.12.1 changed its `swift-nio-ssh` source to an unaudited fork. The mosh client is a clean-room implementation. The complete audited inventory and license texts live in `Multiplex/Models/LicenseCatalog.swift`.
+Citadel 0.12.0 is pinned because 0.12.1 changed its `swift-nio-ssh` source to an unaudited fork. RNNoise is vendored as its C library only; the app downloads its model from xiph.org on request (Settings → Voice input) and verifies it by SHA-256 — see `Vendor/rnnoise/README.md`. The mosh client is a clean-room implementation. The complete audited inventory and license texts live in `Multiplex/Models/LicenseCatalog.swift`.
 
 ## Credits
 

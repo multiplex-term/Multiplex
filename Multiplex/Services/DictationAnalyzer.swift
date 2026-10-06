@@ -1,4 +1,3 @@
-#if !os(visionOS)
 import AVFoundation
 import Foundation
 import Speech
@@ -21,7 +20,7 @@ import os
 /// these words) — which is exactly the line `DictationStream` has to guess at
 /// on the older path, decided here by the recognizer itself. Final text is
 /// typed; volatile text is the bar's queue and nothing more.
-@available(iOS 26, *)
+@available(iOS 26, visionOS 26, *)
 @MainActor
 final class DictationAnalyzer {
     private static let logger = Logger(
@@ -161,41 +160,19 @@ final class DictationAnalyzer {
 }
 
 /// The seam between the realtime audio tap and the analyzer's input sequence:
-/// the microphone runs at the hardware's format and the analyzer wants its
-/// own, so each buffer is converted where it arrives and yielded straight
-/// through. The continuation is the only thing the two threads share.
-@available(iOS 26, *)
+/// each buffer is converted to the analyzer's format where it arrives and
+/// yielded straight through. The continuation is the only thing the two
+/// threads share.
+@available(iOS 26, visionOS 26, *)
 private final class AnalyzerFeed: @unchecked Sendable {
     private let lock = NSLock()
-    private let outputFormat: AVAudioFormat
-    /// Rebuilt whenever the microphone's format changes under us — a route
-    /// change (AirPods arriving) hands the tap a different format, and a
-    /// converter built for the old one would turn speech into noise.
-    private var inputFormat: AVAudioFormat
-    private var converter: AVAudioConverter?
-    private var ratio: Double
+    /// Touched only from the tap's thread.
+    private let converter: AudioBufferConverter
     private var continuation: AsyncStream<AnalyzerInput>.Continuation?
 
     init?(from input: AVAudioFormat, to output: AVAudioFormat) {
-        outputFormat = output
-        inputFormat = input
-        ratio = output.sampleRate / max(input.sampleRate, 1)
-        if input != output {
-            guard let converter = AVAudioConverter(from: input, to: output) else {
-                return nil
-            }
-            self.converter = converter
-        }
-    }
-
-    /// The tap is the only caller, so this is serial with itself.
-    private func adopt(_ format: AVAudioFormat) {
-        guard format != inputFormat else { return }
-        inputFormat = format
-        ratio = outputFormat.sampleRate / max(format.sampleRate, 1)
-        converter = format == outputFormat
-            ? nil
-            : AVAudioConverter(from: format, to: outputFormat)
+        guard let converter = AudioBufferConverter(from: input, to: output) else { return nil }
+        self.converter = converter
     }
 
     func attach(_ continuation: AsyncStream<AnalyzerInput>.Continuation) {
@@ -205,36 +182,10 @@ private final class AnalyzerFeed: @unchecked Sendable {
     }
 
     func append(_ buffer: AVAudioPCMBuffer) {
-        adopt(buffer.format)
-        guard let converted = convert(buffer) else { return }
+        guard let converted = converter.convert(buffer) else { return }
         lock.lock()
         let continuation = self.continuation
         lock.unlock()
         continuation?.yield(AnalyzerInput(buffer: converted))
     }
-
-    private func convert(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
-        guard let converter else { return buffer }
-        let capacity = AVAudioFrameCount((Double(buffer.frameLength) * ratio).rounded(.up)) + 32
-        guard let output = AVAudioPCMBuffer(
-            pcmFormat: outputFormat,
-            frameCapacity: capacity
-        ) else { return nil }
-        var consumed = false
-        var error: NSError?
-        let status = converter.convert(to: output, error: &error) { _, inputStatus in
-            // The block is asked for input until it says there is none; this
-            // buffer is all there is for this call.
-            if consumed {
-                inputStatus.pointee = .noDataNow
-                return nil
-            }
-            consumed = true
-            inputStatus.pointee = .haveData
-            return buffer
-        }
-        guard status != .error, output.frameLength > 0 else { return nil }
-        return output
-    }
 }
-#endif

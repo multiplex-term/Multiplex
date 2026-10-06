@@ -491,6 +491,28 @@ final class UMDBarUIKitTests: XCTestCase {
         XCTAssertEqual(events, ["fresh"])
     }
 
+    func testSourceStripLaysOutASameSizeSwapWithoutAnotherPass() {
+        let strip = UMDSourceStripView(
+            frame: CGRect(x: 0, y: 0, width: 400, height: UMDSourceStripView.height)
+        )
+        func label(_ text: String) -> UILabel {
+            let label = UILabel()
+            label.text = text
+            return label
+        }
+        strip.update(title: label("MAIN · ATLAS"), status: label("LIVE"))
+        strip.layoutIfNeeded()
+
+        let title = label("MAIN · ATLAS")
+        let status = label("LIVE")
+        strip.update(title: title, status: status)
+        XCTAssertGreaterThan(
+            title.frame.width, 0,
+            "a re-render inside the fold spring gets no later pass; the swap must lay itself out"
+        )
+        XCTAssertGreaterThan(status.frame.width, 0)
+    }
+
     func testTogglingConnectionStatsRebuildsOverflowMenu() throws {
         let state = UMDBarObservedState(
             status: .live,

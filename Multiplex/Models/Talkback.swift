@@ -73,10 +73,13 @@ struct TalkbackAttachment: Identifiable, Equatable {
 /// session controller (beside its open state) so it follows the tab across
 /// window and tab switches and dies with the tab — never persisted.
 struct TalkbackDraft: Equatable {
-    /// The SEND face. `.waiting` while an upload is still in flight (the
-    /// message is never sent half); `.disabled` with nothing to send, with a
-    /// failed chip still attached, or while the pane can't take input.
+    /// The SEND face. `.empty` with nothing to send yet (the composer arms
+    /// SEND anyway while its mic is filling the draft — SEND finishes the
+    /// take first); `.waiting` while an upload is still in flight (the
+    /// message is never sent half); `.disabled` with a failed chip still
+    /// attached, or while the pane can't take input.
     enum SendState: Equatable {
+        case empty
         case disabled
         case waiting
         case ready
@@ -102,7 +105,8 @@ struct TalkbackDraft: Equatable {
     /// The SEND face for a pane that can take input; the controller folds
     /// its own liveness in on top.
     var sendState: SendState {
-        if isEmpty || hasFailedAttachment { return .disabled }
+        if isEmpty { return .empty }
+        if hasFailedAttachment { return .disabled }
         if hasUploadInFlight { return .waiting }
         return .ready
     }
@@ -167,5 +171,48 @@ enum TalkbackMessage {
     static func placeholder(agentName: String?) -> String {
         agentName.map { String(localized: "Message \($0)…") }
             ?? String(localized: "Message this pane…")
+    }
+
+    /// One settled dictation chunk as it enters the draft between `preceding`
+    /// and `following` (nil at either end). The stream's own leading
+    /// separator assumes it is appending to the last chunk; the draft is
+    /// edited text, so the spacing is decided against the real neighbours
+    /// instead — a space where two words meet, none at a line start, before
+    /// closing punctuation, after opening punctuation, or against text
+    /// written without spaces (Chinese, Japanese).
+    static func dictatedInsertion(
+        _ chunk: String,
+        after preceding: Character?,
+        before following: Character?
+    ) -> String {
+        let words = chunk.drop(while: \.isWhitespace)
+        guard let first = words.first, let last = words.last else { return "" }
+        var text = String(words)
+        if let preceding, !preceding.isWhitespace, spaced(preceding, first) {
+            text = " " + text
+        }
+        if let following, !following.isWhitespace, !last.isWhitespace, spaced(last, following) {
+            text += " "
+        }
+        return text
+    }
+
+    private static let closingMarks: Set<Character> = [".", ",", "!", "?", ";", ":", ")", "]", "}", "…", "%"]
+    private static let openingMarks: Set<Character> = ["(", "[", "{"]
+
+    private static func spaced(_ left: Character, _ right: Character) -> Bool {
+        !(openingMarks.contains(left) || closingMarks.contains(right)
+            || isSpaceless(left) || isSpaceless(right))
+    }
+
+    /// Han, kana, and the CJK punctuation and full-width forms around them.
+    /// Hangul is written with spaces and stays out.
+    private static func isSpaceless(_ character: Character) -> Bool {
+        character.unicodeScalars.contains { scalar in
+            scalar.properties.isIdeographic
+                || (0x3000...0x30FF).contains(scalar.value)
+                || (0x31F0...0x31FF).contains(scalar.value)
+                || (0xFF00...0xFFEF).contains(scalar.value)
+        }
     }
 }

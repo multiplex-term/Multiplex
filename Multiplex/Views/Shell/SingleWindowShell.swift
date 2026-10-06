@@ -113,6 +113,33 @@ struct SingleWindowShellLayoutMetrics: Equatable {
     }
 }
 
+/// The iPad shell's top edge under iPadOS windowing — the classic rail's
+/// rule (`TerminalClassicRailInsets`): a resized window reports the display's
+/// 32 pt status bar as its top safe area wherever it floats, so the shell
+/// spends only the strip actually under the status bar, and the leading
+/// header row clears the window-control pill.
+struct ShellWindowChrome: Equatable {
+    var topSafeArea: CGFloat
+    var controlsInset: CGFloat
+
+    init(
+        sceneTopSafeArea: CGFloat,
+        hostsWindowControls: Bool,
+        systemTopChromeOverlap: CGFloat,
+        spansDisplay: Bool
+    ) {
+        topSafeArea = TerminalClassicRailInsets.topStrip(
+            sceneTopSafeArea: sceneTopSafeArea,
+            hostsWindowControls: hostsWindowControls,
+            systemTopChromeOverlap: systemTopChromeOverlap
+        )
+        controlsInset = TerminalClassicRailInsets.floatsWithPill(
+            hostsWindowControls: hostsWindowControls,
+            spansDisplay: spansDisplay
+        ) ? TerminalClassicRailInsets.windowControlsLeadingInset : 0
+    }
+}
+
 enum SingleWindowShellNativeLayout {
     /// `division` is the active fold region in shell coordinates (nil when
     /// flat): vertical makes a book, horizontal hands the bottom region to
@@ -130,7 +157,8 @@ enum SingleWindowShellNativeLayout {
         compactBackSwipeActive: Bool,
         foldable: Bool = false,
         displayHorizontalSizeClass: ShellSizeClass? = nil,
-        ownsLeadingDisplayCorner: Bool = true
+        ownsLeadingDisplayCorner: Bool = true,
+        windowControlsInset: CGFloat = 0
     ) -> SingleWindowShellLayoutMetrics {
         let fullWidth = max(0, size.width)
         let usableWidth = max(0, fullWidth - safeArea.left - safeArea.right)
@@ -172,7 +200,7 @@ enum SingleWindowShellNativeLayout {
         // Split View half is compact but sits on the regular inner display,
         // and only the half at the display's left edge owns its corner.
         let displayClass = displayHorizontalSizeClass ?? horizontalSizeClass
-        let cornerInset = ownsLeadingDisplayCorner
+        let displayCornerInset = ownsLeadingDisplayCorner
             ? SingleWindowShellLayout.cornerLeadingInset(
                 topSafeArea: safeArea.top,
                 leadingSafeArea: safeArea.left,
@@ -180,6 +208,9 @@ enum SingleWindowShellNativeLayout {
                 horizontalSizeClass: displayClass
             )
             : 0
+        // The iPad's window-control pill rides the window's own leading
+        // corner, wherever the window sits — the same header row clears it.
+        let cornerInset = max(displayCornerInset, windowControlsInset)
         let topPadding = SingleWindowShellLayout.bareTopPadding(
             topSafeArea: safeArea.top,
             idiom: idiom,
@@ -387,6 +418,12 @@ final class SingleWindowShellViewController: UIViewController {
         verticalSizeClass: ShellSizeClass,
         division: CGRect?
     )?
+    /// The window chrome the last layout spent; the position watch relayouts
+    /// only when a fresh reading differs.
+    private var appliedWindowChrome: ShellWindowChrome?
+    #if os(iOS)
+    private let windowPositionWatch = WindowPositionWatch()
+    #endif
     /// Hinge `partiallyOpen`: drives layout only while the reserved-region
     /// query is empty (the 27.1 simulator).
     private var hingePartiallyOpen = false
@@ -565,6 +602,7 @@ final class SingleWindowShellViewController: UIViewController {
         externalCoordinator?.attach()
         #if os(iOS)
         attachBackSwipeRecognizer()
+        startWindowPositionWatchIfNeeded()
         #endif
     }
 
@@ -572,6 +610,7 @@ final class SingleWindowShellViewController: UIViewController {
         super.viewDidDisappear(animated)
         #if os(iOS)
         if view.window == nil { detachBackSwipeRecognizer() }
+        windowPositionWatch.stop()
         #endif
     }
 
@@ -634,6 +673,9 @@ final class SingleWindowShellViewController: UIViewController {
 
     func prepareForRemoval() {
         routeObservationGeneration &+= 1
+        #if os(iOS)
+        windowPositionWatch.stop()
+        #endif
         layoutAnimator?.stopAnimation(true)
         layoutAnimator = nil
         layoutCompletion = nil
@@ -955,12 +997,16 @@ final class SingleWindowShellViewController: UIViewController {
     }
 
     private func resolvedLayoutMetrics() -> SingleWindowShellLayoutMetrics {
+        let chrome = testLayoutInput == nil ? currentWindowChrome() : nil
+        var safeArea = shellRootView.safeAreaInsets
+        if let chrome { safeArea.top = chrome.topSafeArea }
         let input = testLayoutInput ?? (
             size: shellRootView.bounds.size,
-            safeArea: shellRootView.safeAreaInsets,
+            safeArea: safeArea,
             verticalSizeClass: ShellSizeClass(traitCollection.verticalSizeClass),
             division: currentDivisionRegion()
         )
+        appliedWindowChrome = chrome
         return SingleWindowShellNativeLayout.resolve(
             size: input.size,
             safeArea: input.safeArea,
@@ -974,9 +1020,46 @@ final class SingleWindowShellViewController: UIViewController {
             compactBackSwipeActive: compactBackSwipeActive,
             foldable: hingePresent,
             displayHorizontalSizeClass: testLayoutInput == nil ? displayHorizontalSizeClass : nil,
-            ownsLeadingDisplayCorner: testLayoutInput == nil ? (windowFrameOnScreen.map { $0.minX < 1 } ?? true) : true
+            ownsLeadingDisplayCorner: testLayoutInput == nil ? (windowFrameOnScreen.map { $0.minX < 1 } ?? true) : true,
+            windowControlsInset: chrome?.controlsInset ?? 0
         )
     }
+
+    /// iPad only: the phone shell never floats, and skips the window reads
+    /// on its hot layout path. nil before the shell is in a window.
+    private func currentWindowChrome() -> ShellWindowChrome? {
+        #if os(iOS)
+        guard ShellModeDecision.Idiom.device == .pad, let window = shellRootView.window else {
+            return nil
+        }
+        let reading = TerminalClassicRailInsets.reading(for: window)
+        return ShellWindowChrome(
+            sceneTopSafeArea: shellRootView.safeAreaInsets.top,
+            hostsWindowControls: TerminalClassicRailInsets.deviceHostsWindowControls,
+            systemTopChromeOverlap: reading.systemTopChromeOverlap,
+            spansDisplay: reading.spansDisplay
+        )
+        #else
+        return nil
+        #endif
+    }
+
+    #if os(iOS)
+    /// A drag moves the window under or out from the status bar without a
+    /// layout pass — see `WindowPositionWatch`.
+    private func startWindowPositionWatchIfNeeded() {
+        guard ShellModeDecision.Idiom.device == .pad else { return }
+        windowPositionWatch.start { [weak self] in self?.checkWindowPosition() }
+    }
+
+    private func checkWindowPosition() {
+        guard shellState.sceneIsActive,
+              testLayoutInput == nil,
+              currentWindowChrome() != appliedWindowChrome
+        else { return }
+        shellRootView.setNeedsLayout()
+    }
+    #endif
 
     /// The fold in shell coordinates, nil when flat or when it does not
     /// cross this window (a Split View half): the system's division region,

@@ -9,10 +9,14 @@
 #
 #   1. Put raw captures in Tools/appstore/raw/   (see docs/appstore/screenshots-plan.md)
 #   2. ./compose.sh            # everything with a raw capture present
+#      ./compose.sh duo duoclosed   # only the named platforms
 #   3. bundle exec fastlane store_screenshots
 #
 # deliver infers the device class from pixel size: 3840×2160 → Vision Pro,
-# 2752×2064 → iPad 13″, 1320×2868 → iPhone 6.9″.
+# 2752×2064 → iPad 13″, 1320×2868 → iPhone 6.9″. iPhone Duo (2853×2007
+# inner, 1398×2034 outer) is unknown to fastlane 2.237's deliver, whose
+# validator fails the whole run on an unknown size — so the Duo set lands in
+# fastlane/screenshots/duo/, outside store_screenshots, for a hand upload.
 #
 # Frames whose raw capture is missing are still rendered (as AWAITING CAPTURE
 # boards) but are NOT copied into fastlane/screenshots.
@@ -29,6 +33,8 @@ shots_for() { # macOS bash 3.2 has no associative arrays
   case "$1" in
     visionos|ipad) echo "wall windows herdr agents strip launch fileviewer widgets keys themes" ;;
     iphone)        echo "wall keys agents herdr strip launch drop widgets mosh themes" ;;
+    duo)           echo "wall agents strip fileviewer themes" ;;
+    duoclosed)     echo "keys" ;;
   esac
 }
 size_for() {
@@ -36,6 +42,8 @@ size_for() {
     visionos) echo "3840,2160" ;;
     ipad)     echo "2752,2064" ;;
     iphone)   echo "1320,2868" ;;
+    duo)       echo "2853,2007" ;;
+    duoclosed) echo "1398,2034" ;;
   esac
 }
 
@@ -51,19 +59,26 @@ mkdir -p out raw
 dest_for() { # ASC platform version the set belongs to (see header)
   case "$1" in
     visionos) echo "../../fastlane/screenshots/visionos/en-US" ;;
+    duo*)     echo "../../fastlane/screenshots/duo/en-US" ;;
     *)        echo "../../fastlane/screenshots/ios/en-US" ;;
   esac
 }
 
-for platform in visionos ipad iphone; do
+# iPhone Duo's two resolutions share one ASC set: the closed display's
+# shots continue the inner display's numbering under the duo- prefix.
+prefix_for() { case "$1" in duoclosed) echo "duo" ;; *) echo "$1" ;; esac; }
+first_for() { case "$1" in duoclosed) set -- $(shots_for duo); echo $# ;; *) echo 0 ;; esac; }
+
+for platform in ${*:-visionos ipad iphone duo duoclosed}; do
   size="$(size_for "$platform")"
   dest="$(dest_for "$platform")"
   mkdir -p "$dest"
   # Renumbering means stale names linger and push the set past ASC's cap of
   # 10 — clear this platform's files before recomposing (iphone and ipad
   # share the ios dir, so the glob must stay platform-prefixed).
-  rm -f "${dest}/${platform}"-*.png
-  i=0
+  prefix="$(prefix_for "$platform")"
+  [[ "$platform" == duoclosed ]] || rm -f "${dest}/${prefix}"-*.png
+  i="$(first_for "$platform")"
   for shot in $(shots_for "$platform"); do
     i=$((i + 1))
     frame="${platform}-${shot}"
@@ -74,8 +89,8 @@ for platform in visionos ipad iphone; do
       "file://$PWD/storyboard.html?frame=${frame}" 2>/dev/null
     if [[ -f "raw/${frame}.png" ]]; then
       printf -v n '%02d' "$i"
-      cp "out/${frame}.png" "${dest}/${platform}-${n}-${shot}.png"
-      echo "composed  ${frame} → ${dest#../../}/${platform}-${n}-${shot}.png"
+      cp "out/${frame}.png" "${dest}/${prefix}-${n}-${shot}.png"
+      echo "composed  ${frame} → ${dest#../../}/${prefix}-${n}-${shot}.png"
     else
       echo "awaiting  ${frame} (no raw/${frame}.png — rendered to out/ only)"
     fi

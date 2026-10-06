@@ -44,23 +44,30 @@ final class SettingsUIKitTests: XCTestCase {
             of: UIKitChassisLabel.self,
             in: fixture.controller.view
         ).filter { $0.accessibilityTraits.contains(.header) }
-        var expectedHeaders = [
+        // Window mode is the iPad's single-window opt-in; the iPhone is
+        // always the Shell and visionOS never is, so neither shows it.
+        let windowMode = ShellModeDecision.Idiom.device == .pad ? ["Window mode"] : []
+        #if canImport(CTailscaleRS)
+        let tailscale = ["Tailscale"]
+        #else
+        let tailscale: [String] = []
+        #endif
+        XCTAssertEqual(headers.compactMap(\.accessibilityLabel), [
             "Appearance",
             "Current theme",
             "Built-in themes",
             "Your themes",
+        ] + windowMode + [
             "Terminal renderer",
+            "Voice input",
             "Connection stats",
+        ] + tailscale + [
             "Agent alerts",
             "App lock",
             "Multiplex Pro",
             "Language",
             "About",
-        ]
-        #if canImport(CTailscaleRS)
-        expectedHeaders.insert("Tailscale", at: 6)
-        #endif
-        XCTAssertEqual(headers.compactMap(\.accessibilityLabel), expectedHeaders)
+        ])
 
         let rendered = renderedText(in: fixture.controller.view)
         XCTAssertTrue(rendered.contains("TERMINAL SURFACE"))
@@ -70,6 +77,10 @@ final class SettingsUIKitTests: XCTestCase {
         XCTAssertTrue(rendered.contains("MOSH TRANSPORT"))
         XCTAssertTrue(rendered.contains("AGENT HELPERS"))
         XCTAssertTrue(rendered.contains("Metal renderer"))
+        XCTAssertTrue(
+            rendered.contains("NOT INSTALLED") || rendered.contains("Noise reduction"),
+            "Voice input shows the model's state or its switch"
+        )
         XCTAssertTrue(rendered.contains("AGENT ALERTS"))
         XCTAssertTrue(rendered.contains("CONNECTION STATS"))
         XCTAssertTrue(rendered.contains("CUSTOM THEMES"))
@@ -356,7 +367,7 @@ final class SettingsUIKitTests: XCTestCase {
         )
         licenses.loadViewIfNeeded()
         XCTAssertEqual(licenses.title, "Open Source Licenses")
-        XCTAssertEqual(licenses.components.count, 13)
+        XCTAssertEqual(licenses.components.count, 14)
         XCTAssertNotNil(
             licenses.navigationItem.rightBarButtonItem,
             "A modal licenses sheet needs its own Done"

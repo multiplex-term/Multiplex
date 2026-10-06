@@ -5,10 +5,10 @@ final class LicenseCatalogTests: XCTestCase {
     func testCatalogContainsTheShippedDependencySet() {
         let components = LicenseCatalog.components
 
-        XCTAssertEqual(components.count, 13)
+        XCTAssertEqual(components.count, 14)
         XCTAssertEqual(components.filter { $0.family == .apache2 }.count, 9)
         XCTAssertEqual(components.filter { $0.family == .mit }.count, 3)
-        XCTAssertEqual(components.filter { $0.family == .bsd }.count, 1)
+        XCTAssertEqual(components.filter { $0.family == .bsd }.count, 2)
     }
 
     func testVendoredSetIsExact() {
@@ -16,7 +16,7 @@ final class LicenseCatalogTests: XCTestCase {
             LicenseCatalog.components.filter(\.isVendored).map(\.name)
         )
 
-        XCTAssertEqual(vendored, ["SwiftTerm", "SwiftNIO SSH", "bcrypt_pbkdf"])
+        XCTAssertEqual(vendored, ["SwiftTerm", "SwiftNIO SSH", "bcrypt_pbkdf", "RNNoise"])
     }
 
     func testEveryLicenseContainsTheRealTerms() {
@@ -34,9 +34,9 @@ final class LicenseCatalogTests: XCTestCase {
                 XCTAssertTrue(component.licenseText.contains("Apache License"), component.name)
                 XCTAssertTrue(component.licenseText.contains("Version 2.0"), component.name)
             case .bsd:
-                let hasWarrantyLine = component.licenseText.contains(
-                    "THE SOFTWARE IS PROVIDED"
-                ) || component.licenseText.contains("THE AUTHOR DISCLAIMS ALL WARRANTIES")
+                let hasWarrantyLine = component.licenseText.contains("THE SOFTWARE IS PROVIDED")
+                    || component.licenseText.contains("THIS SOFTWARE IS PROVIDED")
+                    || component.licenseText.contains("THE AUTHOR DISCLAIMS ALL WARRANTIES")
                 XCTAssertTrue(hasWarrantyLine, component.name)
             }
         }

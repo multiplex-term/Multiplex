@@ -14,12 +14,14 @@ enum UIKitScenePresentationPlan: Equatable {
         platform: ShellModeDecision.Platform,
         idiom: ShellModeDecision.Idiom,
         isFullScreen: Bool,
+        padPrefersShell: Bool,
         environmentOverride: String?
     ) -> Self {
         let usesShell = ShellModeDecision.usesSingleWindowShell(
             platform: platform,
             idiom: idiom,
             isFullScreen: isFullScreen,
+            padPrefersShell: padPrefersShell,
             environmentOverride: environmentOverride
         )
         if usesShell {

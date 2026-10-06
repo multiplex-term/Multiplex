@@ -20,8 +20,8 @@ behavior, or App Review flow changes.
 | Target release model | Free download with one non-consumable Pro unlock; confirm the base-app price manually |
 | Primary category | Developer Tools |
 | Secondary category | Utilities |
-| Privacy declaration | Target: Data Not Collected; selected files/photos and camera captures go directly to the user's SSH host; dictation audio is transcribed by Apple's Speech framework (on device wherever the locale supports it) and the resulting text is typed into the user's own session — Multiplex stores and transmits neither; set/confirm manually in App Store Connect |
-| Runtime permissions | Camera only after FILE → Camera on iPad/iPhone, or Add Host ▸ BIND → SCAN QR (iPhone/iPad; visionOS App Store apps have no camera access at all); Microphone + Speech Recognition only after a terminal dictation button (in the key rail while a physical keyboard is attached, or in the top-center KEYBOARD LOCKED tip while the software keyboard is locked closed); Local Network for LAN hosts and for finding machines offering to bind (Bonjour browsing, only while the Add Host sheet's BIND pane is open); Notifications only for enabled agent alerts; Face ID/Optic ID only when the optional App Lock setting is enabled (device passcode fallback). Photos/Files use system pickers. |
+| Privacy declaration | Target: Data Not Collected; selected files/photos and camera captures go directly to the user's SSH host; dictation audio is transcribed by Apple's Speech framework (on device wherever the locale supports it) and the resulting text is typed into the user's own session or message box — Multiplex stores and transmits neither; the optional noise-reduction model is a plain file download from xiph.org on request (Settings → Voice input), sending nothing; set/confirm manually in App Store Connect |
+| Runtime permissions | Camera only after FILE → Camera on iPad/iPhone, or Add Host ▸ BIND → SCAN QR (iPhone/iPad; visionOS App Store apps have no camera access at all); Microphone + Speech Recognition only after a dictation button (in the key rail while a physical keyboard is attached, in the top-center KEYBOARD LOCKED tip while the software keyboard is locked closed, or the Talkback message box's mic on every platform); Local Network for LAN hosts and for finding machines offering to bind (Bonjour browsing, only while the Add Host sheet's BIND pane is open); Notifications only for enabled agent alerts; Face ID/Optic ID only when the optional App Lock setting is enabled (device passcode fallback). Photos/Files use system pickers. |
 | Age rating | Target: all questionnaire answers None → 4+; complete/confirm manually |
 | Base-app price | Free; confirm in App Store Connect before submission |
 | Storefronts | Confirm intended coverage in App Store Connect; France needs the encryption step in the release playbook |
@@ -190,7 +190,9 @@ Current product split:
   direction keys (always on iPad, and while iPhone's software keyboard is
   locked closed), app-owned terminal dictation from the physical-keyboard rail
   or software-keyboard-lock tip (on device wherever the locale supports it,
-  typed into the session as it settles and never submitted),
+  typed into the session as it settles and never submitted) and from the
+  message box's mic on every platform, with optional RNNoise noise reduction
+  (a one-time, SHA-256-checked model download in Settings),
   Key Commands on a CTRL hold (saved chords the software keyboard cannot
   press — Shift+Enter, a double Ctrl-C, Option+Backspace — plus custom chords and
   one-line text macros with repeat and stay-open rules, one app-wide set

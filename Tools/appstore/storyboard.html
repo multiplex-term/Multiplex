@@ -55,7 +55,11 @@
      mask is the device frame, and the UMD floats as a rounded slab inset
      clear of the curve (the visionOS slab idiom, portrait-sized). Captures
      must keep their money pixels out of the slab's bottom band. */
-  .frame.ipad { display: flex; flex-direction: column; gap: 0; padding: calc(var(--u) * 1.8); }
+  .frame.ipad, .frame.duo { display: flex; flex-direction: column; gap: 0; padding: calc(var(--u) * 1.8); }
+  /* iPhone Duo inner display: the iPad mat, padded clear of the store's
+     device mask (the display's 55 pt corner ≈ 165 px at 2853 cuts ~48 px
+     in on the diagonal). The closed display wears the iPhone slab. */
+  .frame.duo { padding: calc(var(--u) * 2.6); }
   .frame .inset {
     position: relative; flex: 1; min-height: 0; overflow: hidden;
     aspect-ratio: var(--rawAR); align-self: center; max-width: 100%;
@@ -97,7 +101,7 @@
      slab's corners inside the ~185 px mask radius. --u is w/50 there (not
      w/100), and the type runs larger than the old docked bar (headline
      1.9u, telemetry 1.25u) so the slab carries at card size. */
-  .frame.iphone .umd {
+  .frame.iphone .umd, .frame.duoclosed .umd {
     position: absolute; left: calc(var(--u) * 1.6); right: calc(var(--u) * 1.6);
     bottom: calc(var(--u) * 3);
     width: auto; /* the shared .umd width: 100% would override `right` */
@@ -106,10 +110,10 @@
     border-radius: calc(var(--u) * .7);
     box-shadow: 0 calc(var(--u) * .5) calc(var(--u) * 2.2) rgba(0,0,0,.6);
   }
-  .frame.iphone .umd .headline { font-size: calc(var(--u) * 1.9); }
-  .frame.iphone .umd .telemetry, .frame.iphone .umd .lamp { font-size: calc(var(--u) * 1.25); }
-  .frame.iphone .umd .lamp .dot { width: calc(var(--u) * .95); height: calc(var(--u) * .95); }
-  .frame.iphone .umd .subrow {
+  .frame.iphone .umd .headline, .frame.duoclosed .umd .headline { font-size: calc(var(--u) * 1.9); }
+  .frame.iphone .umd .telemetry, .frame.iphone .umd .lamp, .frame.duoclosed .umd .telemetry, .frame.duoclosed .umd .lamp { font-size: calc(var(--u) * 1.25); }
+  .frame.iphone .umd .lamp .dot, .frame.duoclosed .umd .lamp .dot { width: calc(var(--u) * .95); height: calc(var(--u) * .95); }
+  .frame.iphone .umd .subrow, .frame.duoclosed .umd .subrow {
     display: flex; align-items: baseline; justify-content: space-between;
     gap: calc(var(--u) * 1);
   }
@@ -127,9 +131,9 @@
   .awaiting .mark { font-family: var(--mono); font-size: calc(var(--u) * 1.3); letter-spacing: .18em; color: var(--signal3); }
   .awaiting .file { font-family: var(--mono); font-size: calc(var(--u) * 1.0); color: var(--signal2); }
   .awaiting .stage { max-width: 72%; font-size: calc(var(--u) * 1.05); line-height: 1.5; color: var(--signal2); }
-  .frame.iphone .awaiting .stage { font-size: calc(var(--u) * .8); }
-  .frame.iphone .awaiting .file  { font-size: calc(var(--u) * .75); }
-  .frame.iphone .awaiting .mark  { font-size: calc(var(--u) * .95); }
+  .frame.iphone .awaiting .stage, .frame.duoclosed .awaiting .stage { font-size: calc(var(--u) * .8); }
+  .frame.iphone .awaiting .file, .frame.duoclosed .awaiting .file { font-size: calc(var(--u) * .75); }
+  .frame.iphone .awaiting .mark, .frame.duoclosed .awaiting .mark { font-size: calc(var(--u) * .95); }
 
   /* ---------- gallery chrome (not part of the render) ---------- */
   .gallery { max-width: 1040px; margin: 0 auto; padding: 48px 24px 96px; }
@@ -165,9 +169,12 @@ const LAMP = { live: ["live", "LIVE"], needs: ["needs", "NEEDS YOU"], plain: ["p
 // store order — lives in ORDER below.
 const SHOTS = {
   wall: {
-    headline: "Every essions, live on the wall", telemetry: "2 HOSTS · 4 SESSIONS", lamp: "live",
+    headline: "Every session, live on the wall", telemetry: "2 HOSTS · 4 SESSIONS", lamp: "live",
     stage: "Deck frontmost, 2 host rails, live tiles with real miniature content; header count must match the telemetry. One tile LIVE, the agent tile showing its glyph. Nothing behind the app.",
-    per: { iphone: { stage: "The single-window shell's deck in portrait: both host rails in frame, staged miniatures, one attached tile's tally dot lit. Status bar overridden to 9:41." } },
+    per: {
+      iphone: { stage: "The single-window shell's deck in portrait: both host rails in frame, staged miniatures, one attached tile's tally dot lit. Status bar overridden to 9:41." },
+      duo: { headline: "Unfold — the wall beside your session", telemetry: "1 HOST · 4 SESSIONS", stage: "Book pose: deck page | fold | terminal page. AUTO_ATTACH=main on vim DESIGN.md (:set linebreak), the agent tile idle on a finished turn, keyboard dismissed." },
+    },
   },
   windows: {
     headline: "A spatial window per session", telemetry: "3 WINDOWS", lamp: "live",
@@ -181,15 +188,20 @@ const SHOTS = {
   agents: {
     headline: "Know when your agent needs you", telemetry: "✳ CLAUDE CODE · EVEN AFTER YOU LEAVE", lamp: "needs",
     stage: "Wall with the agent tile in NEEDS YOU (run real claude, let it ask a question). Notification banner visible if you can catch it — that's the money pixel. Telemetry carries the v1.3 keep-alive angle.",
-    per: { iphone: { stage: "Shell deck with the agent tile in NEEDS YOU and the notification banner landing over it — the away-from-the-desk pitch. Needs the one-time notification grant." } },
+    per: {
+      iphone: { stage: "Shell deck with the agent tile in NEEDS YOU and the notification banner landing over it — the away-from-the-desk pitch. Needs the one-time notification grant." },
+      duo: { stage: "Book pose with main attached, then DISPLAY_UUID=<inner> stage-agents-shot.sh duo: banner over the deck page, agent tile NEEDS YOU." },
+    },
   },
   strip: {
     headline: "One-tap agent commands — plus your own", telemetry: "/CLEAR · /COMPACT · /MODEL", lamp: "plain",
     stage: "Attached session running real Claude Code, chip strip visible, keyboard hidden. Include one custom chip from Command Setup (e.g. a SHIP IT… command) so “plus your own” is true in the pixels. Recapture: the STOP chip was withdrawn 2026-08-05 — the shipped frames still show it.",
+    per: { duo: { headline: "One-tap agent commands", stage: "Flat-open pose (the book page clips the strip): AUTO_ATTACH=agent on the fake Claude Code pane, a finished turn on screen, keyboard dismissed. No custom chip staged, so the headline drops “plus your own”." } },
   },
   fileviewer: {
     headline: "Code, diffs, docs — beside the session", telemetry: "▤ CODE · DIFF · MARKDOWN", lamp: "plain",
     stage: "A ▤ file-viewer tab beside a live session: a git diff or code screen with line numbers, the tree drawer visible, and a second ▤ tab in the tab row (the v1.3 file-viewer tabs). Auxiliary pane — no tally dot, honest.",
+    per: { duo: { stage: "Flat-open pose: echo a repo path in main, debug.link + debug.pathview → the ▤ panel takes the deck column; git show --stat beside it." } },
   },
   launch: {
     headline: "Start an agent session in one step", telemetry: "CLAUDE CODE · CODEX · PI", lamp: "plain",
@@ -226,6 +238,10 @@ const SHOTS = {
         telemetry: "ESC · CTRL · TAB · ARROWS · RET · TMUX",
         stage: "Attached session with the docked keyboard raised (debug.summon): TALLY key rail — ESC / latching CTRL / TAB, shell symbols, arrows, dedicated RET, TMUX — with the agent helper strip riding above it.",
       },
+      duoclosed: {
+        headline: "Folded, still a full terminal",
+        stage: "Closed display, portrait: AUTO_ATTACH=main, debug.summon — key rail above the keyboard, chip column (DECK / FILE / TMUX / ⋯ / DETACH) in the camera strip.",
+      },
       visionos: {
         headline: "ESC, CTRL, TAB — always in reach", telemetry: "ESC · CTRL · TAB",
         stage: "Terminal window with the ornament key cluster beside the UMD and the floating keyboard below (debug.summon) — the cluster's latching CTRL is the story.",
@@ -245,13 +261,22 @@ const ORDER = {
   visionos: ["wall", "windows", "herdr", "agents", "strip", "launch", "fileviewer", "widgets", "keys", "themes"],
   ipad:     ["wall", "windows", "herdr", "agents", "strip", "launch", "fileviewer", "widgets", "keys", "themes"],
   iphone:   ["wall", "keys", "agents", "herdr", "strip", "launch", "drop", "widgets", "mosh", "themes"],
+  // iPhone Duo: one ASC display size, two resolutions — the inner display
+  // in the book pose (landscape) carries the set, the closed display closes
+  // it. compose.sh numbers duoclosed after duo so the store order holds.
+  duo:       ["wall", "agents", "strip", "fileviewer", "themes"],
+  duoclosed: ["keys"],
 };
 
 const PLATFORMS = [
   { id: "visionos", w: 3840, h: 2160, label: "Apple Vision Pro" },
   { id: "ipad",     w: 2752, h: 2064, label: "iPad 13″ (landscape)" },
   { id: "iphone",   w: 1320, h: 2868, label: "iPhone 6.9″ (portrait)" },
+  { id: "duo",       w: 2853, h: 2007, label: "iPhone Duo inner (landscape)" },
+  { id: "duoclosed", w: 1398, h: 2034, label: "iPhone Duo outer (portrait)" },
 ];
+const PORTRAIT_SLAB = new Set(["iphone", "duoclosed"]);
+const MATTED = new Set(["ipad", "duo"]);
 
 function resolve(shotKey, platformId) {
   const base = SHOTS[shotKey];
@@ -268,14 +293,14 @@ function frameEl(shotKey, platform) {
   // --u: one UMD unit. Landscape frames scale it from width (w/100); the
   // portrait iPhone frame needs a larger unit (w/50) or the UMD vanishes
   // against the tall image.
-  f.style.setProperty("--u", (platform.id === "iphone" ? platform.w / 50 : platform.w / 100) + "px");
+  f.style.setProperty("--u", (PORTRAIT_SLAB.has(platform.id) ? platform.w / 50 : platform.w / 100) + "px");
   // --rawAR: the capture's aspect, so matted insets never crop it.
   f.style.setProperty("--rawAR", `${platform.w} / ${platform.h}`);
 
   const [lampClass, lampText] = LAMP[shot.lamp];
   const raw = `raw/${platform.id}-${shot.key}.png`;
   const lampHTML = lampText ? `<div class="lamp ${lampClass}"><span class="dot"></span>${lampText}</div>` : "";
-  const umd = platform.id === "iphone"
+  const umd = PORTRAIT_SLAB.has(platform.id)
     ? `<div class="umd">
         <div class="headline">${shot.headline}</div>
         <div class="subrow"><div class="telemetry">${shot.telemetry}</div>${lampHTML}</div>
@@ -292,7 +317,7 @@ function frameEl(shotKey, platform) {
       <div class="stage">${shot.stage}</div>
     </div>`;
 
-  if (platform.id === "ipad") {
+  if (MATTED.has(platform.id)) {
     f.innerHTML = `<div class="inset"><img class="raw" src="${raw}" alt="">${awaiting}</div>${umd}`;
   } else {
     // visionOS + iPhone are full-bleed: the raw is the poster, the UMD floats

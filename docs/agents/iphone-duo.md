@@ -154,6 +154,10 @@ Measured on the 27.1 simulator with `MULTIPLEX_DUO_PROBE=1` (log category
 - Content installed inside the fold spring keeps its in-flight geometry
   (collapsed rows at the origin), so the deck's presentation update runs
   on the settled pass, not at the animation's start.
+- A source-strip re-render inside the spring swaps in same-size views, so
+  the row's frame never changes and nothing lays them out: they stay at
+  zero size (blank title) until relaunch. `UMDSourceStripView.update`
+  lays the row out itself, outside the animation.
 - The keyboard obstruction is measured against the window's bottom; a
   pane above the fold subtracts the gap (`KeyboardAvoidance.paneObstruction`)
   or a keyboard over the console lifts its composer to the pane's top.

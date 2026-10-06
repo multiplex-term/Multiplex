@@ -22,6 +22,12 @@ Third-party source vendored into this repository:
   Copyright (c) 2013 Ted Unangst; Copyright 1997 Niels Provos. OpenBSD source
   vendored under an `mpxbind_` prefix for Bind key sealing.
 
+- RNNoise (`Vendor/rnnoise`) — BSD 3-Clause License.
+  Copyright (c) 2007-2017, 2024 Jean-Marc Valin; 2023 Amazon; 2017 Mozilla;
+  2005-2017 Xiph.Org Foundation; 2003-2004 Mark Borgerding. The C library of
+  rev 70f1d25 with one local patch; its model is downloaded at runtime, not
+  vendored. See `Vendor/rnnoise/COPYING`.
+
 The mosh transport in `Multiplex/Services/Mosh` is a clean-room implementation
 written from published protocol facts. It carries no third-party license and no
 code from the mosh project (which is GPLv3).

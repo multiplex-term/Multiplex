@@ -124,8 +124,13 @@ app.multiplexterm.multiplex`):
   (never persisted) for a real embedded-node login; tailscale-rs logs to
   stderr via `RUST_LOG`.
 - `MULTIPLEX_FORCE_SHELL=1|0` — force the single-window shell on/off.
-  Default: iPhone always shell, iPad only when `UIWindowScene.isFullScreen`,
-  visionOS never. Logged under category `shell`.
+  Default: iPhone always shell, iPad only when `UIWindowScene.isFullScreen`
+  (Catalyst-only, so in practice never) or the Settings → Window mode
+  opt-in (`SingleWindowShellSetting`, defaults key
+  `MultiplexSingleWindowShellOnPad`, latched per launch — seed it with
+  `xcrun simctl spawn <udid> defaults write app.multiplexterm.multiplex
+  MultiplexSingleWindowShellOnPad -bool YES`), visionOS never. The env var
+  beats the opt-in. Logged under category `shell` (`padOptIn=`).
 - `MULTIPLEX_SIDE_PANEL=0` — DEBUG-only legacy road: terminal-confirmed ▤/⌗
   viewers dock as tabs instead of side panels. Pass
   `SIMCTL_CHILD_MULTIPLEX_SIDE_PANEL=0` to preserve older recipes.
@@ -224,6 +229,22 @@ app.multiplexterm.multiplex.<name>`:
   text file through the real upload queue, press ↑. Proof: `tmux
   capture-pane -t agent:0 -p` shows the paths and both lines land as one
   paste + CR; the uploads sit in the pane cwd's `.multiplex-drops/`.
+  `debug.talkbackmic` presses the composer's mic (needs mic + speech
+  permission — the alerts block a headless run until granted);
+  `debug.talkbackdictated` inserts one settled chunk at the caret through the
+  mic's own delivery path, no microphone needed.
+- `debug.rnnoisedownload` — start the noise-reduction model download (hook
+  installed once a Talkback composer has opened). Proof: log category `rnnoise`
+  → `rnnoise-installed`, Settings → Voice input shows the switch; dictation
+  then logs `denoise=true` on `dictation-start`. `AudioDenoiserTests` runs
+  against a real blob only with `TEST_RUNNER_RNNOISE_WEIGHTS=<path>`.
+  ⚠ Neither simulator can RECOGNIZE: the analyzer gets no audio format
+  (`dictation-analyzer-no-format`) and on-device `SFSpeechRecognizer` says
+  "Failed to initialize recognizer", with or without the denoiser. The sim
+  proves the mic + denoise path and the UI; words need a device. Mic and
+  speech permission pre-grant: `simctl privacy <udid> grant microphone`,
+  plus a `kTCCServiceSpeechRecognition` row (auth_value 2) in the sim's
+  `data/Library/TCC/TCC.db`, then reboot.
 - `debug.keycommands` / `debug.keycommandsetup` / `debug.keycommandcompose` —
   the hold-CTRL KEY COMMANDS popover (iPad rail or visionOS cluster) on its
   COMMANDS grid / CUSTOM SETUP list / with a fresh row's composer expanded.

@@ -242,8 +242,18 @@ routing, tab moves, keyboard avoidance, or secret fields.
   navigation controller, rail heights 54/41/31 all left it exactly there).
   `.minimalStyle` — "occupy as little of the scene's space as possible" —
   lifts it to 6–27.5 pt, in line with the rail's own chips. It is scoped
-  to terminal scenes: the deck and shell still host system navigation
-  bars, and `.unified` is what insets THOSE bars around the pill. Total
+  to terminal and shell scenes: the classic deck still hosts a system
+  navigation bar, and `.unified` is what insets THAT bar around the pill
+  (the shell's deck header is FleetWall's own row). The iPad Shell
+  (Settings → Window mode) follows the same geometry rule through
+  `ShellWindowChrome`: its top strip is the part of the window under the
+  status bar (a resized window spent the reported 32 pt as an empty
+  title-bar band above both panes, reported on device 2026-10-04), the
+  leading header row — MULTIPLEX beside a terminal, the rail when the deck
+  is hidden or single-pane — clears the pill through `ShellHeaderChrome
+  .cornerInset`, a 0.5 s position watch catches drags, and the rail's
+  `padShell` profile is 45 pt so its rule meets the deck header's
+  (44 pt row + hairline below; the rail's hairline is inside). Total
   chrome: 44 pt in a window — the rail matches `TerminalKeyBar.barHeight`
   at the pane's other end (`minimumContentHeight`; the faces keep their
   size and centre in it, and the padding becomes a floor) — pill
@@ -306,7 +316,23 @@ routing, tab moves, keyboard avoidance, or secret fields.
   system dictation, so the app runs recognition itself (Speech +
   AVAudioEngine), requesting on-device recognition wherever the locale
   supports it — terminal input must not leave the device outside the
-  user's own SSH connection. Invariants:
+  user's own SSH connection. The engine (`DictationSession`) also drives the
+  Talkback mic, on visionOS too. Invariants:
+  - **RNNoise sits in front of both engines** when Settings → Voice input
+    has the model and the switch on (`AudioDenoiser`, logged `denoise=` on
+    `dictation-start`): tap buffers resample to 48 kHz mono, re-block into
+    480-sample frames (`AudioFrameAssembler`), go through at int16 scale —
+    so the recognizers see one format whatever the route did. The model is
+    never shipped: `RNNoiseModelStore` downloads upstream's archive, checks
+    upstream's SHA-256, converts the C tables to `dump_weights_blob`'s bytes
+    and checks that blob's own SHA-256 (`Vendor/rnnoise/README.md`).
+  - ⚠ `.record` routes a Bluetooth headset's mic only with
+    `.allowBluetoothHFP` — without it a take with AirPods in listened
+    through the device's own mic.
+  - ⚠ visionOS refuses server-backed recognition outright ("On device
+    models required for speech recognition on this platform"), so
+    `adoptRecognizer` fails a take up front when the language has no
+    on-device model instead of burning six born-dead restarts.
   - **Nothing typed is ever retracted** — a byte handed to
     `TerminalView.send` has left the app, and backspaces would aim at a
     remote composer this app cannot see. Words type as they settle:
@@ -574,7 +600,14 @@ routing, tab moves, keyboard avoidance, or secret fields.
   uploads and refuses a failed chip. **Locking the keyboard closes every box
   in the window, and a box opened while locked releases the lock first** —
   both halves live in `renderTalkback`, so every opener inherits the rule
-  (`testLockingTheKeyboardClosesEveryTalkbackBoxInTheWindow`). ⚠ Not
+  (`testLockingTheKeyboardClosesEveryTalkbackBoxInTheWindow`). **The mic**
+  (between field and ↑, every platform) runs the dictation engine into the
+  FIELD (its own `DictationDriver`, the pane's take type): settled chunks
+  insert at the caret, spaced against their real neighbours
+  (`TalkbackMessage.dictatedInsertion` — none through CJK); the eyebrow
+  turns LISTENING only once the mic is open;
+  SEND mid-take finishes the take, then sends; a tab switch or close cancels
+  it. Pane and composer takes cancel each other (one mic app-wide). ⚠ Not
   verified headlessly: the docked software keyboard under the card (the sim
   reports a hardware keyboard). Hooks: `docs/agents/e2e-headless.md`.
 

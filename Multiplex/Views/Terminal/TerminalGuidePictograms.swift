@@ -352,8 +352,8 @@ final class TerminalGuidePictogramView: UIView {
         }
     }
 
-    /// The message card: eyebrow, paperclip, a line of message, the filled ↑
-    /// — with the talk key that opens it above.
+    /// The message card: eyebrow, paperclip, a line of message, the mic, the
+    /// filled ↑ — with the talk key that opens it above.
     private func drawTalkback() {
         // The talk key: a keycap wearing a small speech bubble.
         let keycap = CGRect(x: 7, y: 3, width: 16, height: 10)
@@ -411,15 +411,30 @@ final class TerminalGuidePictogramView: UIView {
         stroke(clip, color: UIKitChassis.signal2)
         // The message.
         drawMonoText(
-            "Fix the test",
+            "Fix tests",
             at: CGPoint(x: 24, y: 43.5),
             size: 5.6,
             color: UIKitChassis.signal
         )
         let caret = UIBezierPath()
-        caret.move(to: CGPoint(x: 65.5, y: 43))
-        caret.addLine(to: CGPoint(x: 65.5, y: 51))
+        caret.move(to: CGPoint(x: 56.5, y: 43))
+        caret.addLine(to: CGPoint(x: 56.5, y: 51))
         stroke(caret, color: UIKitChassis.signal)
+        // The mic, a hairline round button like the paperclip's.
+        strokeCircle(
+            center: CGPoint(x: 68.5, y: 47),
+            radius: 4.5,
+            color: UIKitChassis.signal2
+        )
+        let mic = UIBezierPath(
+            roundedRect: CGRect(x: 67.4, y: 44.2, width: 2.2, height: 3.6),
+            cornerRadius: 1.1
+        )
+        mic.move(to: CGPoint(x: 66.6, y: 47.2))
+        mic.addQuadCurve(to: CGPoint(x: 70.4, y: 47.2), controlPoint: CGPoint(x: 68.5, y: 50.2))
+        mic.move(to: CGPoint(x: 68.5, y: 48.7))
+        mic.addLine(to: CGPoint(x: 68.5, y: 49.8))
+        stroke(mic, color: UIKitChassis.signal2)
         // The filled ↑.
         fillCircle(center: CGPoint(x: 80, y: 47), radius: 5.5, color: UIKitChassis.signal)
         let up = UIBezierPath()

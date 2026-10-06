@@ -25,12 +25,59 @@ final class SingleWindowShellPolicyTests: XCTestCase {
                     platform: testCase.platform,
                     idiom: testCase.idiom,
                     isFullScreen: testCase.fullScreen,
+                    padPrefersShell: false,
                     environmentOverride: nil
                 ),
                 testCase.expected,
                 "\(testCase.platform) \(testCase.idiom) fullScreen=\(testCase.fullScreen)"
             )
         }
+    }
+
+    func testPadOptInOnlyMovesTheIPad() {
+        let cases: [(
+            platform: ShellModeDecision.Platform,
+            idiom: ShellModeDecision.Idiom,
+            expected: Bool
+        )] = [
+            (.iOS, .pad, true),
+            (.iOS, .phone, true),
+            (.iOS, .other, false),
+            (.visionOS, .pad, false),
+            (.visionOS, .other, false),
+        ]
+        for testCase in cases {
+            XCTAssertEqual(
+                ShellModeDecision.usesSingleWindowShell(
+                    platform: testCase.platform,
+                    idiom: testCase.idiom,
+                    isFullScreen: false,
+                    padPrefersShell: true,
+                    environmentOverride: nil
+                ),
+                testCase.expected,
+                "\(testCase.platform) \(testCase.idiom)"
+            )
+        }
+        XCTAssertFalse(ShellModeDecision.usesSingleWindowShell(
+            platform: .iOS,
+            idiom: .pad,
+            isFullScreen: false,
+            padPrefersShell: true,
+            environmentOverride: "0"
+        ))
+    }
+
+    func testPadOptInDefaultsOffAndPersists() throws {
+        let suite = "SingleWindowShellSettingTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        XCTAssertFalse(SingleWindowShellSetting.isEnabled(defaults: defaults))
+        SingleWindowShellSetting.setEnabled(true, defaults: defaults)
+        XCTAssertTrue(SingleWindowShellSetting.isEnabled(defaults: defaults))
+        SingleWindowShellSetting.setEnabled(false, defaults: defaults)
+        XCTAssertFalse(SingleWindowShellSetting.isEnabled(defaults: defaults))
     }
 
     func testForceOnOverridesEveryPlatformAndIdiom() {
@@ -45,6 +92,7 @@ final class SingleWindowShellPolicyTests: XCTestCase {
                         platform: platform,
                         idiom: idiom,
                         isFullScreen: fullScreen,
+                        padPrefersShell: false,
                         environmentOverride: "1"
                     ))
                 }
@@ -64,6 +112,7 @@ final class SingleWindowShellPolicyTests: XCTestCase {
                         platform: platform,
                         idiom: idiom,
                         isFullScreen: fullScreen,
+                        padPrefersShell: false,
                         environmentOverride: "0"
                     ))
                 }
@@ -76,12 +125,14 @@ final class SingleWindowShellPolicyTests: XCTestCase {
             platform: .iOS,
             idiom: .phone,
             isFullScreen: false,
+            padPrefersShell: false,
             environmentOverride: "yes"
         ))
         XCTAssertFalse(ShellModeDecision.usesSingleWindowShell(
             platform: .iOS,
             idiom: .pad,
             isFullScreen: false,
+            padPrefersShell: false,
             environmentOverride: "yes"
         ))
     }

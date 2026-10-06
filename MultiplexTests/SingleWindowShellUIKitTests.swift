@@ -218,6 +218,68 @@ final class SingleWindowShellUIKitTests: XCTestCase {
         )
     }
 
+    func testFloatingIPadWindowSpendsNoStatusStripAndClearsThePill() {
+        // A resized iPad window reports the display's 32 pt status bar as its
+        // top safe area wherever it floats; the shell spends only the part
+        // actually under the status bar (on device, 2026-10-04).
+        let clearance = TerminalClassicRailInsets.windowControlsLeadingInset
+        let cases: [(overlap: CGFloat, spans: Bool, top: CGFloat, inset: CGFloat)] = [
+            (0, false, 0, clearance),   // floating
+            (12, false, 12, clearance), // floating, tucked under the bar
+            (32, true, 32, 0),          // maximised: status bar, no pill
+        ]
+        for testCase in cases {
+            let chrome = ShellWindowChrome(
+                sceneTopSafeArea: 32,
+                hostsWindowControls: true,
+                systemTopChromeOverlap: testCase.overlap,
+                spansDisplay: testCase.spans
+            )
+            XCTAssertEqual(chrome.topSafeArea, testCase.top, "\(testCase)")
+            XCTAssertEqual(chrome.controlsInset, testCase.inset, "\(testCase)")
+        }
+        // The Mac: a real title bar above the scene, no pill.
+        let mac = ShellWindowChrome(
+            sceneTopSafeArea: 32,
+            hostsWindowControls: false,
+            systemTopChromeOverlap: 32,
+            spansDisplay: false
+        )
+        XCTAssertEqual(mac.topSafeArea, 0)
+        XCTAssertEqual(mac.controlsInset, 0)
+
+        func floating(deckRailVisible: Bool, width: CGFloat = 900) -> SingleWindowShellLayoutMetrics {
+            SingleWindowShellNativeLayout.resolve(
+                size: CGSize(width: width, height: 700),
+                safeArea: UIEdgeInsets(top: 0, left: 0, bottom: 20, right: 0),
+                verticalSizeClass: .regular,
+                horizontalSizeClass: .regular,
+                idiom: .pad,
+                deckRailVisible: deckRailVisible,
+                compactShowsTerminal: true,
+                compactBackSwipeOffset: 0,
+                compactBackSwipeActive: false,
+                windowControlsInset: clearance
+            )
+        }
+        // No strip: both panes start at the window's top edge.
+        let withDeck = floating(deckRailVisible: true)
+        XCTAssertTrue(withDeck.expanded)
+        XCTAssertEqual(withDeck.deckFrame.minY, 0)
+        XCTAssertEqual(withDeck.terminalFrame.minY, 0)
+        // The MULTIPLEX header owns the leading corner beside a terminal…
+        XCTAssertEqual(withDeck.deckHeaderChrome.cornerInset, clearance)
+        XCTAssertEqual(withDeck.terminalRailChrome.cornerInset, 0)
+        // …and the terminal rail inherits it once the deck is hidden.
+        let deckHidden = floating(deckRailVisible: false)
+        XCTAssertEqual(deckHidden.deckHeaderChrome.cornerInset, 0)
+        XCTAssertEqual(deckHidden.terminalRailChrome.cornerInset, clearance)
+        // A narrow window is one pane at a time; the visible one clears it.
+        let narrow = floating(deckRailVisible: true, width: 500)
+        XCTAssertFalse(narrow.expanded)
+        XCTAssertEqual(narrow.terminalRailChrome.cornerInset, clearance)
+    }
+
     func testTerminalBottomBackfillDisappearsWhenRailOwnsSafeArea() throws {
         let harness = makeController(initialRoute: TerminalWindowRoute(
             tab: terminal("main")
