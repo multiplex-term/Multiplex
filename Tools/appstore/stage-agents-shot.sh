@@ -3,7 +3,10 @@
 # Claude Code pane parks on a permission dialog, the wall tile flips
 # NEEDS YOU, and the local-notification banner posts — no real agent CLI.
 #
-#   ./stage-agents-shot.sh visionos|ipad|iphone [udid]
+#   ./stage-agents-shot.sh visionos|ipad|iphone|duo [udid]
+#
+# iPhone Duo: export DISPLAY_UUID=<inner display port from
+# `simctl io <udid> enumerate`> — the default screenshot is the outer display.
 #
 # Run AFTER the fleet is staged and the app is frontmost on its deck:
 #   Tools/dev-sshd/harness.sh start && Tools/dev-sshd/harness.sh demo
@@ -29,7 +32,8 @@ case "$DEVICE" in
     visionos) MATCH="Apple Vision Pro" ;;
     ipad)     MATCH="iPad" ;;
     iphone)   MATCH="iPhone" ;;
-    *) echo "usage: $0 visionos|ipad|iphone [udid]" >&2; exit 1 ;;
+    duo)      MATCH="iPhone Duo" ;;
+    *) echo "usage: $0 visionos|ipad|iphone|duo [udid]" >&2; exit 1 ;;
 esac
 
 UDID="${2:-$(xcrun simctl list devices booted | grep "$MATCH" | grep -oE '[0-9A-F-]{36}' | head -1)}"
@@ -113,7 +117,7 @@ echo "burst-capturing to ${BURST#"$HERE/"} for ~20 s…"
 SECONDS=0
 i=0
 while [ "$SECONDS" -lt 20 ]; do
-    xcrun simctl io "$UDID" screenshot \
+    xcrun simctl io "$UDID" screenshot ${DISPLAY_UUID:+--display="$DISPLAY_UUID"} \
         "$BURST/$(printf 'frame-%02d' "$i").png" >/dev/null 2>&1 || true
     i=$((i + 1))
     sleep 0.4
