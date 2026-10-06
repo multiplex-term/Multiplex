@@ -424,6 +424,13 @@ final class HostStore {
                 secondaries.compactMap(Host.SessionBackend.init(rawValue:))
             )
         }
+        // Headless tailscale-seam checks flip the seeded host without
+        // touching the shared seed.json (pairs with
+        // MULTIPLEX_TAILSCALE_FAKE_DIAL).
+        if ProcessInfo.processInfo.environment["MULTIPLEX_SEED_TAILSCALE"] == "1" {
+            host.useTailscale = true
+            host.useMosh = false
+        }
         if let path = seed.moshServerPath { host.moshServerPath = path }
         if let ports = seed.moshPorts { host.moshPorts = ports }
         // Optional so existing seeds leave the host's dirs alone; used by
