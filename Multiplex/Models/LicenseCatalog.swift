@@ -129,5 +129,15 @@ enum LicenseCatalog {
             vendorNote: "Vendored source · mpxbind_ prefix · Bind key sealing",
             licenseText: LicenseTexts.openBSDBSD
         ),
+        OpenSourceComponent(
+            name: "RNNoise",
+            version: "0.2",
+            family: .bsd,
+            copyrightHolder: "Copyright (c) 2007-2017, 2024 Jean-Marc Valin; 2023 Amazon; "
+                + "2017 Mozilla; 2005-2017 Xiph.Org Foundation; 2003-2004 Mark Borgerding",
+            isVendored: true,
+            vendorNote: "Vendored source · rev 70f1d25 · model downloaded on request",
+            licenseText: LicenseTexts.rnnoiseBSD
+        ),
     ]
 }

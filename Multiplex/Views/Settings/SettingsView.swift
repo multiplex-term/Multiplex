@@ -43,6 +43,9 @@ final class SettingsViewController: UIViewController {
 
     private let scrollView = UIScrollView()
     private var appearanceSection: SettingsSectionView?
+    /// Self-observing (the model download's progress), so it is built once
+    /// and survives the form's re-renders.
+    private lazy var voiceInputSection = SettingsVoiceInputSection()
     private var observationGeneration = 0
     private var didRunDebugPresentation = false
     private var hasEstablishedInitialTopAlignment = false
@@ -243,6 +246,7 @@ final class SettingsViewController: UIViewController {
             ),
             makeWindowModeSection(),
             makeRendererSection(),
+            voiceInputSection,
             makeConnectionStatsSection(),
             makeAlertsSection(state),
             makeAppLockSection(state),
@@ -540,12 +544,12 @@ final class SettingsViewController: UIViewController {
         agentAlertsControl = control
         var rows: [UIView] = [control]
         if !state.canScheduleAgentAlerts {
-            rows.append(SettingsInsetRow(contentView: settingsLeadingView(UIKitChassisChip(
+            rows.append(settingsChipRow(
                 "VIEW MULTIPLEX PRO",
                 accessibilityLabel: String(localized: "View Multiplex Pro")
             ) { [weak self] in
                 self?.presentPaywall()
-            })))
+            })
         }
         return SettingsSectionView(
             title: String(localized: "Agent alerts"),
@@ -620,7 +624,7 @@ final class SettingsViewController: UIViewController {
             freeStatus: "UP TO \(EntitlementStore.freeKeyCommandLimit)",
             state: state
         ))
-        rows.append(SettingsInsetRow(contentView: settingsLeadingView(UIKitChassisChip(
+        rows.append(settingsChipRow(
             state.isPro ? "PRO DETAILS" : "UNLOCK MULTIPLEX PRO",
             prominent: true,
             accessibilityLabel: state.isPro
@@ -628,7 +632,7 @@ final class SettingsViewController: UIViewController {
                 : String(localized: "Unlock Multiplex Pro")
         ) { [weak self] in
             self?.presentPaywall()
-        })))
+        })
 
         #if DEBUG
         rows.append(SettingsBooleanRow(
@@ -1786,11 +1790,27 @@ private extension TerminalTheme {
 }
 
 @MainActor
-private func settingsFlexibleSpacer() -> UIView {
+func settingsFlexibleSpacer() -> UIView {
     let spacer = UIView()
     spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
     spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     return spacer
+}
+
+/// One chip on its own inset row, leading-aligned.
+@MainActor
+func settingsChipRow(
+    _ caption: String,
+    prominent: Bool = false,
+    accessibilityLabel: String,
+    action: @escaping () -> Void
+) -> UIView {
+    SettingsInsetRow(contentView: settingsLeadingView(UIKitChassisChip(
+        caption,
+        prominent: prominent,
+        accessibilityLabel: accessibilityLabel,
+        action: action
+    )))
 }
 
 @MainActor

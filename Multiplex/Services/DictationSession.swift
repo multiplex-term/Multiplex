@@ -1,4 +1,3 @@
-#if !os(visionOS)
 import AVFoundation
 import Foundation
 import Speech
@@ -105,7 +104,7 @@ final class DictationSession {
     /// `SFSpeechRecognizer` machinery below (segments, rolls, backoff) is
     /// unused — one analyzer runs for the whole take.
     private var analyzerBox: AnyObject?
-    @available(iOS 26, *)
+    @available(iOS 26, visionOS 26, *)
     private var analyzer: DictationAnalyzer? {
         get { analyzerBox as? DictationAnalyzer }
         set { analyzerBox = newValue }
@@ -132,6 +131,11 @@ final class DictationSession {
     /// Decided once per take and logged, so the field answer to "did this
     /// leave the device" is in the same line as the start.
     private var onDeviceRecognition = true
+    /// RNNoise in front of both engines, when Settings has it on and the
+    /// model is installed — decided once per take and logged beside the
+    /// engine choice. Fixed for the take, so every tap captures it directly;
+    /// only the tap's thread ever runs it.
+    private var denoiser: AudioDenoiser?
     private var silenceTask: Task<Void, Never>?
     private var capTask: Task<Void, Never>?
     private var quietTask: Task<Void, Never>?
@@ -185,7 +189,7 @@ final class DictationSession {
         deafTask?.cancel()
         probationTask?.cancel()
         stopAudio()
-        if #available(iOS 26, *), let analyzer {
+        if #available(iOS 26, visionOS 26, *), let analyzer {
             // Ends the input and finalizes everything heard; the last words
             // arrive as final results and are typed on the way out.
             analyzer.finish()
@@ -280,13 +284,21 @@ final class DictationSession {
             return
         }
 
+        // The recognizers hear the denoiser's output when there is one, so
+        // its format — fixed, whatever the route — is the one they are
+        // built for.
+        // A missing or partial blob fails the denoiser's own size check.
+        denoiser = NoiseReductionSetting.isEnabled()
+            ? AudioDenoiser(weightsURL: RNNoiseWeightsInstaller.weightsURL)
+            : nil
+
         // Pick the engine before the microphone opens: choosing costs a
         // couple of XPC round trips, and audio captured across them would
         // have nowhere to go. iOS 26's analyzer is the one built for this;
         // `SFSpeechRecognizer` is the fallback for everything older and for
         // languages whose dictation model is not installed.
-        let inputFormat = engine.inputNode.outputFormat(forBus: 0)
-        if #available(iOS 26, *) {
+        let inputFormat = denoiser?.outputFormat ?? engine.inputNode.outputFormat(forBus: 0)
+        if #available(iOS 26, visionOS 26, *) {
             analyzer = await DictationAnalyzer.make(
                 inputFormat: inputFormat,
                 locale: locale ?? .current
@@ -294,12 +306,10 @@ final class DictationSession {
         }
         guard onFinish != nil, !isListening else { return }
         if analyzerBox == nil {
-            guard let recognizer = makeRecognizer(), recognizer.isAvailable else {
-                deliver(.failure(String(localized: "Dictation isn't available for this language")))
+            if let failure = adoptRecognizer() {
+                deliver(.failure(failure))
                 return
             }
-            self.recognizer = recognizer
-            onDeviceRecognition = recognizer.supportsOnDeviceRecognition
         }
 
         do {
@@ -319,12 +329,12 @@ final class DictationSession {
         segmentStart = nil
         observeAudioDisruption()
         Self.logger.debug(
-            "dictation-start engine=\(self.analyzerBox == nil ? "sfspeech" : "analyzer", privacy: .public) onDevice=\(self.onDeviceRecognition, privacy: .public) locale=\(self.locale?.identifier ?? "system", privacy: .public)"
+            "dictation-start engine=\(self.analyzerBox == nil ? "sfspeech" : "analyzer", privacy: .public) onDevice=\(self.onDeviceRecognition, privacy: .public) denoise=\(self.denoiser != nil, privacy: .public) locale=\(self.locale?.identifier ?? "system", privacy: .public)"
         )
         onStart?()
         onStart = nil
 
-        if #available(iOS 26, *), let analyzer {
+        if #available(iOS 26, visionOS 26, *), let analyzer {
             await startAnalyzer(analyzer)
         } else {
             beginSegment()
@@ -513,7 +523,7 @@ final class DictationSession {
         quietTask = Task { [weak self] in
             try? await Task.sleep(for: Self.quietFlush)
             guard !Task.isCancelled, let self, isListening, !finishing else { return }
-            if #available(iOS 26, *), let analyzer {
+            if #available(iOS 26, visionOS 26, *), let analyzer {
                 // The analyzer decides what is final, so ask it to finalize
                 // rather than typing its volatile tail behind its back.
                 analyzer.finalizePending()
@@ -528,7 +538,7 @@ final class DictationSession {
     /// Hand the microphone to the analyzer and let it decide what is final.
     /// There is no rolling here: one analyzer runs for the whole take, which
     /// is the entire reason this path exists.
-    @available(iOS 26, *)
+    @available(iOS 26, visionOS 26, *)
     private func startAnalyzer(_ analyzer: DictationAnalyzer) async {
         audioSink.useAnalyzer { [weak analyzer] buffer in analyzer?.append(buffer) }
         do {
@@ -559,21 +569,41 @@ final class DictationSession {
         Self.logger.error("dictation-analyzer-abandoned \(reason, privacy: .public)")
         probationTask?.cancel()
         probationTask = nil
-        if #available(iOS 26, *) {
+        if #available(iOS 26, visionOS 26, *) {
             analyzer?.cancel()
             analyzer = nil
         }
         analyzerBox = nil
         audioSink.useAnalyzer(nil)
-        if recognizer == nil {
-            recognizer = makeRecognizer()
-            onDeviceRecognition = recognizer?.supportsOnDeviceRecognition ?? false
+        if recognizer == nil, let failure = adoptRecognizer() {
+            deliver(.failure(failure))
+            return
         }
         guard recognizer?.isAvailable == true else {
             deliver(.failure(String(localized: "Dictation isn't available for this language")))
             return
         }
         beginSegment()
+    }
+
+    /// Take the `SFSpeechRecognizer` for this take, or the reason it cannot
+    /// run. ⚠ visionOS refuses server-backed recognition outright ("On device
+    /// models required for speech recognition on this platform"): there a
+    /// recognizer without its on-device model only ever makes born-dead
+    /// tasks, so the take fails up front with words instead of six dead
+    /// restarts and a vague ending.
+    private func adoptRecognizer() -> String? {
+        guard let recognizer = makeRecognizer(), recognizer.isAvailable else {
+            return String(localized: "Dictation isn't available for this language")
+        }
+        #if os(visionOS)
+        guard recognizer.supportsOnDeviceRecognition else {
+            return String(localized: "This language's speech model isn't on this device yet")
+        }
+        #endif
+        self.recognizer = recognizer
+        onDeviceRecognition = recognizer.supportsOnDeviceRecognition
+        return nil
     }
 
     /// The chosen language's recognizer, or the system one when nothing was
@@ -630,7 +660,10 @@ final class DictationSession {
 
     private func activateAudioSession() throws {
         let audio = AVAudioSession.sharedInstance()
-        try audio.setCategory(.record, mode: .measurement, options: .duckOthers)
+        // `.record` offers a Bluetooth headset's microphone only when asked:
+        // without `allowBluetoothHFP` a take with AirPods in still listened
+        // through the device's own mic, across the room from the speaker.
+        try audio.setCategory(.record, mode: .measurement, options: [.duckOthers, .allowBluetoothHFP])
         try audio.setActive(true, options: .notifyOthersOnDeactivation)
     }
 
@@ -638,12 +671,19 @@ final class DictationSession {
         let input = engine.inputNode
         input.removeTap(onBus: 0)
         let sink = audioSink
+        let denoiser = denoiser
         input.installTap(
             onBus: 0,
             bufferSize: 1024,
             format: input.outputFormat(forBus: 0)
         ) { buffer, _ in
-            sink.append(buffer)
+            if let denoiser {
+                // Nil while a 10 ms frame is still filling.
+                guard let clean = denoiser.process(buffer) else { return }
+                sink.append(clean)
+            } else {
+                sink.append(buffer)
+            }
         }
         engine.prepare()
         try engine.start()
@@ -736,7 +776,7 @@ final class DictationSession {
         deafTask = nil
         probationTask = nil
         stopAudio()
-        if #available(iOS 26, *) {
+        if #available(iOS 26, visionOS 26, *) {
             analyzer?.cancel()
             analyzer = nil
         }
@@ -753,6 +793,7 @@ final class DictationSession {
 
     private func stopAudio() {
         audioSink.use(nil)
+        denoiser = nil
         for observer in audioObservers { NotificationCenter.default.removeObserver(observer) }
         audioObservers = []
         if engine.isRunning { engine.stop() }
@@ -805,4 +846,3 @@ private final class AudioSink: @unchecked Sendable {
         analyzer?(buffer)
     }
 }
-#endif

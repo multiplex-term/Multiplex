@@ -244,8 +244,8 @@ enum TerminalGuide {
                 .text(String(localized: "The speech-bubble key beside ")),
                 .key("RET"),
                 .text(String(localized: """
-                     opens a message box: write with autocorrect and your keyboard's own \
-                    dictation, attach photos or files, then\u{20}
+                     opens a message box: write with autocorrect, or tap its mic to dictate, \
+                    attach photos or files, then\u{20}
                     """)),
                 .control("↑"),
                 .text(String(localized: """

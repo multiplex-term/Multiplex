@@ -90,7 +90,14 @@ UIKit scene runtime (MultiplexSceneDelegate + UIKitSceneRootViewController;
                          attachTalkbackFiles = the drop path's one upload
                          primitive, held until SEND; rendered by
                          TalkbackComposerViewController (window-docked on
-                         iPad/iPhone, an ornament slab on visionOS)
+                         iPad/iPhone, an ornament slab on visionOS), whose
+                         mic writes into the field
+    DictationDriver      one take per mic control (pane rail key / composer
+                         mic) — state + failure beat over DictationSession
+    DictationSession     the one mic, app-wide: Speech
+                         analyzer or SFSpeechRecognizer behind AudioDenoiser
+                         (RNNoise, Vendor/rnnoise) when the model is on;
+                         RNNoiseModelStore downloads + SHA-256-pins it
     TerminalTransport    the tab's byte pipe; picked by host.useMosh
                          (exec + SFTP stay SSH-only capabilities)
     SessionResumePolicy  pure: suspension damage vs user-ended session

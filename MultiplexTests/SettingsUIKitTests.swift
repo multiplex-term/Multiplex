@@ -54,6 +54,7 @@ final class SettingsUIKitTests: XCTestCase {
             "Your themes",
         ] + windowMode + [
             "Terminal renderer",
+            "Voice input",
             "Connection stats",
             "Agent alerts",
             "App lock",
@@ -70,6 +71,10 @@ final class SettingsUIKitTests: XCTestCase {
         XCTAssertTrue(rendered.contains("MOSH TRANSPORT"))
         XCTAssertTrue(rendered.contains("AGENT HELPERS"))
         XCTAssertTrue(rendered.contains("Metal renderer"))
+        XCTAssertTrue(
+            rendered.contains("NOT INSTALLED") || rendered.contains("Noise reduction"),
+            "Voice input shows the model's state or its switch"
+        )
         XCTAssertTrue(rendered.contains("AGENT ALERTS"))
         XCTAssertTrue(rendered.contains("CONNECTION STATS"))
         XCTAssertTrue(rendered.contains("CUSTOM THEMES"))
@@ -356,7 +361,7 @@ final class SettingsUIKitTests: XCTestCase {
         )
         licenses.loadViewIfNeeded()
         XCTAssertEqual(licenses.title, "Open Source Licenses")
-        XCTAssertEqual(licenses.components.count, 13)
+        XCTAssertEqual(licenses.components.count, 14)
         XCTAssertNotNil(
             licenses.navigationItem.rightBarButtonItem,
             "A modal licenses sheet needs its own Done"

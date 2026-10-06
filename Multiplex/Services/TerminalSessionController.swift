@@ -230,21 +230,31 @@ final class TerminalSessionController {
         case listening(String)
         case failed(String)
     }
-    private(set) var dictation: DictationState?
-    private var dictationSession: DictationSession?
-    private var dictationClearTask: Task<Void, Never>?
-    /// The key has been pressed and a dictation is in flight — which starts
-    /// before `dictation` does, because the first press waits on the system's
-    /// microphone and speech-recognition alerts. Whichever mic control was
-    /// pressed latches on this; the pane's LISTENING bar waits for the
-    /// microphone itself.
-    private var dictationRequested = false
+    /// The pane's take. `dictationPhase` is its observed mirror — the driver
+    /// itself is not observable.
+    @ObservationIgnored private let dictationDriver = DictationDriver()
+    private var dictationPhase: DictationDriver.State = .idle
+
+    var dictation: DictationState? {
+        switch dictationPhase {
+        case .listening(let pending): .listening(pending)
+        case .failed(let message): .failed(message)
+        case .idle, .starting: nil
+        }
+    }
     #endif
 
     init(route: TerminalRoute, host: Host, attention: AttentionCenter? = nil) {
         self.route = route
         self.host = host
         self.attention = attention
+        #if !os(visionOS)
+        dictationDriver.onStateChange = { [weak self] in
+            guard let self else { return }
+            dictationPhase = dictationDriver.state
+        }
+        dictationDriver.onText = { [weak self] settled in self?.typeDictated(settled) }
+        #endif
     }
 
     /// The remote rang the terminal bell (BEL through the PTY — how opt-in
@@ -1210,13 +1220,13 @@ final class TerminalSessionController {
     /// What either mic control shows: engaged from the press, not from the
     /// microphone, so a permission alert never leaves the action looking
     /// untouched.
-    var isDictating: Bool { dictationRequested }
+    var isDictating: Bool { dictationPhase.isActive }
 
     /// One dictation action shared by the physical-keyboard rail slot and the
     /// software-keyboard lock tip. Neither path reaches the system keyboard's
     /// own microphone, so both run the same app-owned recognition session.
     func toggleDictation() {
-        if dictationRequested {
+        if isDictating {
             stopDictation()
         } else {
             startDictation()
@@ -1224,40 +1234,21 @@ final class TerminalSessionController {
     }
 
     /// Finish and type the tail. Most of the dictation is already in the
-    /// session — this is the last words the hold rules were still sitting on,
-    /// and the recognizer gets a moment to make its final pass over them
-    /// first. A press that has not reached the microphone yet has nothing to
-    /// type, so it simply abandons the attempt.
+    /// session — this is the last words the hold rules were still sitting on.
     func stopDictation() {
-        guard let dictationSession else { return }
-        if dictationSession.isListening {
-            dictationSession.stop()
-        } else {
-            dictationSession.cancel()
-        }
+        dictationDriver.stop()
     }
 
     /// Leave without typing the rest. Words that already settled are in the
     /// session and stay there — a terminal has no undo, so this abandons the
     /// queue, not the dictation's past.
     func cancelDictation() {
-        dictationSession?.cancel()
+        dictationDriver.cancel()
     }
 
-    /// The LISTENING bar's language chip: persist the pick, and when a take
-    /// is live restart it in the new language — the recognizer heard the old
-    /// one, and "applies next time" from a control pressed mid-take would
-    /// read as the pick not working. The restart abandons only the unsettled
-    /// queue; words already typed stay, like any cancel. A full restart, not
-    /// an in-place engine swap: a recognition task created while the daemon
-    /// tears its predecessor down comes back dead (the session's whole
-    /// restart-backoff ladder exists for that), and the well-worn start path
-    /// costs one bar blink.
+    /// The LISTENING bar's language chip (see `DictationDriver.selectLanguage`).
     func selectDictationLanguage(_ choice: DictationLanguageChoice) {
-        DictationLanguageSetting.setChosen(choice.id)
-        guard dictationRequested else { return }
-        dictationSession?.cancel()
-        startDictation()
+        dictationDriver.selectLanguage(choice)
     }
 
     private func startDictation() {
@@ -1265,28 +1256,7 @@ final class TerminalSessionController {
         // The jump search owns the pane's input while it pages the remote
         // transcript; dictated text would interleave with its PgUp stream.
         if case .finding = historyJump { return }
-        dictationClearTask?.cancel()
-        dictation = nil
-        dictationRequested = true
-        let session = dictationSession ?? DictationSession()
-        dictationSession = session
-        session.start(
-            locale: DictationLanguageSetting.chosenLocale(),
-            onStart: { [weak self] in
-                guard let self, dictationRequested else { return }
-                dictation = .listening("")
-            },
-            onText: { [weak self] settled in
-                self?.typeDictated(settled)
-            },
-            onPending: { [weak self] pending in
-                guard let self, dictationRequested else { return }
-                dictation = .listening(DictationText.preview(pending))
-            },
-            onFinish: { [weak self] outcome in
-                self?.finishDictation(outcome)
-            }
-        )
+        dictationDriver.start()
     }
 
     /// One chunk of settled speech, typed exactly like a rail key or a
@@ -1294,33 +1264,13 @@ final class TerminalSessionController {
     /// never submitted. The stream already sanitized it and owns the spacing
     /// between chunks, so it goes out verbatim.
     private func typeDictated(_ text: String) {
-        guard dictationRequested else { return }
         guard status == .live, let terminalView else {
             // The session being spoken into is gone. Stop rather than aim the
             // rest of the sentence at whatever takes its place.
-            dictationSession?.cancel()
+            dictationDriver.cancel()
             return
         }
         terminalView.send(txt: text)
-    }
-
-    private func finishDictation(_ outcome: DictationSession.Outcome) {
-        dictationRequested = false
-        dictation = nil
-        switch outcome {
-        case .ended, .cancelled:
-            // Everything that settled was typed as it landed; there is no
-            // trailing text left to deliver here.
-            break
-        case .failure(let message):
-            dictation = .failed(message)
-            dictationClearTask?.cancel()
-            dictationClearTask = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(4))
-                guard !Task.isCancelled else { return }
-                if case .failed = self?.dictation { self?.dictation = nil }
-            }
-        }
     }
     #endif
 
@@ -2295,11 +2245,7 @@ final class TerminalSessionController {
         #if !os(visionOS)
         // The tab is going away — release the microphone rather than typing
         // into a session that no longer exists.
-        dictationClearTask?.cancel()
-        dictationSession?.cancel()
-        dictationSession = nil
-        dictationRequested = false
-        dictation = nil
+        dictationDriver.cancel()
         #endif
         dropTask?.cancel()
         dropTask = nil

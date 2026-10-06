@@ -43,9 +43,12 @@ struct TalkbackComposerPresentation: Equatable {
 /// Candidate B — MESSAGE CARD. A rounded card on the chassis band above the
 /// key rail (iPad · iPhone) or in its own slab under the visionOS console:
 /// an eyebrow naming the target, previews of the attachments, a round
-/// paperclip, a native text field, and a filled ↑ that sends. The field owns
-/// the keyboard while the rail keeps driving the pane; SEND is one paste plus
-/// a CR through the ordered pump. Design record: `local-plan/talkback-bakeoff/`.
+/// paperclip, a native text field, a mic, and a filled ↑ that sends. The
+/// field owns the keyboard while the rail keeps driving the pane; SEND is one
+/// paste plus a CR through the ordered pump. The mic dictates into the field
+/// (its own `DictationDriver`) — the eyebrow turns LISTENING with the heard-not-yet-
+/// typed queue, and SEND mid-take finishes the take first. Design record:
+/// `local-plan/talkback-bakeoff/`.
 @MainActor
 final class TalkbackComposerViewController: UIViewController, UITextViewDelegate {
     static let cardCornerRadius: CGFloat = 14
@@ -100,6 +103,28 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
     )
     private let textView = TalkbackTextView()
     private let placeholder = UILabel()
+    private let micButton = TalkbackRoundButton(
+        diameter: TalkbackComposerViewController.roundButtonDiameter,
+        symbol: "mic",
+        pointSize: 13
+    )
+    /// The eyebrow while the mic is engaged or just failed: a captioned lamp,
+    /// the language chip, and the heard-not-yet-typed queue (or the reason).
+    private let dictationStrip = UIStackView()
+    private let listeningLamp = DictationChrome.listeningLamp()
+    private let dictationFailedLamp = DictationChrome.failureLamp()
+    /// Built when a take opens — the pick can only change through it (which
+    /// restarts the take) or from the pane (whose take cancels this one).
+    private var languageChip: UIView?
+    private let pendingLabel = DictationPendingLabel(on: .composer)
+    private let failureLabel = UILabel()
+    private let dictation = DictationDriver()
+    /// The last full render of the strip: per-hypothesis updates only move
+    /// the queue.
+    private var renderedDictationFace: DictationFace?
+    /// SEND pressed mid-take: the take finishes, then this SEND (its submit
+    /// flag) goes — so the words still being settled are part of it.
+    private var sendAfterDictation: Bool?
     private let sendButton = TalkbackRoundButton(
         diameter: TalkbackComposerViewController.roundButtonDiameter,
         symbol: "arrow.up",
@@ -167,6 +192,7 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
         view = root
         buildHierarchy()
         installAttachPresenter()
+        installDictation()
         #if DEBUG
         installDebugObservers()
         #endif
@@ -201,6 +227,7 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
     /// render can't touch a controller that moved on.
     func prepareForRemoval() {
         observationGeneration &+= 1
+        endDictationForTargetChange()
         if textView.isFirstResponder { textView.resignFirstResponder() }
     }
 
@@ -260,13 +287,13 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
     }
 
     /// The field's width for a box width: everything else in the line row is
-    /// fixed — two round buttons and their gaps (one button when the tab
-    /// can't attach).
+    /// fixed — three round buttons and their gaps (mic and ↑ always; the
+    /// paperclip only when the tab can attach).
     private func fieldWidth(forWidth width: CGFloat) -> CGFloat {
         let insets = bandHorizontalInsets
         var fixed = insets.left + insets.right
             + Self.cardPadding.left + Self.cardPadding.right
-            + Self.roundButtonDiameter + Self.lineSpacing
+            + 2 * (Self.roundButtonDiameter + Self.lineSpacing)
         if showsAttachButton {
             fixed += Self.roundButtonDiameter + Self.lineSpacing
         }
@@ -427,8 +454,27 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
         closeButton.accessibilityIdentifier = "terminal.talkback.close"
         closeButton.addTarget(self, action: #selector(closePressed), for: .touchUpInside)
 
-        for view in [toLabel, targetLabel, agentLabel, stateLabel, spacer, closeButton] {
+        buildDictationStrip()
+        for view in [dictationStrip, toLabel, targetLabel, agentLabel, stateLabel, spacer, closeButton] {
             header.addArrangedSubview(view)
+        }
+    }
+
+    private func buildDictationStrip() {
+        dictationStrip.axis = .horizontal
+        dictationStrip.alignment = .center
+        dictationStrip.spacing = 8
+        dictationStrip.accessibilityIdentifier = "terminal.talkback.dictation"
+        dictationStrip.isHidden = true
+        failureLabel.font = UIKitChassis.monoFont(10)
+        failureLabel.textColor = UIKitChassis.signal2
+        failureLabel.lineBreakMode = .byTruncatingTail
+        for label in [pendingLabel, failureLabel] {
+            label.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        }
+        for view in [listeningLamp, dictationFailedLamp, pendingLabel, failureLabel] {
+            dictationStrip.addArrangedSubview(view)
         }
     }
 
@@ -511,8 +557,12 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
         hold.minimumPressDuration = 0.5
         sendButton.addGestureRecognizer(hold)
 
+        micButton.accessibilityIdentifier = "terminal.talkback.mic"
+        micButton.addTarget(self, action: #selector(micPressed), for: .touchUpInside)
+
         line.addArrangedSubview(attachButton)
         line.addArrangedSubview(textView)
+        line.addArrangedSubview(micButton)
         line.addArrangedSubview(sendButton)
     }
 
@@ -568,6 +618,9 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
         renderedKey = key
 
         if controllerChanged {
+            // The take was filling the old tab's draft; the field is about to
+            // show another one.
+            endDictationForTargetChange()
             attachPresenter.update(controller: controller)
             // The draft is the text of record across a tab switch; the field
             // is its writer otherwise (SEND clears both).
@@ -616,19 +669,24 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
 
     private func renderHeader() {
         let presentation = configuration.presentation
+        // The mic's strip takes the eyebrow while it has something to say;
+        // NEEDS YOU stays — an agent asking is worth the room.
+        let dictating = !dictationStrip.isHidden
+        toLabel.isHidden = dictating
+        targetLabel.isHidden = dictating
         targetLabel.text = presentation.targetLabel.uppercased()
         if let agent = presentation.agent {
             // U+FE0E pins the text presentation: ✳ has an emoji twin the
             // system font would otherwise pick.
             agentLabel.text = "\(agent.glyph)\u{FE0E} \(agent.displayName)"
-            agentLabel.isHidden = false
+            agentLabel.isHidden = dictating
         } else {
             agentLabel.text = nil
             agentLabel.isHidden = true
         }
         let running = presentation.agentState == .busy
         stateLabel.setText(running ? "RUNNING" : "")
-        stateLabel.isHidden = !running
+        stateLabel.isHidden = !running || dictating
         var needsYou = false
         if case .needsYou = presentation.agentState { needsYou = true }
         if needsYou, needsYouLamp == nil {
@@ -698,8 +756,17 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
             attachButton.menu = state.canAttachNow ? attachPresenter.makeSourceMenu() : nil
             renderedAttachKey = attachKey
         }
+        renderMic()
+        if sendAfterDictation != nil {
+            // SEND is already pressed; it goes when the take's last words land.
+            sendButton.style = .waiting
+            sendButton.isEnabled = false
+            sendButton.accessibilityLabel = String(localized: "Send, finishing dictation")
+            return
+        }
         switch state.sendState {
-        case .ready:
+        // Mid-take an empty draft is still filling; SEND finishes the take first.
+        case .ready, .empty where dictation.isActive:
             sendButton.style = .prominent
             sendButton.isEnabled = true
             sendButton.accessibilityLabel = String(localized: "Send")
@@ -707,7 +774,7 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
             sendButton.style = .waiting
             sendButton.isEnabled = false
             sendButton.accessibilityLabel = String(localized: "Send, waiting for uploads")
-        case .disabled:
+        case .disabled, .empty:
             sendButton.style = .dim
             sendButton.isEnabled = false
             sendButton.accessibilityLabel = String(localized: "Send")
@@ -731,11 +798,148 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
 
     /// SEND / a long-press SEND (type only). The controller composes the
     /// bytes and clears the draft; the field — its writer — clears itself
-    /// (the chips follow through observation).
+    /// (the chips follow through observation). Mid-take, SEND finishes the
+    /// take and goes once its last words are in the field.
     func send(submit: Bool) {
+        if dictation.isActive {
+            sendAfterDictation = submit
+            dictation.stop()
+            renderDictation()
+            return
+        }
         guard configuration.controller.sendTalkback(submit: submit) else { return }
         textView.text = ""
         textViewDidChange(textView)
+    }
+
+    @objc private func micPressed() {
+        if dictation.isActive {
+            dictation.stop()
+        } else {
+            dictation.start()
+        }
+    }
+
+    // MARK: Dictation
+
+    private func installDictation() {
+        dictation.onStateChange = { [weak self] in self?.dictationStateChanged() }
+        dictation.onText = { [weak self] chunk in self?.insertDictated(chunk) }
+    }
+
+    /// Words land where the caret is when the field has the keyboard (a
+    /// selection is replaced, as system dictation does), at the end
+    /// otherwise; the field stays the draft's writer either way. The take's
+    /// one delivery point — internal so tests can stand in for the mic.
+    func insertDictated(_ chunk: String) {
+        if textView.markedTextRange != nil { textView.unmarkText() }
+        let current = textView.text ?? ""
+        let end = current.endIndex..<current.endIndex
+        let target = textView.isFirstResponder
+            ? Range(textView.selectedRange, in: current) ?? end
+            : end
+        let preceding = target.lowerBound > current.startIndex
+            ? current[current.index(before: target.lowerBound)]
+            : nil
+        let following = target.upperBound < current.endIndex ? current[target.upperBound] : nil
+        let insertion = TalkbackMessage.dictatedInsertion(chunk, after: preceding, before: following)
+        guard !insertion.isEmpty else { return }
+        let caret = current.utf16.distance(from: current.startIndex, to: target.lowerBound)
+            + insertion.utf16.count
+        textView.text = current.replacingCharacters(in: target, with: insertion)
+        textView.selectedRange = NSRange(location: caret, length: 0)
+        textViewDidChange(textView)
+        textView.scrollRangeToVisible(textView.selectedRange)
+    }
+
+    /// A take that ended with SEND pressed sends now — every settled word
+    /// is already in the field.
+    private func dictationStateChanged() {
+        if !dictation.isActive, let submit = sendAfterDictation {
+            sendAfterDictation = nil
+            send(submit: submit)
+        }
+        renderDictation()
+    }
+
+    /// Tab switch or removal: the field is about to stop showing the draft
+    /// the take was filling, so the take ends without its unsettled tail and
+    /// a pending SEND is dropped with it.
+    private func endDictationForTargetChange() {
+        sendAfterDictation = nil
+        dictation.cancel()
+    }
+
+    private func renderDictation() {
+        guard isViewLoaded else { return }
+        let face = DictationFace(state: dictation.state, sendPending: sendAfterDictation != nil)
+        // A new hypothesis moves only the queue.
+        if case .listening(let pending) = dictation.state, face == renderedDictationFace {
+            pendingLabel.pending = pending
+            pendingLabel.isHidden = pending.isEmpty
+            return
+        }
+        renderedDictationFace = face
+        switch dictation.state {
+        case .idle, .starting:
+            // LISTENING means the microphone is open — never merely pressed
+            // (the first press sits behind the system's permission alerts).
+            dictationStrip.isHidden = true
+        case .listening(let pending):
+            dictationStrip.isHidden = false
+            listeningLamp.isHidden = false
+            dictationFailedLamp.isHidden = true
+            failureLabel.isHidden = true
+            pendingLabel.pending = pending
+            pendingLabel.isHidden = pending.isEmpty
+            renderLanguageChip()
+        case .failed(let message):
+            dictationStrip.isHidden = false
+            listeningLamp.isHidden = true
+            dictationFailedLamp.isHidden = false
+            pendingLabel.isHidden = true
+            languageChip?.isHidden = true
+            failureLabel.text = message
+            failureLabel.isHidden = false
+        }
+        renderHeader()
+        if let state = renderedKey?.state {
+            renderButtons(state)
+        } else {
+            renderMic()
+        }
+    }
+
+    /// One preferred language means nothing to choose: no chip, matching the
+    /// pane bar and the system keyboard.
+    private func renderLanguageChip() {
+        languageChip?.removeFromSuperview()
+        languageChip = nil
+        let choices = DictationLanguageSetting.choices()
+        guard let language = DictationLanguageSetting.effectiveChoice(among: choices) else { return }
+        let chip = DictationChrome.languageButton(
+            language: language,
+            choices: choices,
+            on: .composer
+        ) { [weak self] choice in
+            self?.dictation.selectLanguage(choice)
+        }
+        chip.setContentCompressionResistancePriority(.required, for: .horizontal)
+        dictationStrip.insertArrangedSubview(chip, at: 2)
+        languageChip = chip
+    }
+
+    private func renderMic() {
+        let engaged = dictation.isActive
+        micButton.style = engaged ? .latched : .plain
+        micButton.symbol = engaged ? "mic.fill" : "mic"
+        micButton.isEnabled = sendAfterDictation == nil
+        micButton.accessibilityLabel = engaged
+            ? String(localized: "Stop dictation")
+            : String(localized: "Dictate")
+        micButton.accessibilityHint = engaged
+            ? nil
+            : String(localized: "Writes what you say into the message; nothing is sent until you send it")
     }
 
     // MARK: UITextViewDelegate
@@ -787,6 +991,9 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
     #if DEBUG
     private func installDebugObservers() {
         TalkbackDebugHook.install()
+        // The model install is the mic's prerequisite; its hook lives with
+        // the store, which nothing else may have touched yet.
+        RNNoiseDebugHook.install()
         let center = NotificationCenter.default
         func observe(_ name: Notification.Name, _ action: @escaping @MainActor () -> Void) {
             debugObservers.append(center.addObserver(
@@ -810,6 +1017,16 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
             guard let self, self.view.window != nil else { return }
             self.configuration.controller.attachTalkbackFiles(Self.debugSampleFiles())
         }
+        observe(.multiplexDebugTalkbackMic) { [weak self] in
+            guard let self, self.view.window != nil else { return }
+            self.micPressed()
+        }
+        observe(.multiplexDebugTalkbackDictated) { [weak self] in
+            guard let self, self.view.window != nil else { return }
+            // A settled chunk as the stream emits it (separator first), so the
+            // proof exercises the draft's own spacing rule.
+            self.insertDictated(" dictated into the draft")
+        }
     }
 
     /// A photo-shaped PNG and a text file, so one hook exercises both preview
@@ -830,6 +1047,27 @@ final class TalkbackComposerViewController: UIViewController, UITextViewDelegate
         ]
     }
     #endif
+}
+
+/// What the mic's chrome renders from, minus the queue's text — two faces
+/// that differ only in what is heard share one layout.
+private struct DictationFace: Equatable {
+    enum Phase: Equatable {
+        case idle, starting, listening, failed(String)
+    }
+
+    var phase: Phase
+    var sendPending: Bool
+
+    init(state: DictationDriver.State, sendPending: Bool) {
+        switch state {
+        case .idle: phase = .idle
+        case .starting: phase = .starting
+        case .listening: phase = .listening
+        case .failed(let message): phase = .failed(message)
+        }
+        self.sendPending = sendPending
+    }
 }
 
 /// The values the composer re-renders on — its draft's structure (never its
@@ -892,8 +1130,9 @@ final class TalkbackTextView: UITextView {
 
 // MARK: - Round buttons
 
-/// The card's round controls: paperclip and ✕ in the hairline style, the ↑
-/// filled when armed, dashed while SEND waits on an upload, dim otherwise.
+/// The card's round controls: paperclip, mic and ✕ in the hairline style,
+/// the ↑ filled when armed, dashed while SEND waits on an upload, dim
+/// otherwise; the mic latches while a take is engaged.
 @MainActor
 final class TalkbackRoundButton: UIButton {
     enum Style: Equatable {
@@ -901,6 +1140,10 @@ final class TalkbackRoundButton: UIButton {
         case prominent
         case waiting
         case dim
+        /// Engaged — the pane mic's latch: a filled secondary ground, never
+        /// tally red (red is only ever a captioned lamp; the eyebrow's
+        /// LISTENING carries it).
+        case latched
     }
 
     var style: Style = .plain {
@@ -910,7 +1153,15 @@ final class TalkbackRoundButton: UIButton {
         }
     }
 
+    var symbol: String {
+        didSet {
+            guard symbol != oldValue else { return }
+            refreshSymbol()
+        }
+    }
+
     private let diameter: CGFloat
+    private let symbolConfiguration: UIImage.SymbolConfiguration
     private let symbolView = UIImageView()
     private let ring = CAShapeLayer()
 
@@ -921,19 +1172,18 @@ final class TalkbackRoundButton: UIButton {
         weight: UIImage.SymbolWeight = .semibold
     ) {
         self.diameter = diameter
+        self.symbol = symbol
+        symbolConfiguration = UIImage.SymbolConfiguration(
+            pointSize: pointSize * Theme.typeScale,
+            weight: weight
+        )
         super.init(frame: .zero)
         isAccessibilityElement = true
         accessibilityTraits = .button
         layer.cornerRadius = diameter / 2
         layer.borderWidth = 1
         hoverStyle = UIHoverStyle(effect: .highlight, shape: .circle)
-        symbolView.image = UIImage(
-            systemName: symbol,
-            withConfiguration: UIImage.SymbolConfiguration(
-                pointSize: pointSize * Theme.typeScale,
-                weight: weight
-            )
-        )
+        refreshSymbol()
         symbolView.contentMode = .center
         symbolView.isUserInteractionEnabled = false
         addSubview(symbolView)
@@ -973,6 +1223,10 @@ final class TalkbackRoundButton: UIButton {
         refreshAppearance()
     }
 
+    private func refreshSymbol() {
+        symbolView.image = UIImage(systemName: symbol, withConfiguration: symbolConfiguration)
+    }
+
     private func refreshAppearance() {
         let traits = traitCollection
         switch style {
@@ -998,6 +1252,11 @@ final class TalkbackRoundButton: UIButton {
             backgroundColor = UIKitChassis.bezelHi
             layer.borderColor = UIKitChassis.bezelHi.resolvedColor(with: traits).cgColor
             symbolView.tintColor = UIKitChassis.signal3
+            ring.isHidden = true
+        case .latched:
+            backgroundColor = UIKitChassis.signal2
+            layer.borderColor = UIKitChassis.signal2.resolvedColor(with: traits).cgColor
+            symbolView.tintColor = UIKitChassis.chassis
             ring.isHidden = true
         }
         alpha = isHighlighted ? 0.7 : 1
@@ -1264,6 +1523,8 @@ extension Notification.Name {
     static let multiplexDebugTalkbackType = Notification.Name("MultiplexDebugTalkbackType")
     static let multiplexDebugTalkbackSend = Notification.Name("MultiplexDebugTalkbackSend")
     static let multiplexDebugTalkbackAttach = Notification.Name("MultiplexDebugTalkbackAttach")
+    static let multiplexDebugTalkbackMic = Notification.Name("MultiplexDebugTalkbackMic")
+    static let multiplexDebugTalkbackDictated = Notification.Name("MultiplexDebugTalkbackDictated")
 }
 
 /// Headless proof of the composer, no touch required:
@@ -1272,7 +1533,9 @@ extension Notification.Name {
 /// two-line sample into its field, `….debug.talkbackattach` attaches a
 /// sample photo + text file through the real upload queue,
 /// `….debug.talkbacksend` presses ↑ — the harness's `tmux capture-pane` then
-/// shows the message (paths first) landing.
+/// shows the message (paths first) landing. `….debug.talkbackmic` presses the
+/// mic; `….debug.talkbackdictated` inserts one settled dictation chunk at the
+/// caret, no microphone needed.
 @MainActor
 enum TalkbackDebugHook {
     private static var installed = false
@@ -1285,6 +1548,8 @@ enum TalkbackDebugHook {
             ("talkbacktype", .multiplexDebugTalkbackType),
             ("talkbacksend", .multiplexDebugTalkbackSend),
             ("talkbackattach", .multiplexDebugTalkbackAttach),
+            ("talkbackmic", .multiplexDebugTalkbackMic),
+            ("talkbackdictated", .multiplexDebugTalkbackDictated),
         ]
         for hook in hooks {
             var token: Int32 = 0

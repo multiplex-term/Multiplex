@@ -161,6 +161,44 @@ final class TalkbackComposerUIKitTests: XCTestCase {
         XCTAssertEqual(escaped, 1)
     }
 
+    func testTheMicSitsBetweenTheFieldAndSend() throws {
+        let controller = makeController()
+        controller.setTalkbackOpen(true)
+        let composer = makeComposer(controller: controller, agent: nil)
+        composer.loadViewIfNeeded()
+        let mic = try XCTUnwrap(descendants(in: composer.view).first {
+            $0.accessibilityIdentifier == "terminal.talkback.mic"
+        } as? TalkbackRoundButton)
+        let line = try XCTUnwrap(mic.superview as? UIStackView)
+        XCTAssertEqual(
+            line.arrangedSubviews.map(\.accessibilityIdentifier),
+            ["terminal.talkback.attach", "terminal.talkback.field", "terminal.talkback.mic", "terminal.talkback.send"]
+        )
+        XCTAssertEqual(mic.style, .plain)
+        XCTAssertEqual(mic.symbol, "mic")
+        XCTAssertEqual(mic.accessibilityLabel, "Dictate")
+        let strip = try XCTUnwrap(descendants(in: composer.view).first {
+            $0.accessibilityIdentifier == "terminal.talkback.dictation"
+        })
+        XCTAssertTrue(strip.isHidden, "LISTENING only once a microphone is open")
+    }
+
+    func testDictatedChunksLandInTheDraftSpacedAgainstTheirNeighbours() {
+        let controller = makeController()
+        controller.setTalkbackOpen(true)
+        let composer = makeComposer(controller: controller, agent: nil)
+        composer.loadViewIfNeeded()
+
+        composer.insertDictated("Fix")
+        XCTAssertEqual(controller.talkback.text, "Fix", "the field is the draft's writer")
+        composer.insertDictated(" the flaky test")
+        XCTAssertEqual(controller.talkback.text, "Fix the flaky test")
+
+        enter("修正", into: composer)
+        composer.insertDictated(" 這個錯誤")
+        XCTAssertEqual(controller.talkback.text, "修正這個錯誤", "no spaces through Chinese")
+    }
+
     // MARK: Helpers
 
     private func makeController(mode: TerminalRoute.Mode = .attach(sessionName: "main")) -> TerminalSessionController {

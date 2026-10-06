@@ -316,7 +316,23 @@ routing, tab moves, keyboard avoidance, or secret fields.
   system dictation, so the app runs recognition itself (Speech +
   AVAudioEngine), requesting on-device recognition wherever the locale
   supports it — terminal input must not leave the device outside the
-  user's own SSH connection. Invariants:
+  user's own SSH connection. The engine (`DictationSession`) also drives the
+  Talkback mic, on visionOS too. Invariants:
+  - **RNNoise sits in front of both engines** when Settings → Voice input
+    has the model and the switch on (`AudioDenoiser`, logged `denoise=` on
+    `dictation-start`): tap buffers resample to 48 kHz mono, re-block into
+    480-sample frames (`AudioFrameAssembler`), go through at int16 scale —
+    so the recognizers see one format whatever the route did. The model is
+    never shipped: `RNNoiseModelStore` downloads upstream's archive, checks
+    upstream's SHA-256, converts the C tables to `dump_weights_blob`'s bytes
+    and checks that blob's own SHA-256 (`Vendor/rnnoise/README.md`).
+  - ⚠ `.record` routes a Bluetooth headset's mic only with
+    `.allowBluetoothHFP` — without it a take with AirPods in listened
+    through the device's own mic.
+  - ⚠ visionOS refuses server-backed recognition outright ("On device
+    models required for speech recognition on this platform"), so
+    `adoptRecognizer` fails a take up front when the language has no
+    on-device model instead of burning six born-dead restarts.
   - **Nothing typed is ever retracted** — a byte handed to
     `TerminalView.send` has left the app, and backspaces would aim at a
     remote composer this app cannot see. Words type as they settle:
@@ -584,7 +600,14 @@ routing, tab moves, keyboard avoidance, or secret fields.
   uploads and refuses a failed chip. **Locking the keyboard closes every box
   in the window, and a box opened while locked releases the lock first** —
   both halves live in `renderTalkback`, so every opener inherits the rule
-  (`testLockingTheKeyboardClosesEveryTalkbackBoxInTheWindow`). ⚠ Not
+  (`testLockingTheKeyboardClosesEveryTalkbackBoxInTheWindow`). **The mic**
+  (between field and ↑, every platform) runs the dictation engine into the
+  FIELD (its own `DictationDriver`, the pane's take type): settled chunks
+  insert at the caret, spaced against their real neighbours
+  (`TalkbackMessage.dictatedInsertion` — none through CJK); the eyebrow
+  turns LISTENING only once the mic is open;
+  SEND mid-take finishes the take, then sends; a tab switch or close cancels
+  it. Pane and composer takes cancel each other (one mic app-wide). ⚠ Not
   verified headlessly: the docked software keyboard under the card (the sim
   reports a hardware keyboard). Hooks: `docs/agents/e2e-headless.md`.
 

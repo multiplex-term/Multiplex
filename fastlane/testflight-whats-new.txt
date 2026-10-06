@@ -4,6 +4,9 @@ NEW SINCE 1.4.2
 • iPhone Duo Split View: a half behaves like an iPhone (deck and terminal in turn, title bar on top); the half beside the clock keeps its chip column.
 • Deck: the NO TMUX / NO HERDR tile's hint wraps across the tile instead of one character per line.
 • iPad: Settings → Window mode → Single-window mode runs Multiplex in one window, as on iPhone — the deck beside the terminal, sessions as tabs. Off by default; takes effect the next time Multiplex launches. In a resized window the title row starts at the window's top edge, clear of the window controls, and the deck header and terminal title bar line up.
+• Message box: a mic beside the send button dictates into the message (every platform, Vision Pro included). Words land as you speak; sending mid-sentence waits for the last words.
+• Dictation: Settings → Voice input downloads a noise-reduction model that filters background noise out of the microphone before dictation hears it.
+• Dictation listens through AirPods (or any Bluetooth headset mic) when one is connected, instead of the device's own microphone.
 
 PLEASE TRY
 1. iPhone Duo, closed: attach two sessions, rotate both ways; the chips should follow the camera, and the tabs and title should never sit under it.
@@ -12,5 +15,8 @@ PLEASE TRY
 4. Split View with Multiplex on the left, then on the right: a normal iPhone layout on the left (title bar, DECK back button), the chip column on the right.
 5. SE-size iPhone in landscape: the terminal should fill the width, with an edge swipe returning to the deck.
 6. iPad: turn on Single-window mode, quit Multiplex from the app switcher and reopen it; the deck and an attached session should share one window. Turn it off and relaunch to get the deck and terminal windows back. Resize and drag the window: there should be no empty band above MULTIPLEX, and the window controls should never cover it.
+7. Open the message box, tap the mic and talk; LISTENING should show in the box's top line and words should appear in the field. Tap send mid-sentence; the last words should be in the message that goes. Try it on Vision Pro too.
+8. Settings → Voice input → DOWNLOAD. Then dictate with a fan or music playing, once with Noise reduction on and once off.
+9. With AirPods in, dictate from the message box or the key rail; the AirPods mic should do the listening.
 
 Feedback: screenshot in TestFlight

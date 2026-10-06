@@ -77,9 +77,9 @@ final class TalkbackTests: XCTestCase {
 
     func testSendStateFollowsEmptinessUploadsAndFailures() {
         var draft = TalkbackDraft()
-        XCTAssertEqual(draft.sendState, .disabled, "nothing to send")
+        XCTAssertEqual(draft.sendState, .empty, "nothing to send")
         draft.text = "   \n"
-        XCTAssertEqual(draft.sendState, .disabled, "blank text is nothing")
+        XCTAssertEqual(draft.sendState, .empty, "blank text is nothing")
         draft.text = "hi"
         XCTAssertEqual(draft.sendState, .ready)
 
@@ -104,7 +104,7 @@ final class TalkbackTests: XCTestCase {
         ], focusRequest: 3)
         draft.clearAfterSend()
         XCTAssertTrue(draft.isEmpty)
-        XCTAssertEqual(draft.sendState, .disabled)
+        XCTAssertEqual(draft.sendState, .empty)
         XCTAssertEqual(draft.focusRequest, 3, "the keyboard request is not part of the message")
     }
 
@@ -117,5 +117,24 @@ final class TalkbackTests: XCTestCase {
     func testPlaceholderNamesTheAgentWhenThereIsOne() {
         XCTAssertEqual(TalkbackMessage.placeholder(agentName: "Claude Code"), "Message Claude Code…")
         XCTAssertEqual(TalkbackMessage.placeholder(agentName: nil), "Message this pane…")
+    }
+
+    // MARK: Dictation
+
+    func testDictatedChunksTakeTheirSpacingFromTheDraftNotTheStream() {
+        func insert(_ chunk: String, _ preceding: Character?, _ following: Character?) -> String {
+            TalkbackMessage.dictatedInsertion(chunk, after: preceding, before: following)
+        }
+        XCTAssertEqual(insert(" hello", nil, nil), "hello", "a draft's start takes no space")
+        XCTAssertEqual(insert("world", "o", nil), " world", "two words meet with one")
+        XCTAssertEqual(insert(" world", " ", nil), "world", "never a double space")
+        XCTAssertEqual(insert(" next", "\n", nil), "next", "a line start takes none")
+        XCTAssertEqual(insert("quickly", " ", "t"), "quickly ", "mid-draft, the far side too")
+        XCTAssertEqual(insert(" done", "(", nil), "done", "none after opening punctuation")
+        XCTAssertEqual(insert("then", "x", "."), " then", "none before closing punctuation")
+        XCTAssertEqual(insert(" 錯誤", "修", nil), "錯誤", "Chinese is written without spaces")
+        XCTAssertEqual(insert("テスト", "の", nil), "テスト", "and so is Japanese")
+        XCTAssertEqual(insert("버그", "그", nil), " 버그", "Korean is written with them")
+        XCTAssertEqual(insert("   ", "a", "b"), "", "nothing heard, nothing typed")
     }
 }

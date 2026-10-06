@@ -30,6 +30,11 @@ packages:
   # the NIOSSH target uses `import NIO` without declaring the product.
   swift-nio-ssh:
     path: Vendor/swift-nio-ssh
+  # Vendored RNNoise (xiph, BSD-3-Clause): the C library only, built with
+  # USE_WEIGHTS_FILE. The model is downloaded on request and verified by
+  # SHA-256 (RNNoiseModelStore); see Vendor/rnnoise/README.md.
+  rnnoise:
+    path: Vendor/rnnoise
 
 # Developer-only StoreKit catalog. It is referenced by the run scheme rather
 # than copied into the app; release builds fetch the matching product from the
@@ -135,8 +140,8 @@ targets:
         # The key rail's dictation key, offered in place of the software
         # keyboard toggle while a hardware keyboard is attached. Both are
         # requested only on the first press of that key.
-        NSMicrophoneUsageDescription: Multiplex listens only while you hold a dictation going from the terminal key bar.
-        NSSpeechRecognitionUsageDescription: Multiplex transcribes your dictation so the words can be typed into the terminal session you are attached to. Recognition stays on device wherever your language supports it.
+        NSMicrophoneUsageDescription: Multiplex listens only while you dictate from the terminal key bar or the message box.
+        NSSpeechRecognitionUsageDescription: Multiplex transcribes your dictation into the terminal session you are attached to, or into the message you are writing. Recognition stays on device wherever your language supports it.
         # multiplex://open?host=…&action=shell|agent — widget taps and
         # automation deep links (parsed by ExternalActionURL).
         CFBundleURLTypes:
@@ -188,6 +193,8 @@ targets:
       - package: Citadel
       - package: swift-nio-ssh
         product: NIOSSH
+      - package: rnnoise
+        product: CRNNoise
       - target: MultiplexWidgets
         embed: true
     settings:
