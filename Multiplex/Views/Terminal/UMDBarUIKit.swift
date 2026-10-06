@@ -1832,6 +1832,10 @@ final class UMDSourceStripView: UIView {
         status.setContentCompressionResistancePriority(.required, for: .horizontal)
         row.addArrangedSubview(title)
         row.addArrangedSubview(status)
+        // A same-size swap leaves the row's frame alone, so nothing re-lays
+        // the fresh views when it lands inside the fold spring: lay them out
+        // now, outside the animation, or they stay at zero size.
+        UIView.performWithoutAnimation { row.layoutIfNeeded() }
     }
 }
 
