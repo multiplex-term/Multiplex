@@ -113,6 +113,12 @@ HISTORY/jump.
   only argv[1] names it; `AgentSignature.match` therefore has a `python*`
   interpreter rung beside `node`/`bun` (argv[1] basename must still be exactly
   `hermes` or the pyproject script `hermes-agent` — never a substring).
+  PM installs (install.sh 2026-09+) publish `.hermes/bin/hermes` as `exec
+  <store python> -I -c '<inline launcher>'` instead: argv[1] is `-I`, so the
+  rung also accepts `-I -c import os, re, sys` + a newline (`\012` in macOS
+  ps, `?` in procps) — the first source line Hermes's own `_BOOTSTRAPS`
+  keys on. Both probe ps stages cut argv[0] to its basename before the
+  120-column clip; Homebrew's framework Python path alone is 113.
   Launch: top-level `-m/--model`, but **no interactive-with-prompt flag** —
   `-q` is one-shot (answers, exits), so a prompt launch chains
   `hermes -q '<prompt>' && hermes --continue` (`-c` resumes the most recent

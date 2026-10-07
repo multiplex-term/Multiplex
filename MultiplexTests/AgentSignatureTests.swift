@@ -271,6 +271,20 @@ final class AgentSignatureTests: XCTestCase {
             .hermes)
         XCTAssertEqual(
             AgentSignature.match(argv: "/opt/venv/bin/python3 /opt/venv/bin/hermes-agent"), .hermes)
+        // PM installs exec an inline launcher (`_launchers._launcher_script`);
+        // macOS ps vis-encodes its newline, procps prints `?`, and a raw
+        // newline would end the row at `sys`.
+        XCTAssertEqual(
+            AgentSignature.match(argv: #"python3 -I -c import os, re, sys\012import contextlib, hashlib"#),
+            .hermes)
+        XCTAssertEqual(
+            AgentSignature.match(argv: "python3.14 -I -c import os, re, sys?import contextlib --tui"),
+            .hermes)
+        XCTAssertEqual(AgentSignature.match(argv: "Python -I -c import os, re, sys"), .hermes)
+        XCTAssertNil(AgentSignature.match(argv: "python3 -I -c import os, re, sysconfig"))
+        XCTAssertNil(AgentSignature.match(argv: "python3 -I -c import os, re, sys, json"))
+        XCTAssertNil(AgentSignature.match(argv: "python3 -c import os, re, sys"))
+        XCTAssertNil(AgentSignature.match(argv: "-zsh -I -c import os, re, sys"))
         // A bare interpreter, or one running something else, never matches.
         XCTAssertNil(AgentSignature.match(argv: "python3"))
         XCTAssertNil(AgentSignature.match(argv: "python3 /srv/app/manage.py runserver"))

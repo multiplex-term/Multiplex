@@ -7,6 +7,8 @@ NEW SINCE 1.4.2
 • Message box: a mic beside the send button dictates into the message (every platform, Vision Pro included). Words land as you speak; sending mid-sentence waits for the last words.
 • Dictation: Settings → Voice input downloads a noise-reduction model that filters background noise out of the microphone before dictation hears it.
 • Dictation listens through AirPods (or any Bluetooth headset mic) when one is connected, instead of the device's own microphone.
+• Hermes Agent is recognized again on hosts with its current installer, so its chips and deck label return.
+• Claude Code: the folder-trust question now raises an agent alert like other prompts.
 
 PLEASE TRY
 1. iPhone Duo, closed: attach two sessions, rotate both ways; the chips should follow the camera, and the tabs and title should never sit under it.
@@ -18,5 +20,7 @@ PLEASE TRY
 7. Open the message box, tap the mic and talk; LISTENING should show in the box's top line and words should appear in the field. Tap send mid-sentence; the last words should be in the message that goes. Try it on Vision Pro too.
 8. Settings → Voice input → DOWNLOAD. Then dictate with a fan or music playing, once with Noise reduction on and once off.
 9. With AirPods in, dictate from the message box or the key rail; the AirPods mic should do the listening.
+10. On a host with a fresh Hermes install, run hermes in a session; the deck tile should read HERMES and the Hermes chips should appear.
+11. Start Claude Code in a folder it has never seen, then leave the session; an alert should ask you to answer the trust question.
 
 Feedback: screenshot in TestFlight

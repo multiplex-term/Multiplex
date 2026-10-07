@@ -194,6 +194,7 @@ final class TmuxProbeTests: XCTestCase {
         XCTAssertEqual(command.components(separatedBy: "tmux -u list-panes -a").count - 1, 1)
         XCTAssertTrue(command.contains(#"roots=$(printf '%s\n' "$panes""#))
         XCTAssertTrue(command.contains(#"if(seen[pid]++)continue"#))
+        XCTAssertTrue(command.contains(#"a=$3;sub(/.*\//,"",a);"#))
         XCTAssertTrue(command.contains("substr(a,1,120)"))
         // The original sentinel + fail-soft contract survives.
         XCTAssertTrue(command.contains("MULTIPLEX_NO_TMUX"))
@@ -296,7 +297,9 @@ final class TmuxProbeTests: XCTestCase {
     func testFocusedPaneProcessFallbackTargetsOnlyItsTTY() {
         let command = TmuxProbe.paneProcessCommand(tty: "/dev/pts/9")
         XCTAssertTrue(command?.contains("ps -t 'pts/9'") == true)
-        XCTAssertTrue(command?.contains("cut -c1-120") == true)
+        // argv[0] is cut to its basename before the clip, like the subtree stage.
+        XCTAssertTrue(command?.contains(#"a=$3;sub(/.*\//,"",a);"#) == true)
+        XCTAssertTrue(command?.contains("substr(a,1,120)") == true)
         XCTAssertNil(TmuxProbe.paneProcessCommand(tty: ""))
 
         XCTAssertEqual(
