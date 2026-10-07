@@ -177,7 +177,10 @@ subject stay inside, the rest is bleed.
 - **Header**: a multiviewer wall whose centre 2×2 cell is exactly the safe
   area — the program monitor with the mark and the wall's only LIVE lamp.
 - **Search results**: the multiplexterm.dev og:image layout in 3:2 —
-  headline left, two whole tiles (NEEDS YOU, LIVE) in the safe area.
+  headline left, three large tiles (NEEDS YOU, LIVE, ATTACH) bleeding off
+  the right edge. The iPhone search card shows the whole canvas at
+  ~350 pt wide (ASC preview), not the safe area: size type for that
+  (headline ~236 px), not for the safe area.
 - No URLs or prices; tiles use the deck's real anatomy and invented hosts.
 
 ## App Preview video (phase 2 — ship screenshots first)

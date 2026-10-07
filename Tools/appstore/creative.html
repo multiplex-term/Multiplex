@@ -9,8 +9,9 @@
 
   Header: a multiviewer wall whose centre 2×2 cell is exactly the safe area —
   the program monitor carrying the mark and the wall's only LIVE lamp.
-  Search results: the og:image layout (multiplexterm.dev) in 3:2 — headline
-  left, two whole tiles in the safe area, the wall bleeding off the edges.
+  Search results: the og:image layout (multiplexterm.dev) in 3:2, sized for
+  the iPhone search card, which shows the whole canvas at ~350 pt wide —
+  headline left, three large tiles bleeding off the right edge.
   Tiles follow the deck's anatomy (DESIGN.md: screen, UMD row, spine); every
   host and address is invented. No URLs or prices: store creative rules.
 -->
@@ -105,10 +106,10 @@
 
 <section class="frame" id="search">
   <div id="search-wall"></div>
-  <div style="position:absolute;left:836px;top:765px;width:1100px;height:1030px;padding-left:64px;display:flex;flex-direction:column;justify-content:center">
-    <div class="lockup" style="font-size:50px"><svg><use href="#mark"/></svg><span class="caps">Multiplex</span></div>
-    <h1 style="font-size:128px;margin-top:56px">Every tmux session, a live monitor on a wall.</h1>
-    <p class="sub" style="font-size:52px;margin-top:44px;max-width:20ch">The SSH terminal for Vision&nbsp;Pro, iPad, and iPhone.</p>
+  <div style="position:absolute;left:220px;top:0;bottom:0;width:2000px;display:flex;flex-direction:column;justify-content:center">
+    <div class="lockup" style="font-size:84px"><svg><use href="#mark"/></svg><span class="caps">Multiplex</span></div>
+    <h1 style="font-size:236px;margin-top:90px;line-height:.98">Every tmux session, live on one wall.</h1>
+    <p class="sub" style="font-size:92px;margin-top:84px;max-width:22ch">The SSH terminal for Vision&nbsp;Pro, iPad, and&nbsp;iPhone.</p>
   </div>
   <div class="guide" style="left:836px;top:765px;width:2168px;height:1030px"></div>
 </section>
@@ -160,13 +161,18 @@ if (frame === 'header') {
   }
 }
 
-// Search: two staggered columns; the inner one puts AGENT (needs you) and
-// MAIN (live) whole inside the safe area.
+// Search: shown whole at card size on iPhone (~0.09 pt per px), so the
+// headline runs ~236 px and three large tiles bleed off the right edge
+// (no telemetry: the edge would clip it).
 if (frame === 'search') {
   const wall = document.getElementById('search-wall');
-  const W = 1000, H = 470, G = 40, y = 790 - 2 * (H + G);
-  [[2000, y, [6, 0, 1, 3, 4, 7]], [2000 + W + G, y - 250, [5, 8, 2, 9, 0, 6]]].forEach(([x, dy, s]) =>
-    s.forEach((n, i) => wall.append(tile(pick(n), x, dy + i * (H + G), W, H, 42))));
+  const ROW = [
+    {n:'agent', lamp:'needs', tel:'', scr:'<span class="hi">✳ Claude Code</span>\nEdit Probe.swift?\n<span class="hi">❯ 1. Yes</span>  2. No', sp:['<b>0 claude</b>','<span class="tick">1 server</span>']},
+    {n:'main', lamp:'live', tel:'', scr:'<span class="hi">$</span> git log --oneline\n9d27f5e fix the probe\n8ff3b21 bump to 1.2.0', sp:['<b>0 editor</b>','1 server']},
+    {n:'gpu-01', tel:'', scr:'<span class="hi">$</span> nvidia-smi\nH100 · 81% · 61°C\nepoch 47/80 · 0.031', sp:['<b>0 train</b>','1 smi']},
+  ];
+  const W = 1560, H = 800, G = 60, y0 = (2560 - 3 * H - 2 * G) / 2;
+  ROW.forEach((f, i) => wall.append(tile(f, 2420, y0 + i * (H + G), W, H, 76)));
 }
 </script>
 </body>
