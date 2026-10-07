@@ -1,0 +1,173 @@
+<!doctype html>
+<!--
+  App Store creative assets — product page header (3840×1646) and search
+  results (3840×2560). compose-creative.sh renders both; ?frame=header|search
+  picks one, ?guides=1 draws Apple's art safe area (measured from Apple's
+  Photoshop templates: header 1646×661 at 1097,493; search results
+  2168×1030 at 836,765 — both centered). Type and the focal subject stay
+  inside it; everything outside is bleed some devices crop away.
+
+  Header: a multiviewer wall whose centre 2×2 cell is exactly the safe area —
+  the program monitor carrying the mark and the wall's only LIVE lamp.
+  Search results: the og:image layout (multiplexterm.dev) in 3:2 — headline
+  left, two whole tiles in the safe area, the wall bleeding off the edges.
+  Tiles follow the deck's anatomy (DESIGN.md: screen, UMD row, spine); every
+  host and address is invented. No URLs or prices: store creative rules.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Multiplex creative assets</title>
+<style>
+  :root{
+    --chassis:#17181A; --bezel:#1E2023; --bezelHi:#2C2F33; --screen:#0A0B0C;
+    --ink:#F2F3F4; --ink2:#9BA1A6; --ink3:#5C6166;
+    --tally:#E5484D; --caution:#E0A33E;
+    --sans:system-ui,-apple-system,"SF Pro Display","Helvetica Neue",sans-serif;
+    --mono:ui-monospace,"SF Mono",Menlo,monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{background:var(--chassis);overflow:hidden}
+  body{color:var(--ink);font-family:var(--sans);-webkit-font-smoothing:antialiased}
+  .frame{position:relative;overflow:hidden;background:var(--chassis);display:none;width:3840px}
+  .frame.on{display:block}
+  #header{height:1646px}
+  #search{height:2560px}
+  .caps{font-weight:700;font-stretch:condensed;text-transform:uppercase;letter-spacing:.1em}
+
+  /* tile: screen, UMD row (name, lamp/badge, telemetry), spine */
+  .tile{position:absolute;background:var(--bezel);border:var(--hair,3px) solid var(--bezelHi);
+        border-radius:var(--r,10px);overflow:hidden;display:flex;flex-direction:column;
+        font-size:var(--fs,40px)}
+  .tile .scr{flex:1;background:var(--screen);margin:.42em .42em 0;padding:.55em .7em;
+             font-family:var(--mono);line-height:1.55;color:var(--ink2);white-space:pre;overflow:hidden}
+  .tile .scr .hi{color:var(--ink)}
+  .tile .umd{display:flex;align-items:center;gap:.6em;padding:.5em .7em .35em}
+  .tile .umd .name{font-weight:750;font-stretch:condensed;text-transform:uppercase;letter-spacing:.09em;font-size:1em}
+  .tile .umd .badge{font-weight:700;font-stretch:condensed;text-transform:uppercase;letter-spacing:.1em;
+       font-size:.6em;color:var(--ink2);border:2px solid var(--bezelHi);padding:.15em .5em}
+  .tile .umd .tel{margin-left:auto;font-family:var(--mono);font-size:.62em;letter-spacing:.06em;color:var(--ink2);white-space:nowrap}
+  .lamp{display:inline-flex;align-items:center;gap:.4em;font-weight:700;font-stretch:condensed;
+        text-transform:uppercase;letter-spacing:.12em;font-size:.68em;white-space:nowrap}
+  .lamp i{width:.62em;height:.62em;border-radius:50%;display:block}
+  .lamp.live{color:var(--tally)} .lamp.live i{background:var(--tally);box-shadow:0 0 .7em rgba(229,72,77,.75)}
+  .lamp.needs{color:var(--caution)} .lamp.needs i{background:var(--caution);box-shadow:0 0 .7em rgba(224,163,62,.7)}
+  .tile .spine{display:flex;gap:.9em;padding:.1em .7em .55em;font-family:var(--mono);font-size:.5em;
+       letter-spacing:.06em;color:var(--ink3);text-transform:uppercase;white-space:nowrap;overflow:hidden}
+  .tile .spine b{font-weight:500;color:var(--ink);border-top:3px solid var(--ink);padding-top:.25em}
+  .tile .spine span{border-top:3px solid var(--bezelHi);padding-top:.25em}
+  .tile .spine .tick{border-top-color:var(--caution)}
+  .tile.ghost{opacity:.55}
+
+  .lockup{display:flex;align-items:center;gap:.42em}
+  .lockup svg{width:1.6em;height:1.6em;flex:none}
+  .lockup .caps{letter-spacing:.16em}
+  h1{font-weight:760;font-stretch:condensed;letter-spacing:-.015em;line-height:1.02;text-wrap:balance}
+  .sub{color:var(--ink2);line-height:1.35}
+
+  .guide{position:absolute;border:6px dashed #3BFF4A;pointer-events:none;display:none;z-index:9}
+  body.guides .guide{display:block}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="mark" viewBox="0 0 1024 1024">
+    <rect width="1024" height="1024" rx="212" fill="#232529"/>
+    <g fill="#F2F3F4"><rect x="96" y="654" width="832" height="68"/><rect x="262" y="284" width="68" height="438"/><rect x="694" y="284" width="68" height="438"/></g>
+    <polyline points="296,304 512,600 728,304" fill="none" stroke="#F2F3F4" stroke-width="68"/>
+    <circle cx="512" cy="600" r="40" fill="#E5484D"/>
+  </symbol>
+  <symbol id="carrier" viewBox="80 270 864 470">
+    <g fill="#F2F3F4"><rect x="96" y="654" width="832" height="68"/><rect x="262" y="284" width="68" height="438"/><rect x="694" y="284" width="68" height="438"/></g>
+    <polyline points="296,304 512,600 728,304" fill="none" stroke="#F2F3F4" stroke-width="68"/>
+    <circle cx="512" cy="600" r="40" fill="#E5484D"/>
+  </symbol>
+</svg>
+
+<section class="frame" id="header">
+  <div id="header-wall"></div>
+  <div style="position:absolute;inset:0;background:radial-gradient(ellipse 2300px 1200px at 50% 50%, rgba(23,24,26,0) 40%, rgba(23,24,26,.82) 100%)"></div>
+  <div class="tile" style="--fs:46px;--r:14px;--hair:4px;left:1097px;top:493px;width:1646px;height:661px;border-color:#3A3E43">
+    <div class="scr" style="display:flex;align-items:center;justify-content:center;gap:64px;white-space:normal;padding:0">
+      <svg style="width:300px;height:163px"><use href="#carrier"/></svg>
+      <div>
+        <div class="caps" style="font-family:var(--sans);font-size:112px;letter-spacing:.14em;color:var(--ink);line-height:1">Multiplex</div>
+        <div style="font-family:var(--sans);font-size:46px;color:var(--ink2);margin-top:22px;letter-spacing:.01em">Every tmux session, live on one wall.</div>
+      </div>
+    </div>
+    <div class="umd"><span class="name">Program</span><span class="lamp live"><i></i>Live</span>
+      <span class="tel">VISION PRO · IPAD · IPHONE</span></div>
+    <div class="spine"><b>0 deck</b><span>1 shell</span><span>2 agents</span><span>3 files</span></div>
+  </div>
+  <div class="guide" style="left:1097px;top:493px;width:1646px;height:661px"></div>
+</section>
+
+<section class="frame" id="search">
+  <div id="search-wall"></div>
+  <div style="position:absolute;left:836px;top:765px;width:1100px;height:1030px;padding-left:64px;display:flex;flex-direction:column;justify-content:center">
+    <div class="lockup" style="font-size:50px"><svg><use href="#mark"/></svg><span class="caps">Multiplex</span></div>
+    <h1 style="font-size:128px;margin-top:56px">Every tmux session, a live monitor on a wall.</h1>
+    <p class="sub" style="font-size:52px;margin-top:44px;max-width:20ch">The SSH terminal for Vision&nbsp;Pro, iPad, and iPhone.</p>
+  </div>
+  <div class="guide" style="left:836px;top:765px;width:2168px;height:1030px"></div>
+</section>
+
+<script>
+const q = new URLSearchParams(location.search);
+const frame = q.get('frame') || 'header';
+document.getElementById(frame).classList.add('on');
+if (q.get('guides')) document.body.classList.add('guides');
+
+const FEEDS = [
+  {n:'deploy', tel:'1 WIN · 2H', scr:'<span class="hi">$</span> kubectl rollout status deploy/api\nWaiting for rollout… 8 of 12 updated\n<span class="hi">$ ▌</span>', sp:['<b>0 zsh</b>']},
+  {n:'agent', lamp:'needs', tel:'1 WIN · CLAUDE · 7H', scr:'<span class="hi">✳ Claude Code</span> · ~/workspace/api\nDo you want to make this edit?\n<span class="hi">❯ 1. Yes</span>  2. No', sp:['<b>0 claude</b>','<span class="tick">1 server</span>']},
+  {n:'gpu-01', tel:'3 WIN · 14H', scr:'<span class="hi">$</span> nvidia-smi\n| 0  H100  81% | 61°C | 412W |\ntrain.py · epoch 47/80 · loss 0.0312', sp:['<b>0 train</b>','1 smi','2 logs']},
+  {n:'main', lamp:'live', tel:'2 WIN · 1 CLIENT · 7H', scr:'<span class="hi">$</span> git log --oneline -2\n9d27f5e keep notes under the cap\n8ff3b21 bump to 1.2.0', sp:['<b>0 editor</b>','1 server']},
+  {n:'logs', tel:'1 WIN · 3D', scr:'<span class="hi">$</span> journalctl -fu api\napi[812]: GET /health 200 2ms\napi[812]: GET /v1/jobs 200 14ms', sp:['<b>0 tail</b>']},
+  {n:'codex', tel:'1 WIN · CODEX · 4D', scr:'<span class="hi">›</span> Explain this codebase\n\n  ~/workspace/web · high', sp:['<b>0 codex</b>']},
+  {n:'build', tel:'2 WIN · 40M', scr:'<span class="hi">$</span> pnpm build\n✓ 214 modules transformed\nbuilt in 3.2s', sp:['<b>0 build</b>','1 dev']},
+  {n:'db', tel:'1 WIN · 9D', scr:'<span class="hi">$</span> psql jobs\njobs=# select count(*) from runs;\n 48213', sp:['<b>0 psql</b>']},
+  {n:'htop', tel:'1 WIN · 21D', scr:'  CPU [|||||||||     42.1%]\n  Mem [||||||     7.9G/32G]\n  Load 1.82 1.64 1.40', sp:['<b>0 htop</b>']},
+  {n:'scratch', tel:'1 WIN · 1H', scr:'<span class="hi">$ ▌</span>', sp:['<b>0 zsh</b>']},
+];
+const pick = i => FEEDS[i % FEEDS.length];
+
+function tile(f, x, y, w, h, fs, ghost) {
+  const t = document.createElement('div');
+  t.className = 'tile' + (ghost ? ' ghost' : '');
+  Object.assign(t.style, {left: x + 'px', top: y + 'px', width: w + 'px', height: h + 'px'});
+  t.style.setProperty('--fs', fs + 'px');
+  const lamp = f.lamp === 'live' ? '<span class="lamp live"><i></i>Live</span>'
+             : f.lamp === 'needs' ? '<span class="lamp needs"><i></i>Needs you</span>'
+             : '<span class="badge">Attach</span>';
+  t.innerHTML = `<div class="scr">${f.scr}</div>
+    <div class="umd"><span class="name">${f.n}</span>${lamp}<span class="tel">${f.tel}</span></div>
+    <div class="spine">${f.sp.map(s => s.startsWith('<') ? s : `<span>${s}</span>`).join('')}</div>`;
+  return t;
+}
+
+// Header: the grid's 2×2 centre cell is the program tile, so the safe area
+// always shows one whole monitor. Only the program wears LIVE.
+if (frame === 'header') {
+  const wall = document.getElementById('header-wall');
+  const G = 30, W = (1646 - G) / 2, H = (661 - G) / 2;
+  let k = 0;
+  for (let r = -2; r <= 3; r++) for (let c = -2; c <= 3; c++) {
+    if ((r === 0 || r === 1) && (c === 0 || c === 1)) continue;
+    const f = pick(k++ * 3 + r + 6);
+    wall.append(tile({...f, lamp: f.lamp === 'live' ? null : f.lamp}, 1097 + c * (W + G), 493 + r * (H + G), W, H, 34, true));
+  }
+}
+
+// Search: two staggered columns; the inner one puts AGENT (needs you) and
+// MAIN (live) whole inside the safe area.
+if (frame === 'search') {
+  const wall = document.getElementById('search-wall');
+  const W = 1000, H = 470, G = 40, y = 790 - 2 * (H + G);
+  [[2000, y, [6, 0, 1, 3, 4, 7]], [2000 + W + G, y - 250, [5, 8, 2, 9, 0, 6]]].forEach(([x, dy, s]) =>
+    s.forEach((n, i) => wall.append(tile(pick(n), x, dy + i * (H + G), W, H, 42))));
+}
+</script>
+</body>
+</html>

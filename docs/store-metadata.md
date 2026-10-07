@@ -389,6 +389,7 @@ can still be permission-gated or require App Store Connect UI work.
 | Verify support, marketing, and privacy URLs are live | Browser/hosting check before submission |
 | Attach the first IAP to the first app-version submission | App Store Connect UI |
 | App Preview videos | App Store Connect UI |
+| Product page header + search results creative | App Store Connect UI, Asset Library (`Tools/appstore/compose-creative.sh` renders them; fastlane 2.240.1 has no support) |
 | Final submission and signed Sandbox/TestFlight transaction checks | App Store Connect/TestFlight |
 
 The visionOS public screenshot lane is best-effort: if `deliver` rejects the

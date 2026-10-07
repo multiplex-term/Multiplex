@@ -164,6 +164,22 @@ for the frame change alone (only where the slab band hides a shot's story):
   `bundle exec fastlane store_screenshots` to upload (one deliver per
   platform; device class inferred from pixel size within each).
 
+## Product page header + search results creative
+
+`Tools/appstore/creative.html`, rendered by `compose-creative.sh` into
+`fastlane/screenshots/creative/en-US/` (`header.png` 3840×1646,
+`search-results.png` 3840×2560) for a hand upload in App Store Connect →
+Asset Library (fastlane 2.240.1 has no support). Apple's art safe area (from
+its Photoshop templates) is small and centered: header 1646×661 at
+(1097, 493), search results 2168×1030 at (836, 765); type and the focal
+subject stay inside, the rest is bleed.
+
+- **Header**: a multiviewer wall whose centre 2×2 cell is exactly the safe
+  area — the program monitor with the mark and the wall's only LIVE lamp.
+- **Search results**: the multiplexterm.dev og:image layout in 3:2 —
+  headline left, two whole tiles (NEEDS YOU, LIVE) in the safe area.
+- No URLs or prices; tiles use the deck's real anatomy and invented hosts.
+
 ## App Preview video (phase 2 — ship screenshots first)
 
 15–30 s, no hands/devices, capture in-app footage only, first 3 s must work
