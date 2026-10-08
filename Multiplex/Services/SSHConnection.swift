@@ -811,6 +811,66 @@ actor SSHConnection {
         }
     }
 
+    // MARK: Line channel (agent browser bridge)
+
+    /// Opens a login shell WITHOUT a PTY and types `payload` as its first
+    /// stdin bytes — the agent browser's `mpx bridge` launch. No PTY means no
+    /// echo and no line discipline, so the channel stays a clean byte pipe
+    /// for the bridge's JSON lines once the shell execs it; a login shell
+    /// (unlike exec) brings the host's own PATH. Returns once the channel is
+    /// open; `onClose` fires exactly once when it ends. It takes the
+    /// connection's one channel slot — `openShell`'s — so `write` feeds it.
+    func openLineChannel(
+        payload: String,
+        onStdout: @Sendable @escaping (Data) -> Void,
+        onStderr: @Sendable @escaping (Data) -> Void,
+        onClose: @Sendable @escaping (String?) -> Void
+    ) async throws {
+        guard let client else { throw SSHConnectionError.notConnected }
+        guard shellTask == nil else { return }
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let gate = OneShotGate(continuation)
+            shellTask = Task {
+                do {
+                    try await client.withTTY { inbound, outbound in
+                        await self.storeWriter(outbound)
+                        try await outbound.write(ByteBuffer(string: payload))
+                        gate.open()
+                        for try await chunk in inbound {
+                            switch chunk {
+                            case .stdout(let buffer): onStdout(Data(buffer.readableBytesView))
+                            case .stderr(let buffer): onStderr(Data(buffer.readableBytesView))
+                            }
+                        }
+                    }
+                    onClose(nil)
+                } catch {
+                    let detail = self.shortDescription(of: error)
+                    if !gate.fail(SSHConnectionError.connectFailed(detail)) {
+                        onClose(detail)
+                    }
+                }
+            }
+        }
+    }
+
+    /// A TCP connection made BY THE HOST to `host:port` (an SSH
+    /// direct-tcpip channel) — the agent browser's host route, so a page's
+    /// traffic leaves from the host's network, never the device's. Bytes are
+    /// `ByteBuffer`s both ways; `initialize` adds the caller's handlers.
+    func openDirectTCPIP(
+        host target: String,
+        port: Int,
+        initialize: @escaping @Sendable (Channel) -> EventLoopFuture<Void>
+    ) async throws -> Channel {
+        guard let client else { throw SSHConnectionError.notConnected }
+        let originator = try SocketAddress(ipAddress: "127.0.0.1", port: 0)
+        return try await client.createDirectTCPIPChannel(
+            using: .init(targetHost: target, targetPort: port, originatorAddress: originator),
+            initialize: initialize
+        )
+    }
+
     func write(_ data: Data) async throws {
         guard let stdinWriter else { throw SSHConnectionError.notConnected }
         try await stdinWriter.write(ByteBuffer(bytes: data))

@@ -13,7 +13,7 @@ final class AppRuntime {
     let entitlements: EntitlementStore
     let attention: AttentionCenter
     let localNetworkAccess = LocalNetworkAccessMonitor()
-    let networkChanges = NetworkChangeMonitor()
+    let networkChanges: NetworkChangeMonitor
     let appLock = AppLockStore()
     let externalActions = ExternalActionRouter.shared
     let bind = BindController.shared
@@ -21,6 +21,8 @@ final class AppRuntime {
     /// `didFinishLaunchingWithOptions` (BGTaskScheduler rejects anything
     /// later) and re-scheduled whenever the app leaves.
     let backgroundRefresh: BackgroundRefresh
+    /// `mpx browser` for hosts that opted in (Host Settings ▸ Agent Browser).
+    let agentBrowser: AgentBrowserService
 
     init() {
         // Attention wiring: every probe's events funnel through one center,
@@ -44,6 +46,9 @@ final class AppRuntime {
             hub: hub,
             attention: attention
         )
+        let networkChanges = NetworkChangeMonitor()
+        self.networkChanges = networkChanges
+        agentBrowser = AgentBrowserService(store: store, workspace: workspace, networkChanges: networkChanges)
 
         // Background keep-alive: the assertion is taken only when a host the
         // user opted in has something for the extra time to do, so the
@@ -75,6 +80,7 @@ final class AppRuntime {
         }
         BackgroundActivity.shared.start()
         backgroundRefresh.start()
+        agentBrowser.start()
         #if DEBUG
         backgroundRefresh.installDebugHook()
         #endif

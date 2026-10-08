@@ -32,6 +32,23 @@ app.multiplexterm.multiplex`):
   prompt); `"enabled": false` proves the never-dials promise against a
   silent `state/sshd.log`; `"backgroundKeepAlive": true` starts the host
   opted into background keep-alive (nothing can tap that switch headlessly).
+  `"agentBrowser": true` starts the agent browser's bridge for the host.
+- `MULTIPLEX_AGENT_MPX=<path on the host>` — the bridge launch tries this
+  `mpx` first (a dev build: `../mpx-cli/target/debug/mpx`; the Mac's
+  Homebrew `mpx` may predate `bridge` → the link reports `outdatedCLI`).
+  Then drive it from the Mac: `mpx browser open localhost:<port> --session
+  main`, `snapshot`, `click eN`, … The hidden `mpx browser probe` reports
+  in-window / on-screen / scene + app state and timer/rAF health — the
+  scheduling instrument. `MULTIPLEX_AGENT_INACTIVE=throttle|suspend|none`
+  overrides the agent tab's `inactiveSchedulingPolicy`. iPad: launching
+  Safari backgrounds the app; on visionOS it does not.
+  `MULTIPLEX_AGENT_ROUTE=device` switches back to the old device route;
+  `MULTIPLEX_AGENT_BROWSER_HOST=<name>|first` opts a host in for one
+  launch without writing its synced record (real-device runs: pass env
+  with `devicectl device process launch --environment-variables`; crash
+  logs via `devicectl device copy from --domain-type systemCrashLogs`).
+  ⚠ The simulator proxies `localhost`; a real device never does — prove
+  loopback forwarding on hardware.
 - `MULTIPLEX_AUTO_ATTACH=main,scratch` — opens a terminal per entry via the
   real Attach route; `+` inside an entry groups sessions as tabs of one
   window. Fires once per process. `MULTIPLEX_AUTO_ATTACH_HOST=devbox` names

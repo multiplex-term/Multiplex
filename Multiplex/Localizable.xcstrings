@@ -1648,6 +1648,86 @@
         }
       }
     },
+    "Agent browser" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "エージェントブラウザ"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent 瀏覽器"
+          }
+        }
+      }
+    },
+    "Agents on this host can open and operate web pages in Multiplex" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このホストのエージェントが Multiplex で Web ページを開いて操作できます"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這部主機上的 Agent 可以在 Multiplex 中開啟並操作網頁"
+          }
+        }
+      }
+    },
+    "Let agents drive a browser" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "エージェントにブラウザを操作させる"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "讓 Agent 操作瀏覽器"
+          }
+        }
+      }
+    },
+    "Off: agents on this host cannot open pages in Multiplex." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "オフ：このホストのエージェントは Multiplex でページを開けません。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "關閉：這部主機上的 Agent 無法在 Multiplex 中開啟網頁。"
+          }
+        }
+      }
+    },
+    "While Multiplex is open, agents on this host can open web pages beside your terminal and read, click, and type in them with `mpx browser` (mpx 0.2 or later; `mpx skill install` teaches an agent how). Agent tabs load through this host over SSH, so they see the host's network and never your device's; they keep their own cookies and never see your own tabs." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Multiplex が開いている間、このホストのエージェントは `mpx browser` でターミナルの横に Web ページを開き、読み取り・クリック・入力ができます（mpx 0.2 以降が必要。`mpx skill install` でエージェントに使い方を教えられます）。エージェントのタブは SSH 経由でこのホストを通して読み込まれるため、見えるのはホストのネットワークだけで、あなたのデバイスのネットワークには届きません。独自の Cookie を持ち、あなた自身のタブは見えません。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Multiplex 開啟時，這部主機上的 Agent 可以用 `mpx browser` 在終端機旁開啟網頁，並讀取、點按與輸入內容（需要 mpx 0.2 以上；`mpx skill install` 會教 Agent 如何使用）。Agent 標籤頁經由 SSH 透過這部主機載入，只看得到主機的網路，碰不到你裝置所在的網路；它們有自己的 Cookie，也看不到你自己的標籤頁。"
+          }
+        }
+      }
+    },
     "✳ AGENT HELPERS · PRO" : {
       "localizations" : {
         "ja" : {

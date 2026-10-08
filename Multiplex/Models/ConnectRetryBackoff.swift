@@ -5,7 +5,8 @@ struct ConnectRetryBackoff {
     private static let delays: [Double] = [5, 10, 20, 40, 60]
 
     private var consecutiveFailures = 0
-    private var retryNotBefore: Date?
+    /// When the next attempt may start; nil when it may start now.
+    private(set) var retryNotBefore: Date?
 
     func shouldAttempt(now: Date) -> Bool {
         guard let retryNotBefore else { return true }

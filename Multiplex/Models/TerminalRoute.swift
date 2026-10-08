@@ -246,10 +246,13 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
     /// (the dev-server case, where the port *is* the page's identity), the
     /// host otherwise. `⌗` — U+2317 VIEWDATA SQUARE — is the viewport mark
     /// everywhere; a page never wears a tally dot.
-    static func viewportLabel(_ urlString: String) -> String {
-        guard let url = URL(string: urlString) else { return "⌗" }
-        if let port = url.port { return "⌗ \(port)" }
-        return "⌗ \(url.host() ?? "page")"
+    /// `agent` marks a tab `mpx browser` drives (`⌗ AGENT 5173`) — composed
+    /// here, so no caller patches the mark into the string afterwards.
+    static func viewportLabel(_ urlString: String, agent: Bool = false) -> String {
+        let mark = agent ? "⌗ AGENT" : "⌗"
+        guard let url = URL(string: urlString) else { return mark }
+        if let port = url.port { return "\(mark) \(port)" }
+        return "\(mark) \(url.host() ?? "page")"
     }
 
     /// The file viewer's tab-cell/UMD label: `▤` + the last path component.

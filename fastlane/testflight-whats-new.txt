@@ -1,3 +1,4 @@
 NEW SINCE 1.5.0
+• Agent browser (experimental): turn on Host Settings → Agent browser and agents on that host can open, read, and operate web pages beside your terminal with `mpx browser`. Needs mpx 0.2 on the host.
 
 Feedback: screenshot in TestFlight
