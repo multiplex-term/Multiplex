@@ -347,8 +347,14 @@ final class DeckWindowUIKitTests: XCTestCase {
             reduceMotion: true,
             lifecycleDriver: recorder.driver
         )
+        // The simulator's own stamp falls behind at every notes release; a
+        // harness reading it would queue the card ahead of what it tests.
+        // The release-notes tests swap in a scratch store of their own.
+        let controller = DeckWindowViewController(configuration: configuration)
+        controller.releaseNotesStore = ReleaseNotesStore(defaults: defaults)
+        controller.releaseNotesStore.markSeen(ReleaseNotes.version)
         return Harness(
-            controller: DeckWindowViewController(configuration: configuration),
+            controller: controller,
             bind: bind,
             themes: themes,
             externalActions: externalActions

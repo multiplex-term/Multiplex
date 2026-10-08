@@ -29,19 +29,22 @@ final class ReleaseNotesViewUIKitTests: XCTestCase {
         XCTAssertNotNil(chip(named: "whatsNew.done", in: controller.view))
     }
 
-    func testTheVisionCardMentionsGuideAndThePhoneCardDoesNot() {
+    /// iPhone Duo leads the phone's card and never reaches Vision Pro, whose
+    /// card names what it left out instead.
+    func testThePhoneCardShowsIPhoneDuoAndTheVisionCardDoesNot() {
         let vision = WhatsNewViewController(platform: .vision)
         render(vision, width: 620, height: 700)
         let renderedVision = renderedText(in: vision.view).joined(separator: "\n")
-        XCTAssertTrue(renderedVision.contains("Guide in the three-dot menu"))
-        XCTAssertTrue(renderedVision.contains("CTRL PANELS NO LONGER STACK"))
+        XCTAssertFalse(renderedVision.contains("THE SHELL FOLLOWS IPHONE DUO"))
+        XCTAssertTrue(renderedVision.contains("A MIC IN THE MESSAGE BOX"))
+        XCTAssertTrue(renderedVision.contains("Claude Code's folder-trust question"))
 
         let phone = WhatsNewViewController(platform: .phone)
         render(phone, width: 375, height: 700)
         let renderedPhone = renderedText(in: phone.view).joined(separator: "\n")
-        XCTAssertFalse(renderedPhone.contains("Guide in the three-dot menu"))
-        XCTAssertTrue(renderedPhone.contains("CTRL PANELS NO LONGER STACK"))
-        XCTAssertTrue(renderedPhone.contains("ARRANGE THE KEYS YOUR WAY"))
+        XCTAssertTrue(renderedPhone.contains("THE SHELL FOLLOWS IPHONE DUO"))
+        XCTAssertTrue(renderedPhone.contains("A MIC IN THE MESSAGE BOX"))
+        XCTAssertTrue(renderedPhone.contains("AirPods dictation"))
     }
 
     func testBothChipsReportThroughTheirOwnCallback() throws {
@@ -88,7 +91,7 @@ final class ReleaseNotesViewUIKitTests: XCTestCase {
     // MARK: The full record
 
     /// Every release's record, each under its own header — a reader updating
-    /// from 1.2 straight to 1.4.2 is owed every intervening release's story too.
+    /// from 1.2 straight to 1.5 is owed every intervening release's story too.
     func testTheLogCarriesEveryReleasesChangesForItsPlatform() {
         let controller = ReleaseLogViewController(platform: .pad)
         render(controller, width: 720, height: 4_800)

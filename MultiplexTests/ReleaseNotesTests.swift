@@ -4,29 +4,54 @@ import XCTest
 final class ReleaseNotesTests: XCTestCase {
     // MARK: Content
 
-    /// The card speaks for the newest release only — 1.4.2's features, not a
+    /// The card speaks for the newest release only — 1.5's features, not a
     /// merge of every release the log still carries.
     func testTheCardAnnouncesTheNewestRelease() {
-        XCTAssertEqual(ReleaseNotes.version, "1.4.2")
-        XCTAssertEqual(ReleaseNotes.releases.map(\.version), ["1.4.2", "1.4.1", "1.4", "1.3.1", "1.3"])
+        XCTAssertEqual(ReleaseNotes.version, "1.5")
+        XCTAssertEqual(
+            ReleaseNotes.releases.map(\.version),
+            ["1.5", "1.4.2", "1.4.1", "1.4", "1.3.1", "1.3"]
+        )
         XCTAssertEqual(ReleaseNotes.releases.first?.version, ReleaseNotes.version)
         XCTAssertEqual(ReleaseNotes.promise, ReleaseNotes.current.promise)
     }
 
-    func testTheCardShowsTheSameFourChangesOnEveryPlatform() {
+    /// Each device leads with the change that is about it: iPhone Duo on a
+    /// phone, single-window mode on an iPad. Vision Pro gets neither, so its
+    /// card is the dictation story plus Hermes.
+    func testTheCardLeadsWithTheRowAboutThisPlatform() {
+        XCTAssertEqual(
+            ReleaseNotes.highlights(for: .phone).map(\.id),
+            ["duo", "composermic", "noisereduction", "landscape"]
+        )
+        XCTAssertEqual(
+            ReleaseNotes.highlights(for: .pad).map(\.id),
+            ["singlewindow", "composermic", "noisereduction", "airpods"]
+        )
+        XCTAssertEqual(
+            ReleaseNotes.highlights(for: .vision).map(\.id),
+            ["composermic", "noisereduction", "airpods", "hermes"]
+        )
+    }
+
+    func testTheLayoutChangesKeepTheirPlatformScoping() {
         for platform in ReleaseNotePlatform.allCases {
-            XCTAssertEqual(
-                ReleaseNotes.highlights(for: platform).map(\.id),
-                ["arrangekeys", "shells", "viewport", "ctrl"]
-            )
+            let ids = ReleaseNotes.entries(for: platform).map(\.id)
+            XCTAssertEqual(ids.contains("duo"), platform == .phone)
+            XCTAssertEqual(ids.contains("landscape"), platform == .phone)
+            XCTAssertEqual(ids.contains("singlewindow"), platform == .pad)
+            XCTAssertTrue(ids.contains("composermic"))
         }
     }
 
-    func testGuideKeepsItsPlatformScoping() {
+    func testTheBankedOneFourTwoRecordKeepsItsPlatformScoping() throws {
+        let v142 = try XCTUnwrap(ReleaseNotes.releases.first { $0.version == "1.4.2" })
         for platform in ReleaseNotePlatform.allCases {
-            let ids = ReleaseNotes.entries(for: platform).map(\.id)
-            XCTAssertEqual(ids.contains("guide"), platform == .vision)
-            XCTAssertTrue(ids.contains("ctrl"))
+            XCTAssertEqual(
+                v142.highlights(for: platform).map(\.id),
+                ["arrangekeys", "shells", "viewport", "ctrl"]
+            )
+            XCTAssertEqual(v142.entries(for: platform).map(\.id).contains("guide"), platform == .vision)
         }
     }
 
@@ -255,7 +280,7 @@ final class ReleaseNotesTests: XCTestCase {
     /// 1.3.1's notes to the people who already saw 1.3's.
     func testANewNotesReleaseReopensTheCard() {
         XCTAssertEqual(
-            ReleaseNotesGate.decide(lastSeen: "1.4.1", current: ReleaseNotes.version, installHasPriorUse: true),
+            ReleaseNotesGate.decide(lastSeen: "1.4.2", current: ReleaseNotes.version, installHasPriorUse: true),
             .show
         )
         XCTAssertEqual(
@@ -280,7 +305,7 @@ final class ReleaseNotesTests: XCTestCase {
     /// alone, compares equal, and must not re-present old notes.
     func testABuildWithoutItsOwnNotesDoesNotReopenTheCard() {
         XCTAssertEqual(
-            ReleaseNotesGate.decide(lastSeen: "1.4.2", current: ReleaseNotes.version, installHasPriorUse: true),
+            ReleaseNotesGate.decide(lastSeen: "1.5", current: ReleaseNotes.version, installHasPriorUse: true),
             .nothing
         )
         XCTAssertEqual(

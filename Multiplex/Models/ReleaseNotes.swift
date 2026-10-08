@@ -138,7 +138,7 @@ struct ReleaseNotesRelease: Equatable {
 enum ReleaseNotes {
     /// Newest first. The launch card speaks only for the first; the log
     /// carries them all.
-    static let releases: [ReleaseNotesRelease] = [v142, v141, v14, v131, v13]
+    static let releases: [ReleaseNotesRelease] = [v15, v142, v141, v14, v131, v13]
 
     /// The release the launch card announces.
     static var current: ReleaseNotesRelease { releases[0] }
@@ -176,6 +176,181 @@ enum ReleaseNotes {
     static func alsoLine(for platform: ReleaseNotePlatform) -> String? {
         current.alsoLine(for: platform)
     }
+
+    // MARK: - 1.5
+
+    private static let v15 = ReleaseNotesRelease(
+        version: "1.5",
+        promise: "Talk to your agent through the message box, with background "
+            + "noise filtered out — and a layout that follows the device "
+            + "you hold.",
+        entries: [
+            ReleaseNoteEntry(
+                id: "duo",
+                bank: .terminal,
+                title: "The shell follows iPhone Duo",
+                body: "On the closed display the chips stack beside the clock, "
+                    + "on the camera's side in landscape. Folded as a book, the "
+                    + "deck takes the left page and the terminal the right; "
+                    + "folded as a laptop, the terminal sits above the fold and "
+                    + "the deck below. HIDE hands the whole display to the "
+                    + "terminal and stays hidden when you rotate. In Split View "
+                    + "a half behaves like an iPhone.",
+                tag: "iPhone Duo",
+                platforms: [.phone],
+                mention: nil
+            ),
+            ReleaseNoteEntry(
+                id: "landscape",
+                bank: .terminal,
+                title: "Small iPhones get the whole width in landscape",
+                body: "The deck rail steps aside whenever it would leave the "
+                    + "terminal too narrow, so SE-size phones get a full-width "
+                    + "terminal. Swipe from the edge to return to the deck.",
+                tag: "iPhone",
+                platforms: [.phone],
+                mention: "full-width landscape on small iPhones"
+            ),
+            ReleaseNoteEntry(
+                id: "singlewindow",
+                bank: .terminal,
+                title: "Single-window mode on iPad",
+                body: "Settings → Window mode → Single-window mode runs "
+                    + "Multiplex in one window, as on iPhone: the deck beside "
+                    + "the terminal, sessions as tabs. Off by default; it takes "
+                    + "effect the next time Multiplex launches.",
+                tag: "iPad",
+                platforms: [.pad],
+                mention: "single-window mode"
+            ),
+            ReleaseNoteEntry(
+                id: "composermic",
+                bank: .terminal,
+                title: "A mic in the message box",
+                body: "Tap the mic beside the send button and talk; words land "
+                    + "in the message as you speak. Sending mid-sentence waits "
+                    + "for the last words.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: "a mic in the message box"
+            ),
+            ReleaseNoteEntry(
+                id: "noisereduction",
+                bank: .terminal,
+                title: "Dictation filters out background noise",
+                body: "Settings → Voice input downloads a noise-reduction model "
+                    + "that cleans the microphone before dictation hears it. "
+                    + "Turn Noise reduction off there at any time.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: "noise reduction for dictation"
+            ),
+            ReleaseNoteEntry(
+                id: "airpods",
+                bank: .terminal,
+                title: "Dictation listens through AirPods",
+                body: "With AirPods or another Bluetooth headset connected, "
+                    + "its microphone does the listening instead of the "
+                    + "device's own.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: "AirPods dictation"
+            ),
+            ReleaseNoteEntry(
+                id: "hermes",
+                bank: .terminal,
+                title: "Hermes Agent is recognized again",
+                body: "Hosts with Hermes Agent's current installer get its "
+                    + "chips and deck label back.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: "Hermes Agent recognized again"
+            ),
+            ReleaseNoteEntry(
+                id: "claudetrust",
+                bank: .away,
+                title: "Claude Code's folder-trust question alerts you",
+                body: "Claude Code asking whether to trust a folder now raises "
+                    + "an agent alert, like its other prompts.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: "an alert for Claude Code's folder-trust question"
+            ),
+            ReleaseNoteEntry(
+                id: "notmux",
+                bank: .elsewhere,
+                title: "The NO TMUX hint reads across the tile",
+                body: "A NO TMUX or NO HERDR tile's hint wraps across the tile "
+                    + "instead of one character per line.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: nil
+            ),
+        ],
+        highlights: [
+            ReleaseNoteHighlight(
+                id: "duo",
+                covers: ["duo"],
+                title: "The shell follows iPhone Duo",
+                body: "Closed, folded as a book or as a laptop — deck and "
+                    + "terminal take the layout the pose suggests.",
+                tag: "iPhone Duo",
+                platforms: [.phone]
+            ),
+            ReleaseNoteHighlight(
+                id: "singlewindow",
+                covers: ["singlewindow"],
+                title: "Single-window mode",
+                body: "Settings → Window mode puts the deck and your sessions "
+                    + "in one window, as on iPhone.",
+                tag: "iPad",
+                platforms: [.pad]
+            ),
+            ReleaseNoteHighlight(
+                id: "composermic",
+                covers: ["composermic"],
+                title: "A mic in the message box",
+                body: "Tap it and talk; words land as you speak, and send "
+                    + "waits for the last ones.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all
+            ),
+            ReleaseNoteHighlight(
+                id: "noisereduction",
+                covers: ["noisereduction"],
+                title: "Dictation filters out background noise",
+                body: "Download the model in Settings → Voice input.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all
+            ),
+            ReleaseNoteHighlight(
+                id: "landscape",
+                covers: ["landscape"],
+                title: "Full width in landscape",
+                body: "SE-size iPhones give the terminal the whole width; "
+                    + "swipe from the edge for the deck.",
+                tag: "iPhone",
+                platforms: [.phone]
+            ),
+            ReleaseNoteHighlight(
+                id: "airpods",
+                covers: ["airpods"],
+                title: "Dictation listens through AirPods",
+                body: "A connected Bluetooth headset's mic does the listening.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all
+            ),
+            ReleaseNoteHighlight(
+                id: "hermes",
+                covers: ["hermes"],
+                title: "Hermes Agent is recognized again",
+                body: "Its chips and deck label return on hosts with the "
+                    + "current installer.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all
+            ),
+        ]
+    )
 
     // MARK: - 1.4.2
 
