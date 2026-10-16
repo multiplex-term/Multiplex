@@ -1,47 +1,102 @@
-// swift-tools-version:5.9
+// swift-tools-version:6.2
 
 import PackageDescription
 import Foundation
 
+let environment = ProcessInfo.processInfo.environment
+let embeddedCheck = environment["SWIFTTERM_EMBEDDED_CHECK"] == "1"
+let wasmSmokeBuild = environment["SWIFTTERM_WASM"] == "1"
+let webWasmBuild = environment["SWIFTTERM_WEB_WASM"] == "1"
+let webWasmTests = environment["SWIFTTERM_WEB_WASM_TESTS"] == "1"
+let embeddedWasmBuild = environment["SWIFTTERM_EMBEDDED_WASM"] == "1"
+let documentationBuild = environment["SWIFTTERM_DOCC"] == "1"
+
 // A package manifest is compiled and run on the HOST, so `os(Linux)` is false
-// when cross-compiling from macOS to Linux — and the Apple/Mac/iOS sources are
-// then handed to the Linux target, which fails on `import CoreText`. There is
-// no way for a manifest to see the destination, so allow the exclude to be
-// forced explicitly.
+// when cross-compiling from macOS to Linux. Allow Apple sources to be excluded
+// explicitly for that case.
 let excludeAppleSources =
-    ProcessInfo.processInfo.environment["SWIFTTERM_EXCLUDE_APPLE"] == "1"
+    environment["SWIFTTERM_EXCLUDE_APPLE"] == "1"
 #if os(Linux) || os(Windows)
 let platformExcludes = ["Apple", "Mac", "iOS"]
 #else
 let platformExcludes: [String] = excludeAppleSources ? ["Apple", "Mac", "iOS"] : []
 #endif
 
-let isGitHubActions = ProcessInfo.processInfo.environment["GITHUB_ACTIONS"] == "true"
-let disableBenchmark = true
-let benchmarkDependencies: [Package.Dependency] = (isGitHubActions || disableBenchmark) ? [] : [
-    .package(url: "https://github.com/ordo-one/package-benchmark", .upToNextMajor(from: "1.29.11"))
+let buildInfoTargets: [Target] = [
+    .executableTarget(
+        name: "SwiftTermBuildInfoGenerator",
+        path: "Sources/SwiftTermBuildInfoGenerator"
+    ),
+    .plugin(
+        name: "SwiftTermBuildInfoPlugin",
+        capability: .buildTool(),
+        dependencies: ["SwiftTermBuildInfoGenerator"]
+    )
 ]
+
+// Multiplex patch: upstream links tayloraswift/swift-png (and its transitive
+// rarestype/h) here for the non-Apple PortableGraphics trait only. Apple
+// builds decode through ImageIO and never link it, but SwiftPM still resolves
+// every declared dependency — so the app would fetch two unaudited
+// repositories for code it never compiles. Dropped; restore both this list
+// and the `.package` entry below to build the vendored copy for Linux/WASI.
+let graphicsDependencies: [Target.Dependency] = []
+
+var portableTraitSettings: [SwiftSetting] = [
+    .define("SWIFTTERM_EMBEDDED", .when(traits: ["Embedded"])),
+    .define("SWIFTTERM_WASM", .when(traits: ["Wasm"])),
+]
+
+#if compiler(>=6.3)
+// SwiftPM 6.3+ still forwards trait-conditioned Embedded feature settings to
+// WASM executable link steps. Full-runtime WASI builds must not see that
+// setting, while native and explicitly Embedded WASM builds still need it.
+if (!wasmSmokeBuild && !webWasmBuild && !webWasmTests) || embeddedWasmBuild {
+    portableTraitSettings.append(.enableExperimentalFeature("Embedded", .when(traits: ["Embedded"])))
+}
+#else
+// SwiftPM 6.2 treats any Embedded feature setting as active when it plans a
+// target, even when the setting is trait-conditioned, and then injects the
+// Embedded-only mergeable-symbols workaround into normal debug builds.
+// Omit the setting on that toolchain so Xcode 26 users stay on the normal
+// linker path; true Embedded trait builds require SwiftPM 6.3 or later.
+portableTraitSettings.append(.define("SWIFTTERM_EMBEDDED_NEEDS_SWIFT_6_3", .when(traits: ["Embedded"])))
+#endif
+
+// SwiftPM symbol graph generation enables all package traits. Suppress the
+// portable compiler modes so DocC builds the normal host API.
+var swiftTermSettings: [SwiftSetting] = documentationBuild ? [] : portableTraitSettings
+
+if embeddedCheck {
+    swiftTermSettings += [
+        .define("SWIFTTERM_EMBEDDED"),
+        .unsafeFlags(["-Werror", "EmbeddedRestrictions"]),
+    ]
+}
+
+let swiftTermTarget: Target = .target(
+    name: "SwiftTerm",
+    dependencies: graphicsDependencies,
+    path: "Sources/SwiftTerm",
+    exclude: platformExcludes + [
+        "Mac/README.md",
+        "Apple/Metal/Shaders.metal",
+    ],
+    swiftSettings: swiftTermSettings,
+    plugins: [
+        .plugin(name: "SwiftTermBuildInfoPlugin")
+    ]
+)
 
 #if os(Windows)
-let products: [Product] = [
+var products: [Product] = [
     .executable(name: "SwiftTermFuzz", targets: ["SwiftTermFuzz"]),
-    .library(
-        name: "SwiftTerm",
-        targets: ["SwiftTerm"]
-    ),
+    .library(name: "SwiftTerm", targets: ["SwiftTerm"]),
 ]
 
-let targets: [Target] = [
-    .target(
-        name: "SwiftTerm",
-        dependencies: [],
-        path: "Sources/SwiftTerm",
-        exclude: platformExcludes + ["Mac/README.md"]
-//        swiftSettings: [
-//            .unsafeFlags(["-enforce-exclusivity=none"])
-//        ]
-    ),
-    .executableTarget (
+var targets: [Target] = [
+    swiftTermTarget,
+    .executableTarget(
         name: "SwiftTermFuzz",
         dependencies: ["SwiftTerm"],
         path: "Sources/SwiftTermFuzz"
@@ -49,57 +104,29 @@ let targets: [Target] = [
     .testTarget(
         name: "SwiftTermTests",
         dependencies: ["SwiftTerm"],
-        path: "Tests/SwiftTermTests"
+        path: "Tests/SwiftTermTests",
+        resources: [
+            .copy("Fixtures/xterm-ghostty.infocmp"),
+            .copy("Fixtures/GhosttyFuzzCorpus"),
+            .copy("KittyGraphics/Fixtures")
+        ]
     )
-]
+] + buildInfoTargets
 #else
-let products: [Product] = [
+var products: [Product] = [
     .executable(name: "SwiftTermFuzz", targets: ["SwiftTermFuzz"]),
     .executable(name: "termcast", targets: ["Termcast"]),
-    .library(
-        name: "SwiftTerm",
-        targets: ["SwiftTerm"]
-    ),
+    .library(name: "SwiftTerm", targets: ["SwiftTerm"]),
 ]
 
-let benchmarkTargets: [Target] = (isGitHubActions || disableBenchmark) ? [] : [
+var targets: [Target] = [
+    swiftTermTarget,
     .executableTarget(
-        name: "SwiftTermBenchmarks",
-        dependencies: [
-            "SwiftTerm",
-            .product(name: "Benchmark", package: "package-benchmark")
-        ],
-        path: "Benchmarks/SwiftTermBenchmarks",
-        plugins: [
-            .plugin(name: "BenchmarkPlugin", package: "package-benchmark")
-        ]
-    )
-]
-
-let targets: [Target] = [
-    .target(
-        name: "SwiftTerm",
-        //
-        // We can not use Swift Subprocess, because there is no way of configuring the child process to
-        // be a controlling terminal, as it is posix-spawn based.
-//        dependencies: [
-//            .product(name: "Subprocess", package: "swift-subprocess", condition: .when(platforms: [.macOS, .linux]))
-//        ],
-        path: "Sources/SwiftTerm",
-        exclude: platformExcludes + ["Mac/README.md"],
-        resources: [
-            .process("Apple/Metal/Shaders.metal")
-        ]
-//        swiftSettings: [
-//            .unsafeFlags(["-enforce-exclusivity=none"])
-//        ]
-    ),
-    .executableTarget (
         name: "SwiftTermFuzz",
         dependencies: ["SwiftTerm"],
         path: "Sources/SwiftTermFuzz"
     ),
-    .executableTarget (
+    .executableTarget(
         name: "Termcast",
         dependencies: [
             "SwiftTerm",
@@ -110,25 +137,127 @@ let targets: [Target] = [
     .testTarget(
         name: "SwiftTermTests",
         dependencies: ["SwiftTerm"],
-        path: "Tests/SwiftTermTests"
+        path: "Tests/SwiftTermTests",
+        resources: [
+            .copy("Fixtures/xterm-ghostty.infocmp"),
+            .copy("Fixtures/GhosttyFuzzCorpus"),
+            .copy("KittyGraphics/Fixtures")
+        ]
     )
-] + benchmarkTargets
+] + buildInfoTargets
 #endif
+
+if embeddedCheck {
+    // The host tests and executables use APIs that are deliberately absent
+    // from the portable core. Keep check mode scoped to that core and its
+    // restriction tests, as the former portable-target manifest did.
+    products = [
+        .library(name: "SwiftTerm", targets: ["SwiftTerm"]),
+    ]
+    targets = [swiftTermTarget] + buildInfoTargets
+    targets.append(
+        .testTarget(
+            name: "SwiftTermEmbeddedTests",
+            dependencies: ["SwiftTerm"],
+            path: "Tests/SwiftTermEmbeddedTests"
+        )
+    )
+}
+
+if wasmSmokeBuild || webWasmBuild || webWasmTests {
+    // Embedded WASM executables need two link fixes that plain SwiftPM does
+    // not provide: the Embedded Swift Unicode data tables, and tolerance for
+    // the duplicate symbols that appear because the importer re-emits the
+    // library code that SwiftPM also links as objects. The library directory
+    // lives inside the WASM SDK bundle, so scripts/build-wasm.sh locates it
+    // and passes it through this environment variable. These targets only
+    // exist for opt-in builds, so consumers never see the unsafe flags.
+    let embeddedWasmLinkerSettings: [LinkerSetting]
+    if let libDir = environment["SWIFTTERM_WASM_EMBEDDED_LIBDIR"] {
+        embeddedWasmLinkerSettings = [
+            .unsafeFlags([
+                "-L\(libDir)",
+                "-lswiftUnicodeDataTables",
+                "-Xlinker", "--allow-multiple-definition",
+            ], .when(traits: ["Embedded"]))
+        ]
+    } else {
+        embeddedWasmLinkerSettings = []
+    }
+    if wasmSmokeBuild {
+        products.append(
+            .executable(name: "SwiftTermWasmSmoke", targets: ["SwiftTermWasmSmoke"])
+        )
+        targets.append(
+            .executableTarget(
+                name: "SwiftTermWasmSmoke",
+                dependencies: ["SwiftTerm"],
+                path: "Sources/SwiftTermWasmSmoke",
+                // The smoke program must compile in the same language mode as the
+                // library: with the Embedded trait, a plain-Swift target cannot
+                // link against the $e-mangled Embedded module.
+                swiftSettings: portableTraitSettings,
+                linkerSettings: embeddedWasmLinkerSettings
+            )
+        )
+    }
+    if webWasmBuild || webWasmTests {
+        products.append(.executable(name: "SwiftTermWebWasm", targets: ["SwiftTermWebWasm"]))
+        targets.append(.executableTarget(
+            name: "SwiftTermWebWasm",
+            dependencies: ["SwiftTerm"],
+            path: "Sources/SwiftTermWebWasm",
+            swiftSettings: portableTraitSettings + [
+                .define("SWIFTTERM_WEB_EMBEDDED", .when(traits: ["Embedded"])),
+                .unsafeFlags(["-parse-as-library"]),
+            ] + (embeddedCheck ? [
+                .define("SWIFTTERM_EMBEDDED"),
+                .define("SWIFTTERM_WEB_EMBEDDED"),
+            ] : []),
+            linkerSettings: embeddedWasmLinkerSettings + (webWasmBuild ? [
+                .unsafeFlags(["-Xclang-linker", "-mexec-model=reactor"])
+            ] : [])
+        ))
+        if webWasmTests {
+            targets.append(.testTarget(
+                name: "SwiftTermWebWasmTests",
+                dependencies: ["SwiftTerm", "SwiftTermWebWasm"],
+                path: "Tests/SwiftTermWebWasmTests"
+            ))
+        }
+    }
+}
 
 let package = Package(
     name: "SwiftTerm",
     platforms: [
         .iOS(.v14),
-        (disableBenchmark ? .macOS(.v11) : .macOS(.v13)),
+        // The snapshot Embedded Swift standard library needs macOS 14. Do not
+        // raise the package minimum for that: Embedded macOS builds pass an
+        // explicit `--triple arm64-apple-macosx14.0` (or later) instead.
+        .macOS(.v11),
         .tvOS(.v13),
         .visionOS(.v1)
     ],
     products: products,
+    traits: [
+        .default(enabledTraits: ["PortableGraphics"]),
+        .trait(name: "PortableGraphics", description: "PNG and zlib decoders for the full non-Apple core"),
+        .trait(
+            name: "Embedded",
+            description: "Foundation-free portable core for Embedded Swift"
+        ),
+        .trait(
+            name: "Wasm",
+            description: "Full WASI core with Foundation and graphics; use Embedded separately for the reduced core",
+            enabledTraits: ["PortableGraphics"]
+        ),
+    ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.0.0"),
         .package(url: "https://github.com/apple/swift-docc-plugin", from: "1.4.3"),
-    ] + benchmarkDependencies,
+    ],
 //        .package(url: "https://github.com/swiftlang/swift-subprocess", revision: "426790f3f24afa60b418450da0afaa20a8b3bdd4")
     targets: targets,
-    swiftLanguageVersions: [.v5]
+    swiftLanguageModes: [.v6]
 )

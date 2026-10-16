@@ -11,6 +11,54 @@
 //  Created by Miguel de Icaza on 3/4/20.
 //
 
+#if !SWIFTTERM_EMBEDDED
+struct IOSKittyInputPolicy {
+    static func isModifierKey(_ key: KittyFunctionalKey) -> Bool {
+        key.isKittyModifierKey
+    }
+
+    static func shouldReportModifierDuringComposition(
+        key: KittyFunctionalKey,
+        flags: KittyKeyboardFlags
+    ) -> Bool {
+        flags.contains(.reportAllKeys) && isModifierKey(key)
+    }
+
+    static func shouldScrollPageLocally(key: KittyFunctionalKey,
+                                        modifiers: KittyKeyboardModifiers,
+                                        applicationCursor: Bool) -> Bool {
+        guard key == .pageUp || key == .pageDown, !applicationCursor else {
+            return false
+        }
+        return modifiers.intersection([.shift, .alt, .ctrl, .super]).isEmpty
+    }
+
+    static func repeatEvent(from event: KittyKeyEvent,
+                            eventType: KittyKeyboardEventType,
+                            composing: Bool) -> KittyKeyEvent {
+        var result = event
+        result.eventType = eventType
+        result.composing = composing
+        return result
+    }
+}
+
+struct IOSKittyReportedPresses<Key: Hashable> {
+    private var keys: Set<Key> = []
+
+    mutating func record(_ key: Key) {
+        keys.insert(key)
+    }
+
+    mutating func finish(_ key: Key) -> Bool {
+        keys.remove(key) != nil
+    }
+
+    mutating func removeAll() {
+        keys.removeAll()
+    }
+}
+
 #if os(iOS) || os(visionOS)
 import Foundation
 import UIKit
@@ -19,12 +67,13 @@ import CoreGraphics
 import GameController
 import os
 import SwiftUI
+import UniformTypeIdentifiers
 #if canImport(MetalKit)
 import MetalKit
 #endif
 
 @available(iOS 14.0, *)
-internal var log: Logger = Logger(subsystem: "org.tirania.SwiftTerm", category: "msg")
+internal let log = Logger(subsystem: "org.tirania.SwiftTerm", category: "msg")
 
 public extension Notification.Name {
     /// Posted when TerminalView's controlModifier is reset to false
@@ -46,13 +95,22 @@ public extension Notification.Name {
  * true.  This means that Option-Letter is hijacked for terminal purposes
  * to send the sequence ESC-Letter.   Users can toggle this with command-option-o
  *
- * Call the `getTerminal` method to get a reference to the underlying `Terminal` that backs this
- * view.
- *
  * Use the `configureNativeColors()` to set the defaults colors for the view to match the OS
  * defaults, otherwise, this uses its own set of defaults colors.
+ *
+ * ## Terminal ownership
+ *
+ * `TerminalView` owns its mutable `Terminal`. It does not expose that terminal.
+ * Parsing, rendering, and input can occur on different threads. Use copied reads
+ * such as ``terminalDimensions``, ``terminalStateSnapshot()``, and
+ * ``getBufferAsData(kind:encoding:)``. Use ``feed(byteArray:)`` for received
+ * output and ``send(data:)`` for user input. Use ``pasteText(_:)`` for text
+ * paste. See <doc:MigratingFrom1To2> for the complete access map.
  */
 open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollViewDelegate, TerminalDelegate, UIPointerInteractionDelegate, UIGestureRecognizerDelegate {
+    let coreGraphicsRenderCache = CoreGraphicsRenderCache()
+    let frameCaptureCache = FrameCaptureCache()
+
     private enum PendingKoreanResyllabificationResult {
         case none
         case prefixReinserted
@@ -61,40 +119,6 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 
     public static var textInputDebugEnabled: Bool = ProcessInfo.processInfo.environment["SWIFTTERM_TEXT_INPUT_DEBUG"] == "1"
     internal static var textInputLogCounter: Int = 0
-
-    // Multiplex patch: inactive tabs must keep parsing bytes so their buffer
-    // and scrollback remain current, but they do not need UIKit invalidations,
-    // cursor placement, or accessibility notifications while fully obscured.
-    // The lock matters because feed() is allowed on a background thread.
-    private let renderUpdatesLock = NSLock()
-    private var _renderUpdatesEnabled = true
-    public var renderUpdatesEnabled: Bool {
-        get {
-            renderUpdatesLock.lock()
-            defer { renderUpdatesLock.unlock() }
-            return _renderUpdatesEnabled
-        }
-        set {
-            renderUpdatesLock.lock()
-            let shouldRefresh = newValue && !_renderUpdatesEnabled
-            _renderUpdatesEnabled = newValue
-            renderUpdatesLock.unlock()
-            guard shouldRefresh else { return }
-            let refresh = { [weak self] in
-                guard let self else { return }
-                self.terminal.refresh(
-                    startRow: 0,
-                    endRow: max(0, self.terminal.rows - 1)
-                )
-                self.queuePendingDisplay()
-            }
-            if Thread.isMainThread {
-                refresh()
-            } else {
-                DispatchQueue.main.async(execute: refresh)
-            }
-        }
-    }
 
     struct FontSet {
         public let normal: UIFont
@@ -156,8 +180,11 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /**
      * The delegate that the TerminalView uses to interact with its hosting
      */
-    public weak var terminalDelegate: TerminalViewDelegate?
-
+    public weak var terminalDelegate: TerminalViewDelegate? {
+        didSet {
+            refreshKittyClipboardCapabilities()
+        }
+    }
     /// Controls how the Metal renderer builds GPU buffers each frame.
     ///
     /// The default is ``MetalBufferingMode/perRowPersistent``, which caches
@@ -170,18 +197,29 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     public var metalBufferingMode: MetalBufferingMode = .perRowPersistent
     
     /**
-     * If set, and the the client application has requested mouse events to be sent, this will
-     * send the events.   If this value if false, then a secondary codepath is enabled that will
-     * always allow the selection or the scrolling/panning to take place, regardless of the
-     * request from the client application.
+     * Whether mouse events are sent to the application running in the terminal once it has
+     * requested them.
      *
-     * Additionally, during a pan operation if allowMouseReporting is false, then this turns
-     * panning operations into sending cursor key commands.
+     * While this is true and the application tracks the mouse, a tap is reported as a click and
+     * a one-finger vertical drag is reported as bounded wheel presses; two fingers keep scrolling
+     * the local scrollback. On an alternate screen that does not track the mouse, Alternate
+     * Scroll Mode turns the same one-finger drag into cursor keys.
      *
-     * If a client application has not indicated any use for mouse events, then this setting
-     * does not do anything, and selection and panning are still processed.
+     * While this is false the terminal never reports the mouse. Taps select, and one-finger
+     * drags return to UIKit, which scrolls the local scrollback as for any scroll view. No
+     * cursor keys are generated in place of the reports.
+     *
+     * If the application has not requested mouse events this setting changes nothing: selection
+     * and scrolling are handled locally either way.
      */
-    public var allowMouseReporting: Bool = true
+    public var allowMouseReporting: Bool = true {
+        didSet {
+            guard allowMouseReporting != oldValue, terminal != nil else { return }
+            // A host that declines reports must get one-finger scrolling back even when the
+            // application still has mouse tracking enabled.
+            refreshProgramScrollGesture()
+        }
+    }
 
     /// Controls how link tracking resolves hovered links:
     /// `.explicit` = OSC 8 only, `.implicit` = explicit + implicit fallback, `.none` = off.
@@ -191,39 +229,14 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     public var linkHighlightMode: LinkHighlightMode = .hover {
         didSet {
             linkHighlightRange = nil
-            terminal.updateFullScreen()
-            queuePendingDisplay()
+            withTerminal { $0.updateFullScreen() }
+            frameDriver.markDirty()
         }
     }
 
-    /// Multiplex patch: allow a resolved link to be activated without the
-    /// pointer state `linkHighlightMode` demands. Touch never hovers, so a
-    /// touch-only device could otherwise activate explicit OSC 8 links at
-    /// best and implicit URLs never. This only affects activation — hover
-    /// underlining still follows `linkHighlightMode`.
-    public var linkActivationIgnoresHighlight = false
-
-    /// Multiplex patch: app-owned policy for an activated link. Implicit
-    /// detection matches filesystem paths (`./src/main.swift`, `/etc/hosts`)
-    /// as readily as URLs, and those are everywhere in terminal output — a
-    /// long press over one must still open the selection menu. Returning
-    /// false declines the match and lets the gesture continue as if no link
-    /// were there. Install with a weak capture: the view owns this closure.
-    ///
-    /// With no handler installed, upstream behavior stands: the delegate's
-    /// `requestOpenLink` is called and the gesture is consumed.
-    ///
-    /// `rowTexts` is the implicit match split at its hard-wrap seams
-    /// (empty for explicit links and single-row matches) — the app-side
-    /// glue detector's evidence.
-    ///
-    /// `position` is the pressed cell in buffer coordinates (row includes
-    /// the scrollback offset) — on a multiplexer's composited screen it
-    /// names the pane under the finger, which the app needs to resolve a
-    /// relative path against that pane's cwd rather than the active one's.
-    public var linkActivationHandler: ((_ link: String, _ params: [String: String], _ rowTexts: [String], _ position: Position) -> Bool)?
-
-    /// Multiplex patch: shared activation path for tap and long press.
+    /// Multiplex patch: shared activation path for tap and long press. With
+    /// no `linkActivationHandler` installed, upstream behavior stands: the
+    /// delegate's `requestOpenLink` is called and the gesture is consumed.
     func activateLink(_ result: (link: String, params: [String: String], rowTexts: [String]), at position: Position) -> Bool
     {
         if let linkActivationHandler {
@@ -239,9 +252,14 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     private var pointerInteraction: UIPointerInteraction?
     private var hoverGesture: UIHoverGestureRecognizer?
     private var didFinishSetup = false
+    private enum UIShutdownState {
+        case active
+        case stopping
+        case stopped
+    }
+    private var uiShutdownState = UIShutdownState.active
     var linkHighlightRange: [Terminal.LinkMatch.RowRange]?
     private var lastPointerLocation: CGPoint?
-    private var lastMacSecondaryClickAt: TimeInterval = -.infinity
     
     /**
      * If set, this turns Option-letter keystrokes into an escape + keystroke combination
@@ -264,41 +282,57 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
         set {
             caretView?.tracksFocus = newValue
+#if canImport(MetalKit)
+            frameDriver.markDirty()
+#endif
         }
     }
+
+    /// Keeps a blinking cursor visible while input is being sent by restarting
+    /// its blink interval after every input payload. Defaults to `true`.
+    public var cursorBlinkResetsOnInput = true
+
     var accessibility: AccessibilityService = AccessibilityService()
     var search: SearchService!
     var debug: UIView?
-    var pendingDisplay: Bool = false
-    /// Output received shortly after local input is likely echo or prompt redraw;
-    /// render it without the 16.67ms frame-rate throttle so typing feels responsive.
-    var lastUserInputUptimeNs: UInt64 = 0
-    /// Guards lastUserInputUptimeNs, which is written on the main thread and
-    /// read from the (possibly background) feed thread.
-    let userInputLock = NSLock()
-    let interactiveInputDisplayWindowNs: UInt64 = 150_000_000
-    /// Multiplex patch: keystroke→paint echo sampling. The first feed chunk
-    /// after each user-input stamp yields one latency sample (ms) to the
-    /// handler, invoked on the feed thread. The sampled stamp is guarded by
-    /// `userInputLock` alongside the stamp it compares against. The window
-    /// is wider than the immediate-display one: a 300 ms-RTT link's echo is
-    /// still an echo, but output seconds after the last keystroke is stream.
-    public var echoLatencySampleHandler: ((Double) -> Void)?
-    var lastEchoSampledInputNs: UInt64 = 0
-    /// App-tunable so window policy never needs a re-patch on a bump.
-    public var echoLatencySampleWindowNs: UInt64 = 2_000_000_000
+    let viewStateLock = NSLock()
+    /// Cropped bitmaps for the Kitty placements on screen, reused between
+    /// repaints. Building a crop copies the visible pixels and makes a new
+    /// image, which is far too expensive to repeat on every frame - a cursor
+    /// blink alone would rebuild every placement.
+    nonisolated let kittyPlacementImageCache = Locked([KittyPlacementImageKey: TTImage]())
+    nonisolated let crossThreadState = Locked(TerminalViewCrossThreadState())
+    nonisolated let frameSignal = FrameDriverSignal()
+    public nonisolated let inputSender = TerminalInputSender()
+    public nonisolated let feedSender = TerminalFeedSender()
+    final var frameDriver: FrameDriver!
+    // viewStateLock-guarded mirror of terminal.reverseColors (DECSCNM); see
+    // effectiveNativeForegroundColor for why draw paths must not read the
+    // terminal's flag directly. Access via reverseColorsActiveValue()/
+    // setReverseColorsActive().
+    var textBlinkVisible = true
+    var textBlinkTimer: Timer?
+    var textBlinkObservers: [(NotificationCenter, NSObjectProtocol)] = []
+    var textBlinkApplicationActive = true
+    /// Owns the mutable snapshot and renderer state. The view exchanges only
+    /// checked-Sendable frame values with it.
+    nonisolated let renderOwner = TerminalRenderOwner()
+
+    var cursorColorIsDefault = true
+    var cursorTextColorIsDefault = true
+    var reverseColorsSavedLayerBackground: CGColor?
+
+    // Guards the diagnostics counters, which the parse thread increments once
+    // per batch. Deliberately not the terminal lock: see recordFedBytes.
+    /// Builds styled segments for the Core Graphics draw path. The Metal
+    /// renderer owns a separate instance, so the two never share a cache.
+    let textBuilder = SnapshotTextBuilder()
+
+    nonisolated let diagnosticsState = Locked(TerminalView.Diagnostics())
 #if canImport(MetalKit)
     var metalView: MTKView?
-    var metalRenderer: MetalTerminalRenderer?
-    var pendingMetalDisplay: Bool = false
+    private var metalDrawDelegate: MetalMainActorDrawDelegate?
     private var useMetalRenderer = false
-    var metalDirtyRange: ClosedRange<Int>?
-    /// The cursor position last submitted to the Metal renderer. Used to
-    /// detect pure cursor-only moves (no rows dirty) such as the
-    /// CSI Ps C / CSI Ps D sequences shells emit in response to Option+Arrow
-    /// word jumps, which would otherwise leave the cursor visually stuck
-    /// because `MTKView` is paused and only redraws on demand.
-    var lastRenderedCursor: (x: Int, y: Int, hidden: Bool)?
 
     /// Whether the terminal view is currently using the Metal GPU renderer.
     ///
@@ -312,16 +346,12 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     var caretView: CaretView?
     var _lineSpacing: CGFloat = 1.0
     var terminal: Terminal!
-    // Multiplex patch: keep IME composition local in a floating label until
-    // UIKit commits it; provisional marked text must never enter the PTY.
-    var markedTextOverlay: UILabel?
     private var progressBarView: TerminalProgressBarView?
     private var progressReportTimer: Timer?
-    private var lastProgressValue: UInt8?
     
     /// Tracks the selection state of the terminal, and can be used to set it
     /// programmatically (see `SelectionService`).
-    public var selection: SelectionService!
+    var selection: SelectionService!
     var attrStrBuffer: CircularList<ViewLineInfo>!
     var images:[(image: TerminalImage, col: Int, row: Int)] = []
 
@@ -330,8 +360,6 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     var attributes: [Attribute: [NSAttributedString.Key:Any]] = [:]
     var urlAttributes: [Attribute: [NSAttributedString.Key:Any]] = [:]
 
-    // Timer to display the terminal buffer
-    var link: CADisplayLink!
     // Cache for the colors in the 0..255 range
     var colors: [UIColor?] = Array(repeating: nil, count: 256)
     var trueColors: [Attribute.Color:UIColor] = [:]
@@ -428,12 +456,16 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         self.fontSet = FontSet (font: FontSet.defaultFont)
         cellDimension = CellDimension(width: 1, height: 1)
         super.init (coder: coder)
+        _nativeFg = UIColor.label
+        _nativeBg = UIColor.systemBackground
         setup()
     }
 
     // Shared tail of the frame-based designated initializers
     private func completeInit()
     {
+        _nativeFg = UIColor.label
+        _nativeBg = UIColor.systemBackground
         isAccessibilityElement = true
         accessibilityTraits.formUnion([.staticText, .causesPageTurn])
         accessibilityTextualContext = .sourceCode
@@ -446,26 +478,45 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         indicatorStyle = .white
         
         setupKeyboardButtonColors()
-        setupDisplayUpdates ();
+        setupFrameDriver()
+        frameDriver.setWindowAttachedOnMain(window != nil)
+        eventQueue.configure(
+            onDrain: { [weak self] event in
+                self?.applyTerminalEvent(event)
+            },
+            canDeliverInline: { [weak self] in
+                guard let self, let terminal = self.terminal else { return false }
+                return !terminal.terminalLock.isLockedByCurrentThread
+            })
         setupOptions ()
+        configureInputSender()
+        configureFeedSender()
         setupProgressBar()
         setupGestures ()
         setupLinkReportingInteractions()
         setupAccessoryView ()
+        setupTextBlinking()
         didFinishSetup = true
     }
 
-    // Multiplex patch: a detached terminal has lost its input session
-    // (transport/view teardown or tab reparenting), so discard its local composition.
     open override func didMoveToWindow() {
         super.didMoveToWindow()
-        guard window == nil else { return }
-        // Multiplex patch: the shared menu cannot still belong to a view that
-        // has left its window, so drop this view's record of it rather than
-        // let it swallow the first tap after the tab comes back.
-        contextMenuPresented = false
-        guard _markedTextRange != nil || markedTextOverlay != nil else { return }
-        resetInputBuffer()
+        // Multiplex patch: a detached terminal has lost its input session
+        // (transport/view teardown or tab reparenting), so discard its local
+        // composition. The shared menu cannot still belong to a view that has
+        // left its window either, so drop this view's record of it rather
+        // than let it swallow the first tap after the tab comes back.
+        if window == nil {
+            contextMenuPresented = false
+            if _markedTextRange != nil || markedTextOverlay != nil {
+                resetInputBuffer()
+            }
+        }
+        guard uiShutdownState == .active else { return }
+        frameDriver.setWindowAttachedOnMain(window != nil)
+        refreshCachedViewState()
+        frameDriver.markDirty()
+        updateTextBlinkLifecycle()
     }
 
 #if canImport(MetalKit)
@@ -520,7 +571,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             // Multiplex patch: the terminal's ground is painted by the view's
             // layer (and, under the app's GLASS appearance, by live glass
             // behind a clear nativeBackgroundColor). The renderer clears to
-            // nativeBackgroundColor including its alpha, so the Metal surface
+            // the background color including its alpha, so the Metal surface
             // must composite with alpha instead of the MTKView default opaque
             // black.
             mtkView.isOpaque = false
@@ -532,11 +583,18 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             // displays.
             if let metalLayer = mtkView.layer as? CAMetalLayer {
                 metalLayer.colorspace = CGColorSpace(name: CGColorSpace.sRGB)
-                // Composite through the layer when the background is translucent
-                metalLayer.isOpaque = backgroundOpacity >= 1.0
+                // Multiplex patch: always composite through the layer. The
+                // appearance (GLASS's clear background) can change after this
+                // surface exists, so a one-time opacity read would freeze it.
+                metalLayer.isOpaque = false
             }
-            let renderer = try MetalTerminalRenderer(view: mtkView, terminalView: self)
-            mtkView.delegate = renderer
+            let renderer = try MetalTerminalRenderer(target: mtkView)
+            let frameSignal = frameDriver.signal
+            renderer.requestRedraw = { frameSignal.markDirty() }
+            renderOwner.installMetalRenderer(renderer, needsExternalDraw: false)
+            let drawDelegate = MetalMainActorDrawDelegate(terminalView: self,
+                                                          renderOwner: renderOwner)
+            mtkView.delegate = drawDelegate
             if let caretView = caretView {
                 insertSubview(mtkView, belowSubview: caretView)
                 caretView.disableAnimations()
@@ -545,29 +603,32 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                 addSubview(mtkView)
             }
             metalView = mtkView
-            metalRenderer = renderer
+            metalDrawDelegate = drawDelegate
             setNeedsDisplay(bounds)
             mtkView.setNeedsDisplay(mtkView.bounds)
         } else {
-            metalView?.removeFromSuperview()
-            metalView = nil
-            metalRenderer = nil
-            if let caretView = caretView {
-                caretView.isHidden = false
-                caretView.updateCursorStyle()
+            precondition(terminal == nil || !terminal.terminalLock.isLockedByCurrentThread,
+                         "Metal teardown cannot wait while the terminal lock is held")
+            guard renderOwner.removeMetalRenderer() else {
+                throw MetalError.rendererBusy
             }
-            setNeedsDisplay(bounds)
+            detachMetalRendererUI()
         }
     }
-#endif
 
-    func setupDisplayUpdates ()
-    {
-        link = CADisplayLink(target: self, selector: #selector(step))
-            
-        link.add(to: .current, forMode: .default)
-        suspendDisplayUpdates()
+    /// Detaches the Metal surface after the render owner has released it.
+    private func detachMetalRendererUI() {
+        metalView?.delegate = nil
+        metalView?.removeFromSuperview()
+        metalView = nil
+        metalDrawDelegate = nil
+        if let caretView = caretView {
+            caretView.isHidden = false
+            caretView.updateCursorStyle()
+        }
+        setNeedsDisplay(bounds)
     }
+#endif
 
     private func setupProgressBar() {
         let bar = TerminalProgressBarView(frame: .zero)
@@ -579,41 +640,27 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                 bar.topAnchor.constraint(equalTo: frameLayoutGuide.topAnchor),
                 bar.leadingAnchor.constraint(equalTo: frameLayoutGuide.leadingAnchor),
                 bar.trailingAnchor.constraint(equalTo: frameLayoutGuide.trailingAnchor),
-                bar.heightAnchor.constraint(equalToConstant: 2)
+                bar.heightAnchor.constraint(equalToConstant: TerminalProgressBarView.preferredHeight)
             ])
         } else {
             bar.autoresizingMask = [.flexibleWidth, .flexibleBottomMargin]
-            bar.frame = CGRect(x: 0, y: 0, width: bounds.width, height: 2)
+            bar.frame = CGRect(x: 0, y: 0, width: bounds.width, height: TerminalProgressBarView.preferredHeight)
         }
         progressBarView = bar
-    }
-
-    private func resolveProgress(for report: Terminal.ProgressReport) -> UInt8? {
-        switch report.state {
-        case .remove:
-            return nil
-        case .set:
-            return report.progress ?? 0
-        case .error:
-            return report.progress ?? lastProgressValue
-        case .indeterminate:
-            return nil
-        case .pause:
-            return report.progress ?? lastProgressValue ?? 100
-        }
     }
 
     private func resetProgressReportTimer() {
         progressReportTimer?.invalidate()
         progressReportTimer = Timer.scheduledTimer(withTimeInterval: 15.0, repeats: false) { [weak self] _ in
-            self?.clearProgressReport()
+            MainActor.assumeIsolated {
+                self?.clearProgressReport()
+            }
         }
     }
 
     private func clearProgressReport() {
         progressReportTimer?.invalidate()
         progressReportTimer = nil
-        lastProgressValue = nil
         progressBarView?.apply(state: .remove, progress: nil)
     }
 
@@ -623,31 +670,35 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             return
         }
 
-        let resolvedProgress = resolveProgress(for: report)
-        if let resolvedProgress {
-            lastProgressValue = resolvedProgress
-        }
-        progressBarView?.apply(state: report.state, progress: resolvedProgress)
+        progressBarView?.apply(state: report.state, progress: report.progress)
         resetProgressReportTimer()
     }
     
-    @objc
-    func step(displaylink: CADisplayLink) {
-        updateDisplay()
-    }
-
-    func startDisplayUpdates()
-    {
-        link.isPaused = false
-    }
-    
-    func suspendDisplayUpdates()
-    {
-        link.isPaused = true
-    }
-    
-    public func updateUiClosed() {
-        self.link.invalidate()
+    /// Permanently releases UI drivers and renderer resources.
+    ///
+    /// An owner must call this method when it permanently releases the view.
+    /// A temporary `window == nil` transition is not permanent teardown.
+    ///
+    /// Returns `false` when committed GPU work is still active. In that case,
+    /// the complete Metal graph stays attached and the owner must retry.
+    @MainActor
+    @discardableResult
+    public func updateUiClosed() -> Bool {
+        guard uiShutdownState != .stopped else { return true }
+        uiShutdownState = .stopping
+        frameDriver.shutdown()
+#if canImport(MetalKit)
+        if useMetalRenderer {
+            guard renderOwner.removeMetalRenderer() else { return false }
+            detachMetalRendererUI()
+            useMetalRenderer = false
+        }
+#endif
+        stopTextBlinking()
+        clearProgressReport()
+        renderOwner.invalidateSynchronizedOutputWatchdog()
+        uiShutdownState = .stopped
+        return true
     }
     
     // Multiplex patch: UIKit hides the menu once one of its items runs, so each
@@ -657,37 +708,36 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     @objc open override func paste (_ sender: Any?) {
         contextMenuPresented = false
         disableSelectionPanGesture()
-        if let start = UIPasteboard.general.string {
-            if terminal.bracketedPasteMode {
-                send(data: EscapeSequences.bracketedPasteStart[0...])
-            }
-            send(txt: start)
-            if terminal.bracketedPasteMode {
-                send(data: EscapeSequences.bracketedPasteEnd[0...])
-            }
-            queuePendingDisplay()
+        if !sendKittyPasteEvent(location: .standard), let text = UIPasteboard.general.string {
+            pasteText(text)
         }
+        frameDriver.markDirty()
     }
 
     @objc open override func copy(_ sender: Any?) {
         contextMenuPresented = false
-        UIPasteboard.general.string = selection.getSelectedText()
-        selection.selectNone()
+        UIPasteboard.general.string = withTerminal { _ in
+            let text = selection.getSelectedText()
+            selection.selectNone()
+            return text
+        }
         disableSelectionPanGesture()
     }
-
+        
     @objc open override func selectAll(_ sender: Any?) {
         contextMenuPresented = false
-        selection.selectAll()
+        withTerminal { _ in selection.selectAll() }
         enableSelectionPanGesture()
     }
-
+    
     /// Invoked when the user has long-pressed and then clicked "Select"
     @objc public override func select (_ sender: Any?)  {
         contextMenuPresented = false
         if let loc = lastLongSelect {
-            selection.selectWordOrExpression(at: Position (col: loc.col, row: loc.row), in: terminal.displayBuffer)
-            selection.selectionMode = .character
+            withTerminal { terminal in
+                selection.selectWordOrExpression(at: Position (col: loc.col, row: loc.row), in: terminal.displayBuffer)
+                selection.selectionMode = .character
+            }
             enableSelectionPanGesture()
             DispatchQueue.main.async {
                 self.showContextMenu(forRegion:  self.makeContextMenuRegionForSelection(), pos: loc)
@@ -699,13 +749,15 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     
     @objc func resetCmd(_ sender: Any?) {
         contextMenuPresented = false
-        terminal.cmdReset()
+        withTerminal { terminal in
+            terminal.cmdReset()
+            selection.selectNone()
+        }
         // Multiplex patch: terminal reset also resets UIKit's transient IME state
         // so no marked-text preview survives a rebuilt terminal view.
         resetInputBuffer()
-        selection.selectNone()
         disableSelectionPanGesture()
-        queuePendingDisplay()
+        frameDriver.markDirty()
     }
 
     @objc
@@ -715,11 +767,11 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     ) -> Bool {
         switch action {
         case #selector(copy(_:)):
-            return selection.active
+            return withTerminal { _ in selection.active }
         case #selector(paste(_:)):
             return true
         case #selector(select(_:)):
-            return !selection.active
+            return withTerminal { _ in !selection.active }
         case #selector(selectAll(_:)):
             return true
         case #selector(resetCmd(_:)):
@@ -743,7 +795,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         if selectionUIHandler != nil {
             return
         }
-        var items: [UIMenuItem] = []
+        let items: [UIMenuItem] = []
 
         lastLongSelect = pos
         lastLongSelectRegion = forRegion
@@ -766,12 +818,6 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     // This is a position relative to the buffer
     var lastLongSelect: Position?
     var lastLongSelectRegion = CGRect.zero
-
-    /// Multiplex patch: true while this view believes its selection context
-    /// menu is on screen. Kept in step by `showContextMenu`/`hideContextMenu`
-    /// and cleared by every menu action, so it can never outlive the menu and
-    /// swallow a tap. See `dismissLocalSelectionUI`.
-    var contextMenuPresented = false
     
     /// Creates a region suitable to be passed to the showContextMenu that wants a
     /// region for the menu to avoid.
@@ -780,12 +826,14 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
                     
     func makeContextMenuRegionForSelection () -> CGRect {
-        let width = selection.isMultiLine ? frame.width : CGFloat(selection.end.col-selection.start.col)*cellDimension.width
-        
-        return CGRect (x: CGFloat (selection.start.col)*cellDimension.width,
-                       y: CGFloat (selection.start.row)*cellDimension.height,
-                       width: width,
-                       height: CGFloat (selection.end.row-selection.start.row+1)*cellDimension.height)
+        withTerminal { _ in
+            let width = selection.isMultiLine ? frame.width : CGFloat(selection.end.col-selection.start.col)*cellDimension.width
+
+            return CGRect (x: CGFloat (selection.start.col)*cellDimension.width,
+                           y: CGFloat (selection.start.row)*cellDimension.height,
+                           width: width,
+                           height: CGFloat (selection.end.row-selection.start.row+1)*cellDimension.height)
+        }
     }
     
     @objc func longPress (_ gestureRecognizer: UILongPressGestureRecognizer)
@@ -808,7 +856,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
              endRemoteMouseDrag(at: gestureRecognizer.location(in: self))
          default:
              break
-          }
+         }
     }
 
     /// Multiplex patch: the local action chain a long press runs, shared with
@@ -886,30 +934,20 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         presentLocalPressActions(at: location)
     }
 
-    /// Multiplex patch: when set, a long press over a cell this filter claims
-    /// becomes a remote mouse drag instead of the selection menu. The filter
-    /// receives the screen cell (zero-based, what the wire will report) and
-    /// that cell's character, and must answer quickly — it runs at gesture
-    /// time. Only consulted while the client requested button tracking
-    /// (1002/1003), so a plain shell never loses its long press.
-    public var longPressMouseDragFilter: ((_ cell: (col: Int, row: Int), _ content: Character?) -> Bool)?
-
     /// Multiplex patch: true between a claimed drag's press and its release.
     public var remoteMouseDragActive: Bool { mouseDragPressFlags != nil }
-
-    private var mouseDragPressFlags: Int?
-    private var mouseDragReleaseFlags = 0
-    private var mouseDragLastCell: Position?
 
     /// Converts a point in view coordinates to the screen cell a mouse report
     /// should carry, clamped to the visible grid.
     private func remoteMouseDragCell (at point: CGPoint) -> (grid: Position, pixels: Position)? {
-        guard let terminal else { return nil }
-        let hit = calculateTapHit(point: point)
-        guard let screen = hit.grid.toScreenCoordinate(from: terminal.displayBuffer) else { return nil }
-        let clamped = Position(col: min (max (0, screen.col), terminal.cols-1),
-                               row: min (max (0, screen.row), terminal.rows-1))
-        return (clamped, hit.pixels)
+        guard terminal != nil else { return nil }
+        return withTerminal { terminal -> (grid: Position, pixels: Position)? in
+            let hit = calculateTapHitLocked(point: point)
+            guard let screen = hit.grid.toScreenCoordinate(from: terminal.displayBuffer) else { return nil }
+            let clamped = Position(col: min (max (0, screen.col), terminal.cols-1),
+                                   row: min (max (0, screen.row), terminal.rows-1))
+            return (clamped, hit.pixels)
+        }
     }
 
     /// Multiplex patch: begins a remote mouse drag at `point` if the filter
@@ -919,15 +957,20 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     public func beginRemoteMouseDrag (at point: CGPoint) -> Bool {
         guard let filter = longPressMouseDragFilter,
               allowMouseReporting,
-              let terminal,
-              terminal.mouseMode.sendButtonTracking(),
-              !selection.active,
+              terminal != nil,
               !contextMenuPresented,
               mouseDragPressFlags == nil,
               let hit = remoteMouseDragCell(at: point)
         else { return false }
-        guard filter((hit.grid.col, hit.grid.row),
-                     terminal.getCharacter(col: hit.grid.col, row: hit.grid.row))
+        let candidate = withTerminal { terminal -> (eligible: Bool, content: Character?) in
+            guard terminal.mouseMode.sendButtonTracking(), !selection.active else {
+                return (false, nil)
+            }
+            return (true, terminal.getCharacter(col: hit.grid.col, row: hit.grid.row))
+        }
+        // The filter is app code: it runs with the terminal lock released.
+        guard candidate.eligible,
+              filter((hit.grid.col, hit.grid.row), candidate.content)
         else { return false }
         // Encode both flag values once at press time: encodeFlags clears the
         // app's CTRL latch as a side effect, and a drag's many motion samples
@@ -935,11 +978,15 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         let control = terminalAccessory?.controlModifier ?? controlModifier
         let pressFlags = encodeFlags(release: false)
         mouseDragPressFlags = pressFlags
-        mouseDragReleaseFlags = terminal.encodeButton(button: 0, release: true,
-                                                      shift: false, meta: false, control: control)
+        mouseDragReleaseFlags = withTerminal { terminal in
+            terminal.encodeButton(button: 0, release: true,
+                                  shift: false, meta: false, control: control)
+        }
         mouseDragLastCell = hit.grid
-        terminal.sendEvent(buttonFlags: pressFlags, x: hit.grid.col, y: hit.grid.row,
-                           pixelX: hit.pixels.col, pixelY: hit.pixels.row)
+        withTerminal { terminal in
+            terminal.sendEvent(buttonFlags: pressFlags, x: hit.grid.col, y: hit.grid.row,
+                               pixelX: hit.pixels.col, pixelY: hit.pixels.row)
+        }
         return true
     }
 
@@ -947,13 +994,15 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// cell. Quantized to cells so a fast finger never floods the remote.
     public func continueRemoteMouseDrag (at point: CGPoint) {
         guard let pressFlags = mouseDragPressFlags,
-              let terminal,
+              terminal != nil,
               let hit = remoteMouseDragCell(at: point),
               hit.grid != mouseDragLastCell
         else { return }
         mouseDragLastCell = hit.grid
-        terminal.sendMotion(buttonFlags: pressFlags, x: hit.grid.col, y: hit.grid.row,
-                            pixelX: hit.pixels.col, pixelY: hit.pixels.row)
+        withTerminal { terminal in
+            terminal.sendMotion(buttonFlags: pressFlags, x: hit.grid.col, y: hit.grid.row,
+                                pixelX: hit.pixels.col, pixelY: hit.pixels.row)
+        }
     }
 
     /// Multiplex patch: the inverse of `calculateTapHit` for a visible screen
@@ -961,7 +1010,8 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// hooks stand on to drive the drag path headlessly (no headless route
     /// can synthesize a real touch).
     public func pointForCell (col: Int, row: Int) -> CGPoint {
-        let bufferRow = CGFloat (row + (terminal?.displayBuffer.yDisp ?? 0))
+        let yDisp = terminal == nil ? 0 : withTerminal { $0.displayBuffer.yDisp }
+        let bufferRow = CGFloat (row + yDisp)
         return CGPoint (x: (CGFloat (col) + 0.5) * cellDimension.width,
                         y: (bufferRow + 0.5) * cellDimension.height)
     }
@@ -970,23 +1020,33 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// given buffer position — how the app's selection block reaches a TUI's
     /// own right-click surface (herdr's pane menu; no touch gesture maps to a
     /// right click). Sent only while the client reports mouse; returns
-    /// whether the click went out.
+    /// whether the click went out. Upstream's release encoding now names the
+    /// released button in SGR modes, which is what a right-click menu needs.
     @discardableResult
     public func sendRemoteRightClick (atBufferPosition position: Position) -> Bool {
-        guard allowMouseReporting,
-              let terminal,
-              terminal.mouseMode != .off,
-              let screen = position.toScreenCoordinate(from: terminal.displayBuffer)
-        else { return false }
-        let col = min (max (0, screen.col), terminal.cols-1)
-        let row = min (max (0, screen.row), terminal.rows-1)
-        let point = pointForCell(col: col, row: row)
-        let pixelX = Int (point.x)
-        let pixelY = Int (point.y)
-        let press = terminal.encodeButton(button: 2, release: false,
-                                          shift: false, meta: false, control: false)
-        terminal.sendEvent(buttonFlags: press, x: col, y: row, pixelX: pixelX, pixelY: pixelY)
-        terminal.sendButtonReleaseEvent(button: 2, x: col, y: row, pixelX: pixelX, pixelY: pixelY)
+        guard allowMouseReporting, terminal != nil else { return false }
+        let cell = withTerminal { terminal -> (col: Int, row: Int)? in
+            guard terminal.mouseMode != .off,
+                  let screen = position.toScreenCoordinate(from: terminal.displayBuffer)
+            else { return nil }
+            return (min (max (0, screen.col), terminal.cols-1),
+                    min (max (0, screen.row), terminal.rows-1))
+        }
+        guard let cell else { return false }
+        let point = pointForCell(col: cell.col, row: cell.row)
+        withTerminal { terminal in
+            let pixels = calculateTapHitLocked(point: point).pixels
+            let press = terminal.encodeButton(button: 2, release: false,
+                                              shift: false, meta: false, control: false)
+            terminal.sendEvent(buttonFlags: press, x: cell.col, y: cell.row,
+                               pixelX: pixels.col, pixelY: pixels.row)
+            if terminal.mouseMode.sendButtonRelease() {
+                let release = terminal.encodeButton(button: 2, release: true,
+                                                    shift: false, meta: false, control: false)
+                terminal.sendEvent(buttonFlags: release, x: cell.col, y: cell.row,
+                                   pixelX: pixels.col, pixelY: pixels.row)
+            }
+        }
         return true
     }
 
@@ -995,21 +1055,24 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// real touch).
     @discardableResult
     public func sendRemoteRightClick (at point: CGPoint) -> Bool {
-        guard let hit = remoteMouseDragCell(at: point), let terminal else { return false }
-        let buffer = Position(col: hit.grid.col,
-                              row: hit.grid.row + terminal.displayBuffer.yDisp)
+        guard let hit = remoteMouseDragCell(at: point), terminal != nil else { return false }
+        let yDisp = withTerminal { $0.displayBuffer.yDisp }
+        let buffer = Position(col: hit.grid.col, row: hit.grid.row + yDisp)
         return sendRemoteRightClick(atBufferPosition: buffer)
     }
 
     /// Multiplex patch: releases an active drag at `point` (falling back to
     /// the last reported cell), always exactly once.
     public func endRemoteMouseDrag (at point: CGPoint? = nil) {
-        guard mouseDragPressFlags != nil, let terminal else { return }
+        guard mouseDragPressFlags != nil, terminal != nil else { return }
         let hit = point.flatMap { remoteMouseDragCell(at: $0) }
         let cell = hit?.grid ?? mouseDragLastCell ?? Position(col: 0, row: 0)
         let pixels = hit?.pixels ?? Position(col: 0, row: 0)
-        terminal.sendEvent(buttonFlags: mouseDragReleaseFlags, x: cell.col, y: cell.row,
-                           pixelX: pixels.col, pixelY: pixels.row)
+        let releaseFlags = mouseDragReleaseFlags
+        withTerminal { terminal in
+            terminal.sendEvent(buttonFlags: releaseFlags, x: cell.col, y: cell.row,
+                               pixelX: pixels.col, pixelY: pixels.row)
+        }
         mouseDragPressFlags = nil
         mouseDragLastCell = nil
     }
@@ -1049,11 +1112,33 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// - Returns: both the position where the event took place (either in screen resolution, or buffer relative) and the pixel position to construct the menu location
     func calculateTapHit (point: CGPoint) -> (grid: Position, pixels: Position)
     {
+        withTerminal { _ in
+            calculateTapHitLocked(point: point)
+        }
+    }
+
+    func calculateTapHitLocked (point: CGPoint) -> (grid: Position, pixels: Position)
+    {
+        terminal.terminalLock.preconditionLocked()
         func toInt (_ p: CGPoint) -> Position {
-            
-            let x = min (max (p.x, 0), bounds.width)
-            let y = min (max (p.y, 0), bounds.height)
-            return Position (col: Int (x), row: Int (y))
+            let scale = backingScaleFactor()
+            let width = terminalPixelCount(
+                cells: terminal.cols,
+                cellPoints: cellDimension.width,
+                scale: scale)
+            let height = terminalPixelCount(
+                cells: terminal.rows,
+                cellPoints: cellDimension.height,
+                scale: scale)
+            return Position(
+                col: terminalDevicePixelIndex(
+                    pointOffset: p.x - bounds.minX,
+                    scale: scale,
+                    pixelCount: width),
+                row: terminalDevicePixelIndex(
+                    pointOffset: p.y - bounds.minY,
+                    scale: scale,
+                    pixelCount: height))
         }
 
         let col = Int (point.x / cellDimension.width)
@@ -1076,15 +1161,14 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 
     func encodeFlags (release: Bool) -> Int
     {
-        let encodedFlags = terminal.encodeButton(
-            // Outpost patch: taps/drags are the primary (left) button. Upstream
-            // hard-codes 1 (middle), so every tap arrives as a middle-click —
-            // vim pastes, and left-click targets in TUIs never fire. 0 = left.
-            button: 0,
-            release: release,
-            shift: false,
-            meta: false,
-            control: terminalAccessory?.controlModifier ?? controlModifier ?? false)
+        let encodedFlags = withTerminal { terminal in
+            terminal.encodeButton(
+                button: 0,
+                release: release,
+                shift: false,
+                meta: false,
+                control: terminalAccessory?.controlModifier ?? controlModifier)
+        }
         terminalAccessory?.controlModifier = false
         controlModifier = false
         return encodedFlags
@@ -1092,13 +1176,45 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     
     func sharedMouseEvent (gestureRecognizer: UIGestureRecognizer, release: Bool)
     {
-        let hit = calculateTapHit(gesture: gestureRecognizer)
-        if let grid = hit.grid.toScreenCoordinate(from: terminal.displayBuffer) {
-            terminal.sendEvent(buttonFlags: encodeFlags (release: release), x: grid.col, y: grid.row, pixelX: hit.pixels.col, pixelY: hit.pixels.row)
+        sharedMouseEvent(at: gestureRecognizer.location(in: self), release: release)
+    }
+
+    func sharedMouseEvent(at point: CGPoint, release: Bool)
+    {
+        withTerminal { terminal in
+            let hit = calculateTapHitLocked(point: point)
+            if let grid = hit.grid.toScreenCoordinate(from: terminal.displayBuffer) {
+                let buttonFlags = terminal.encodeButton(
+                    button: 0,
+                    release: release,
+                    shift: false,
+                    meta: false,
+                    control: terminalAccessory?.controlModifier ?? controlModifier)
+                terminal.sendEvent(buttonFlags: buttonFlags, x: grid.col, y: grid.row, pixelX: hit.pixels.col, pixelY: hit.pixels.row)
+            }
         }
+        terminalAccessory?.controlModifier = false
+        controlModifier = false
+    }
+
+    /// Reports a complete primary-button click at a point and returns whether the running
+    /// application requested it.
+    @discardableResult
+    public func forwardTap(at point: CGPoint) -> Bool {
+        let routing = withTerminal { terminal in
+            (press: allowMouseReporting && terminal.mouseMode.sendButtonPress(),
+             release: terminal.mouseMode.sendButtonRelease())
+        }
+        guard routing.press else { return false }
+        sharedMouseEvent(at: point, release: false)
+        if routing.release {
+            sharedMouseEvent(at: point, release: true)
+        }
+        frameDriver.markDirty()
+        return true
     }
     
-    // Returns the offsets into getTerminal().buffer.lines for the first visible and last visible lines
+    // Returns offsets for the first and last visible terminal buffer lines.
     func getVisibleLineRange () -> ClosedRange<Int> {
         let topVisibleLine = contentOffset.y/cellDimension.height
         let bottomVisibleLine = (topVisibleLine+frame.height/cellDimension.height)-1
@@ -1109,7 +1225,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     public func repositionVisibleFrame () {
         let topVisibleLine = contentOffset.y/cellDimension.height
         let bottomVisibleLine = (topVisibleLine+frame.height/cellDimension.height)-1
-        let lines = self.terminal.displayBuffer.lines.count
+        let lines = withTerminal { $0.displayBuffer.lines.count }
         contentOffset.y = max(0, CGFloat(lines) - bottomVisibleLine) * cellDimension.height
     }
     
@@ -1117,34 +1233,30 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// and the running application has not opted in to capturing shift via XTSHIFTESCAPE.
     /// In that case the gesture should fall through to local selection handling instead
     /// of being forwarded to the application as a mouse event.
-    private func shiftBypassesMouseReporting(for gestureRecognizer: UIGestureRecognizer) -> Bool {
-        gestureRecognizer.modifierFlags.contains(.shift) && !terminal.mouseShiftCapture
+    private func shiftBypassesMouseReportingLocked(for gestureRecognizer: UIGestureRecognizer) -> Bool {
+        terminal.terminalLock.preconditionLocked()
+        return gestureRecognizer.modifierFlags.contains(.shift) && !terminal.mouseShiftCapture
     }
 
-    private func semanticPromptModifiers(for gestureRecognizer: UIGestureRecognizer) -> SemanticPromptClickModifiers {
-        var result: SemanticPromptClickModifiers = []
-        let flags = gestureRecognizer.modifierFlags
-        if flags.contains(.shift) { result.insert(.shift) }
-        if flags.contains(.control) { result.insert(.control) }
-        if flags.contains(.alternate) { result.insert(.option) }
-        if flags.contains(.command) { result.insert(.command) }
-        return result
+    /// Multiplex patch: the lock-taking form, for gesture paths that are not
+    /// already inside `withTerminal`.
+    private func shiftBypassesMouseReporting(for gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard terminal != nil else { return false }
+        return withTerminal { _ in shiftBypassesMouseReportingLocked(for: gestureRecognizer) }
     }
 
     /// Multiplex patch: the selection highlight and its context menu are both
     /// app-side UI painted over the remote screen, so any tap while either is
     /// present dismisses them and is consumed — before link opening and before
-    /// mouse reporting. Previously the dismissal only lived in singleTap's
-    /// mouse-off branch: with mouse tracking on (tmux `mouse on`, CLI agents,
-    /// vim) the tap was forwarded to the remote as a click and the highlight
-    /// could never be cancelled by touch — and pans kept extending the
-    /// selection, since an active selection owns the drag.
+    /// mouse reporting. With mouse tracking on (tmux `mouse on`, CLI agents,
+    /// vim) the tap used to be forwarded to the remote as a click and the
+    /// highlight could never be cancelled by touch — and pans kept extending
+    /// the selection, since an active selection owns the drag.
     ///
     /// The menu is tracked independently of `selection.active` because a long
     /// press opens PASTE / SELECT / SELECT ALL *without* selecting anything:
     /// guarding on the selection alone left that menu stuck on screen with no
-    /// way to cancel it, unless the user pressed SELECT first (which finally
-    /// made the guard true). Returns true when anything was dismissed.
+    /// way to cancel it. Returns true when anything was dismissed.
     ///
     /// `contextMenuPresented` is this view's own record of having shown the
     /// menu, rather than `UIMenuController.isMenuVisible` alone: the whole
@@ -1158,14 +1270,15 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         if dismissAppMenu() {
             return true
         }
-        guard selection.active || contextMenuPresented || UIMenuController.shared.isMenuVisible
+        let selectionActive = terminal != nil && withTerminal { _ in selection.active }
+        guard selectionActive || contextMenuPresented || UIMenuController.shared.isMenuVisible
         else { return false }
-        if selection.active {
-            selection.selectNone()
+        if selectionActive {
+            withTerminal { _ in selection.selectNone() }
             disableSelectionPanGesture()
         }
         hideContextMenu()
-        queuePendingDisplay()
+        frameDriver.markDirty()
         return true
     }
 
@@ -1180,13 +1293,32 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         UIMenuController.shared.hideMenu()
     }
 
+    private func semanticPromptModifiers(for gestureRecognizer: UIGestureRecognizer) -> SemanticPromptClickModifiers {
+        var result: SemanticPromptClickModifiers = []
+        let flags = gestureRecognizer.modifierFlags
+        if flags.contains(.shift) { result.insert(.shift) }
+        if flags.contains(.control) { result.insert(.control) }
+        if flags.contains(.alternate) { result.insert(.option) }
+        if flags.contains(.command) { result.insert(.command) }
+        return result
+    }
+
+    private func tapAction(tapCount: Int,
+                           gestureRecognizer: UIGestureRecognizer) -> TerminalTapAction {
+        withTerminal { terminal in
+            let mouseReportingActive = allowMouseReporting &&
+                !shiftBypassesMouseReportingLocked(for: gestureRecognizer) &&
+                terminal.mouseMode.sendButtonPress()
+            return TerminalTapPolicy.action(tapCount: tapCount,
+                                            hasActiveSelection: selection.active,
+                                            mouseReportingActive: mouseReportingActive)
+        }
+    }
+
     @objc func singleTap (_ gestureRecognizer: UITapGestureRecognizer)
     {
-        guard gestureRecognizer.view != nil else { return }
-
-        if gestureRecognizer.state != .ended {
-            return
-        }
+        guard gestureRecognizer.view != nil,
+              gestureRecognizer.state == .ended else { return }
 
         // Multiplex patch: while the app owns selection chrome, a tap seeds
         // a word selection right where it lands — no PASTE/SELECT menu
@@ -1214,62 +1346,75 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             return
         }
 
-        if isFirstResponder {
-            let tapHit = calculateTapHit(gesture: gestureRecognizer).grid
-            // Multiplex patch: a tap over a target the app claims outranks the
-            // remote click at every mouse mode — reaching a path or a URL by
-            // press is the common intent, and long press is a gesture the
-            // reader has to know about. Only cells the app declines
-            // (`activateLink` returns false) fall through to mouse reporting,
-            // so tmux keeps switching panes and vim keeps placing the cursor
-            // everywhere else. This is the same trade the visionOS gaze
-            // regions already make: a lit link is a hit region.
-            if let result = linkForClick(at: tapHit, hasCommandModifier: commandActive),
-               activateLink(result, at: tapHit) {
-                return
+        // Multiplex patch: an unfocused terminal's tap only focuses it.
+        // Upstream forwards that tap as a click when the remote tracks the
+        // mouse, but the app's focus arbiter owns which pane takes keys, and
+        // a focusing tap that also clicked would act on a pane the user was
+        // only selecting.
+        guard isFirstResponder else {
+            _ = becomeFirstResponder()
+            return
+        }
+
+        let tapHit = calculateTapHit(gesture: gestureRecognizer).grid
+        // Multiplex patch: a tap over a target the app claims outranks the
+        // remote click at every mouse mode — reaching a path or a URL by
+        // press is the common intent, and long press is a gesture the
+        // reader has to know about. Only cells the app declines
+        // (`activateLink` returns false) fall through to mouse reporting,
+        // so tmux keeps switching panes and vim keeps placing the cursor
+        // everywhere else. This is the same trade the visionOS gaze
+        // regions already make: a lit link is a hit region.
+        if let result = linkForClick(at: tapHit, hasCommandModifier: commandActive),
+           activateLink(result, at: tapHit) {
+            return
+        }
+
+        let action = tapAction(tapCount: 1, gestureRecognizer: gestureRecognizer)
+        if action == .forwardClick {
+            sharedMouseEvent(gestureRecognizer: gestureRecognizer, release: false)
+
+            if withTerminal({ $0.mouseMode.sendButtonRelease() }) {
+                sharedMouseEvent(gestureRecognizer: gestureRecognizer, release: true)
             }
-
-            if allowMouseReporting && !shiftBypassesMouseReporting(for: gestureRecognizer) && terminal.mouseMode.sendButtonPress() {
-                sharedMouseEvent(gestureRecognizer: gestureRecognizer, release: false)
-
-                if terminal.mouseMode.sendButtonRelease() {
-                    sharedMouseEvent(gestureRecognizer: gestureRecognizer, release: true)
-                }
-            } else {
-                // Multiplex patch: upstream's "menu visible → hide it" arm
-                // lived here, reachable only with mouse reporting off and the
-                // terminal already first responder. `dismissLocalSelectionUI`
-                // above now owns that dismissal at every mouse mode (and
-                // returned early when there was anything to dismiss, so the
-                // selection is inactive here by construction), so only the
-                // show arm and upstream's semantic-prompt click remain.
-                let snapshot = SemanticPromptPointerSnapshot(
-                    selectionWasActive: false,
-                    didDrag: false,
-                    clickCount: 1,
-                    pressWasSemanticEligible: true)
-                let location = gestureRecognizer.location(in: gestureRecognizer.view)
-                let tapLoc = calculateTapHit(gesture: gestureRecognizer).grid
-                let displayBuffer = terminal.displayBuffer
+        } else if action == .dismissSelection {
+            withTerminal { _ in selection.selectNone() }
+            disableSelectionPanGesture()
+        } else {
+            // Multiplex patch: `dismissLocalSelectionUI` above owns the
+            // dismissal of the selection and of the menu at every mouse mode
+            // (and returned early when there was anything to dismiss, so the
+            // selection is inactive here by construction), so only the show
+            // arm and upstream's semantic-prompt click remain.
+            let cursor = withTerminal { terminal -> Position in
+                let buffer = terminal.displayBuffer
                 // The cursor lives at yBase; yDisp is only where the user
                 // scrolled the viewport.
-                let cursorRow = displayBuffer.y + displayBuffer.yBase
-                if abs (tapLoc.col-displayBuffer.x) < 4 && abs (tapLoc.row - cursorRow) < 2 {
-                    showContextMenu (forRegion: makeContextMenuRegionForTap (point: location), pos: tapLoc)
-                } else {
-                    _ = terminal.handleSemanticPromptClick(
+                return Position(col: buffer.x, row: buffer.y + buffer.yBase)
+            }
+            let snapshot = SemanticPromptPointerSnapshot(
+                selectionWasActive: false,
+                didDrag: false,
+                clickCount: 1,
+                pressWasSemanticEligible: true,
+                selectionIsActiveAtRelease: false)
+            let location = gestureRecognizer.location(in: gestureRecognizer.view)
+            let nearCursor = abs(tapHit.col - cursor.col) < 4 &&
+                abs(tapHit.row - cursor.row) < 2
+            if nearCursor {
+                showContextMenu (forRegion: makeContextMenuRegionForTap (point: location), pos: tapHit)
+            } else {
+                _ = withTerminal { terminal in
+                    terminal.handleSemanticPromptClick(
                         at: tapHit,
                         modifiers: semanticPromptModifiers(for: gestureRecognizer),
-                        snapshot: snapshot
-                    )
+                        snapshot: snapshot)
                 }
             }
-            queuePendingDisplay()
-        } else {
-            let _ = becomeFirstResponder ()
         }
+        frameDriver.markDirty()
     }
-    
+
     @objc func doubleTap (_ gestureRecognizer: UITapGestureRecognizer)
     {
         guard gestureRecognizer.view != nil else { return }
@@ -1278,13 +1423,15 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             return
         }
 
-        if allowMouseReporting && !shiftBypassesMouseReporting(for: gestureRecognizer) && terminal.mouseMode.sendButtonPress() {
+        if remoteOwnsImmediateTaps(for: gestureRecognizer) {
             // Multiplex patch: a double tap — finger, Pencil, visionOS
             // gaze/pinch, or a pointer's double-click — is an additive route
             // to the app-owned selection block. The single recognizer has
             // already sent both physical clicks to the remote immediately —
             // preserving the no-latency contract — and this recognizer must
-            // not add a third.
+            // not add a third. (Upstream selects a word locally here, and
+            // spends an unfocused double tap on focus; under Multiplex the
+            // first single tap already focused the view.)
             if localDoubleTapOpensSelectionMenu(gestureRecognizer) {
                 _ = dismissLocalSelectionUI()
                 _ = presentSelectionMenu(at: gestureRecognizer.location(in: self))
@@ -1292,26 +1439,18 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             }
             // A fast re-tap on an active selection or its menu must dismiss
             // that UI, never add another remote click.
-            if dismissLocalSelectionUI() {
-                return
-            }
-            if remoteOwnsImmediateTaps(for: gestureRecognizer) {
-                return
-            }
-            sharedMouseEvent(gestureRecognizer: gestureRecognizer, release: false)
-
-            if terminal.mouseMode.sendButtonRelease() {
-                sharedMouseEvent(gestureRecognizer: gestureRecognizer, release: true)
-            }
+            _ = dismissLocalSelectionUI()
             return
-        } else {
-            let hit = calculateTapHit(gesture: gestureRecognizer).grid
+        }
+
+        let hit = calculateTapHit(gesture: gestureRecognizer).grid
+        withTerminal { terminal in
             selection.selectWordOrExpression(at: hit, in: terminal.displayBuffer)
             selection.selectionMode = .character
-            enableSelectionPanGesture()
-            showContextMenu (forRegion: makeContextMenuRegionForSelection(), pos: hit)
-            queuePendingDisplay()
         }
+        enableSelectionPanGesture()
+        showContextMenu (forRegion: makeContextMenuRegionForSelection(), pos: hit)
+        frameDriver.markDirty()
     }
 
     @objc func tripleTap (_ gestureRecognizer: UITapGestureRecognizer)
@@ -1322,31 +1461,20 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             return
         }
 
-        if allowMouseReporting && !shiftBypassesMouseReporting(for: gestureRecognizer) && terminal.mouseMode.sendButtonPress() {
-            // Multiplex patch: same dismissal rule as singleTap/doubleTap.
-            if dismissLocalSelectionUI() {
-                return
-            }
-            // Multiplex patch: same no-extra-click rule as doubleTap while
-            // the failure chain is bypassed.
-            if remoteOwnsImmediateTaps(for: gestureRecognizer) {
-                return
-            }
-            sharedMouseEvent(gestureRecognizer: gestureRecognizer, release: false)
-
-            if terminal.mouseMode.sendButtonRelease() {
-                sharedMouseEvent(gestureRecognizer: gestureRecognizer, release: true)
-            }
+        if remoteOwnsImmediateTaps(for: gestureRecognizer) {
+            // Multiplex patch: same dismissal rule as singleTap/doubleTap,
+            // and the single recognizer already sent each physical click.
+            _ = dismissLocalSelectionUI()
             return
-        } else {
-            let hit = calculateTapHit(gesture: gestureRecognizer).grid
-            selection.select(row: hit.row)
-            enableSelectionPanGesture()
-            showContextMenu (forRegion: makeContextMenuRegionForSelection(), pos: hit)
-            queuePendingDisplay()
         }
+
+        let hit = calculateTapHit(gesture: gestureRecognizer).grid
+        withTerminal { _ in selection.select(row: hit.row) }
+        enableSelectionPanGesture()
+        showContextMenu (forRegion: makeContextMenuRegionForSelection(), pos: hit)
+        frameDriver.markDirty()
     }
-    
+
     var directionView: UIView?
     var directionCount: Int = 0
     var lastCursorImage: String? = nil
@@ -1425,175 +1553,18 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         imgView.tintColor = .white
     }
     
-    // Multiplex patch: a pan used to be reported as a click-drag (press +
-    // motion + release), which in tmux starts a copy-mode selection and
-    // never scrolls; and with mouse reporting off there was no way to reach
-    // an alternate-screen app's own scrollback at all. Touch has one scroll
-    // gesture, so the pan now scrolls the *remote*: wheel reports when the
+    private var wheelDragAccumulator = WheelDistanceAccumulator<ProgramScrollRoute>()
+    private var wheelReportBudget = WheelReportBudget()
+
+    // Multiplex patch: a pan scrolls the *remote*: wheel reports when the
     // client asked for mouse events, cursor keys ("alternate scroll") when
     // the alternate buffer is active without mouse tracking, or while the
     // host app explicitly presents a remote copy-mode surface. The primary
-    // buffer otherwise keeps native local scrollback.
-    var remoteScrollResidual: CGFloat = 0
-
-    // Multiplex patch: wheel reports are pinned to the pan's START location.
-    // A pan's live location moves with the drag (on visionOS it is the gaze
-    // hit at pinch time plus the hand's unbounded translation), so a long
-    // scroll walks the reported coordinate off the content and the row clamp
-    // pins it to row 0 — herdr's tab bar, where a wheel event switches tabs.
-    // Desktop wheel semantics scroll the point under the pointer at gesture
-    // start; anchoring restores that.
-    var remoteScrollAnchor: CGPoint?
-
-    /// Multiplex patch: an app-owned tmux copy-mode HUD disables mouse
-    /// reporting so UIKit can select text locally, but tmux may still render
-    /// in the primary buffer. In that narrow state, keep pans remote by
-    /// translating them to cursor keys. Selection drags continue to win in
-    /// `RemoteScrollGestureGate` below.
-    public var forceRemoteCursorScroll: Bool = false {
-        didSet {
-            guard forceRemoteCursorScroll != oldValue else { return }
-            updateRemotePanGesture()
-        }
-    }
-
-    /// Multiplex patch: constrain local selection to one multiplexer pane.
-    /// The app sets the focused pane's screen rectangle while its
-    /// select-text mode runs, so taps, drags, and Select All operate on the
-    /// pane instead of the whole screen (a split's neighbor pane must not
-    /// bleed into a selection). Rows/columns are screen cells, both ends
-    /// inclusive. A live selection is pulled into the new rectangle rather
-    /// than dropped — the clamp arrives asynchronously, and a Select All
-    /// taken meanwhile should tighten to the pane, not vanish.
-    public var selectionClampRect: (columns: ClosedRange<Int>, rows: ClosedRange<Int>)? {
-        get { selection.clampRect }
-        set {
-            selection.clampRect = newValue
-            selection.reclampActiveSelection()
-            queuePendingDisplay()
-        }
-    }
-
-    /// Multiplex patch: while set, the APP owns selection chrome. The
-    /// deprecated UIMenuController never shows (`showContextMenu` no-ops),
-    /// a plain tap or long press seeds a word selection directly — no
-    /// PASTE/SELECT menu detour — and every selection change reports the
-    /// selection's CONTENT-coordinate rectangle (`selectionUIRect`; nil
-    /// when the selection clears) so the app can float its own actions
-    /// beside it as sibling subviews. Set only while the app's
-    /// select-text mode runs; nil restores the stock UIKit selection flow.
-    public var selectionUIHandler: ((CGRect?) -> Void)?
-
-    /// Multiplex patch: the app's replacement for the selection context menu
-    /// OUTSIDE select-text mode. A long press / secondary click that does not
-    /// activate a link, or a direct double tap, reports its screen region and
-    /// buffer position here instead of showing deprecated UIMenuController —
-    /// the app draws its own SELECT / SELECT ALL / PASTE block there.
-    public var selectionMenuHandler: ((CGRect, Position) -> Void)?
-
-    /// Multiplex patch: set by the app while its selection block is on
-    /// screen. A tap dismisses-and-consumes exactly like the native menu
-    /// (`dismissLocalSelectionUI` calls and clears it); the app also clears
-    /// it whenever it hides the block itself.
-    public var appMenuDismiss: (() -> Void)?
-
-    /// Multiplex patch: run-and-clear the app's menu dismissal, answering
-    /// whether anything was dismissed.
-    private func dismissAppMenu () -> Bool {
-        guard let dismiss = appMenuDismiss else { return false }
-        appMenuDismiss = nil
-        dismiss()
-        return true
-    }
-
-    /// Multiplex patch: the app's SELECT action — seed a word selection at
-    /// the position its selection block recorded, exactly like an in-mode
-    /// tap.
-    public func seedWordSelection (atBufferPosition position: Position) {
-        seedAppSelection(at: position)
-    }
-
-    /// Multiplex patch: the active selection's bounding box in CONTENT
-    /// coordinates (the scroll view's own space — what subview frames use),
-    /// clipped to the visible rows; nil when fully off-screen. A displayed
-    /// buffer row's content y is simply its absolute row × cell height, so
-    /// the visibility test converts through `yDisp` but the rect must NOT —
-    /// subtracting it anchored the HUD a whole content-offset short (one
-    /// keyboard height per stranded frame on mosh tabs, reported
-    /// 2026-08-10). Multi-row widths honor `selectionClampRect` so the box
-    /// hugs the pane the selection lives in.
-    public func selectionUIRect () -> CGRect? {
-        guard let terminal, selection.active, selection.hasSelectionRange else { return nil }
-        let (first, last) = Position.compare(selection.start, selection.end) == .before
-            ? (selection.start, selection.end)
-            : (selection.end, selection.start)
-        let yDisp = terminal.displayBuffer.yDisp
-        let startRow = first.row - yDisp
-        let endRow = last.row - yDisp
-        guard endRow >= 0, startRow < terminal.rows else { return nil }
-        let cols: (lo: Int, hi: Int)
-        if startRow == endRow {
-            cols = (first.col, last.col)
-        } else if let clamp = selection.clampRect {
-            cols = (clamp.columns.lowerBound, clamp.columns.upperBound)
-        } else {
-            cols = (0, terminal.cols - 1)
-        }
-        return CGRect(
-            x: CGFloat(cols.lo) * cellDimension.width,
-            y: CGFloat(max(0, startRow) + yDisp) * cellDimension.height,
-            width: CGFloat(cols.hi - cols.lo + 1) * cellDimension.width,
-            height: CGFloat(min(terminal.rows - 1, endRow) - max(0, startRow) + 1) * cellDimension.height)
-    }
-
-    /// Multiplex patch: seed a word selection at a gesture location — what
-    /// a plain tap/long press does while the app owns selection chrome.
-    /// Character-granular drags afterwards, exactly like the double-tap
-    /// selection path.
-    private func seedAppSelection (at hit: Position) {
-        selection.selectWordOrExpression(at: hit, in: terminal.displayBuffer)
-        selection.selectionMode = .character
-        enableSelectionPanGesture()
-        queuePendingDisplay()
-    }
-
-    /// Multiplex patch: an app-owned select-text HUD over a mouse-capturing
-    /// full-screen app (tmux, herdr). Like the copy-mode state above it turns
-    /// mouse reporting off so taps run the native selection gestures — but
-    /// unlike copy mode there is no remote view that answers cursor keys, so
-    /// a pan falling through to the alternate-screen branch would type
-    /// arrows into the remote app. While set, pans are not forwarded at all
-    /// (the alternate buffer has no local scrollback to move either).
-    public var suppressRemotePanScroll: Bool = false {
-        didSet {
-            guard suppressRemotePanScroll != oldValue else { return }
-            updateRemotePanGesture()
-        }
-    }
-
-    /// True when a pan should be forwarded to the remote instead of
-    /// scrolling the local scrollback. Terminal.init replays mode changes
-    /// through the delegate before `terminal` is assigned — stay nil-safe.
-    var remoteScrollApplies: Bool {
-        guard let terminal else { return false }
-        if suppressRemotePanScroll { return false }
-        return forceRemoteCursorScroll
-            || (allowMouseReporting && terminal.mouseMode != .off)
-            || terminal.isCurrentBufferAlternate
-    }
-
-    /// Preserve upstream's Shift+mouse bypass while Multiplex owns the
-    /// pan recognizer. Unless the remote explicitly captures Shift through
-    /// XTSHIFTESCAPE, a shifted pan must not emit remote mouse/wheel events;
-    /// an active local selection remains free to own its drag.
-    fileprivate func shouldBeginRemoteScroll (_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        guard remoteScrollApplies, !selection.active, let terminal else { return false }
-        return !(allowMouseReporting
-            && terminal.mouseMode != .off
-            && shiftBypassesMouseReporting(for: gestureRecognizer))
-    }
-
-    @objc func panMouseHandler (_ gestureRecognizer: UIPanGestureRecognizer){
+    // buffer otherwise keeps native local scrollback. Upstream's
+    // `forwardWheelDrag` route below (one finger to the remote, two fingers
+    // to local scrollback, cursor keys only under DECSET 1007) is not wired
+    // up here.
+    @objc func panMouseHandler (_ gestureRecognizer: UIPanGestureRecognizer) {
         guard gestureRecognizer.view != nil,
               cellDimension.height > 0,
               shouldBeginRemoteScroll(gestureRecognizer)
@@ -1622,19 +1593,25 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// DECCKM-aware cursor keys while the alternate buffer is active. Cursor
     /// key bursts are batched into one send per pan tick.
     public func performRemoteScroll (ticks: Int, at point: CGPoint? = nil) {
-        guard let terminal else { return }
+        guard terminal != nil else { return }
         let count = min (abs (ticks), 40)
         guard count > 0 else { return }
-        if allowMouseReporting && terminal.mouseMode != .off {
-            let flags = terminal.encodeButton(button: ticks > 0 ? 4 : 5, release: false,
-                                              shift: false, meta: false, control: false)
-            let hit = calculateTapHit(point: point ?? CGPoint (x: bounds.midX, y: bounds.midY))
-            guard let grid = hit.grid.toScreenCoordinate(from: terminal.displayBuffer) else { return }
-            for _ in 0..<count {
-                terminal.sendEvent(buttonFlags: flags, x: grid.col, y: grid.row,
-                                   pixelX: hit.pixels.col, pixelY: hit.pixels.row)
+        let reportsMouse = allowMouseReporting
+        let forceCursorKeys = forceRemoteCursorScroll
+        let target = point ?? CGPoint (x: bounds.midX, y: bounds.midY)
+        let cursorKeys = withTerminal { terminal -> [UInt8]? in
+            if reportsMouse && terminal.mouseMode != .off {
+                let flags = terminal.encodeButton(button: ticks > 0 ? 4 : 5, release: false,
+                                                  shift: false, meta: false, control: false)
+                let hit = calculateTapHitLocked(point: target)
+                guard let grid = hit.grid.toScreenCoordinate(from: terminal.displayBuffer) else { return nil }
+                for _ in 0..<count {
+                    terminal.sendEvent(buttonFlags: flags, x: grid.col, y: grid.row,
+                                       pixelX: hit.pixels.col, pixelY: hit.pixels.row)
+                }
+                return nil
             }
-        } else if forceRemoteCursorScroll || terminal.isCurrentBufferAlternate {
+            guard forceCursorKeys || terminal.isCurrentBufferAlternate else { return nil }
             let sequence: [UInt8]
             if ticks > 0 {
                 sequence = terminal.applicationCursor
@@ -1650,7 +1627,201 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             for _ in 0..<count {
                 burst.append(contentsOf: sequence)
             }
-            send(burst)
+            return burst
+        }
+        if let cursorKeys {
+            send(cursorKeys)
+        }
+    }
+
+    /// True when a pan should be forwarded to the remote instead of
+    /// scrolling the local scrollback. Stays nil-safe for callbacks that can
+    /// arrive before `terminal` is assigned.
+    var remoteScrollApplies: Bool {
+        guard terminal != nil else { return false }
+        if suppressRemotePanScroll { return false }
+        if forceRemoteCursorScroll { return true }
+        let reportsMouse = allowMouseReporting
+        return withTerminal { terminal in
+            (reportsMouse && terminal.mouseMode != .off) || terminal.isCurrentBufferAlternate
+        }
+    }
+
+    /// Preserve upstream's Shift+mouse bypass while Multiplex owns the
+    /// pan recognizer. Unless the remote explicitly captures Shift through
+    /// XTSHIFTESCAPE, a shifted pan must not emit remote mouse/wheel events;
+    /// an active local selection remains free to own its drag.
+    fileprivate func shouldBeginRemoteScroll (_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard remoteScrollApplies, terminal != nil else { return false }
+        let reportsMouse = allowMouseReporting
+        return withTerminal { terminal in
+            guard !selection.active else { return false }
+            return !(reportsMouse
+                && terminal.mouseMode != .off
+                && shiftBypassesMouseReportingLocked(for: gestureRecognizer))
+        }
+    }
+
+    /// Multiplex patch: constrain local selection to one multiplexer pane.
+    /// The app sets the focused pane's screen rectangle while its
+    /// select-text mode runs, so taps, drags, and Select All operate on the
+    /// pane instead of the whole screen (a split's neighbor pane must not
+    /// bleed into a selection). Rows/columns are screen cells, both ends
+    /// inclusive. A live selection is pulled into the new rectangle rather
+    /// than dropped — the clamp arrives asynchronously, and a Select All
+    /// taken meanwhile should tighten to the pane, not vanish.
+    public var selectionClampRect: (columns: ClosedRange<Int>, rows: ClosedRange<Int>)? {
+        get {
+            guard terminal != nil else { return nil }
+            return withTerminal { _ in selection.clampRect }
+        }
+        set {
+            guard terminal != nil else { return }
+            withTerminal { _ in
+                selection.clampRect = newValue
+                selection.reclampActiveSelection()
+            }
+            frameDriver.markDirty()
+        }
+    }
+
+    /// Multiplex patch: run-and-clear the app's menu dismissal, answering
+    /// whether anything was dismissed.
+    private func dismissAppMenu () -> Bool {
+        guard let dismiss = appMenuDismiss else { return false }
+        appMenuDismiss = nil
+        dismiss()
+        return true
+    }
+
+    /// Multiplex patch: the app's SELECT action — seed a word selection at
+    /// the position its selection block recorded, exactly like an in-mode
+    /// tap.
+    public func seedWordSelection (atBufferPosition position: Position) {
+        seedAppSelection(at: position)
+    }
+
+    /// Multiplex patch: the active selection's bounding box in CONTENT
+    /// coordinates (the scroll view's own space — what subview frames use),
+    /// clipped to the visible rows; nil when fully off-screen. A displayed
+    /// buffer row's content y is simply its absolute row × cell height, so
+    /// the visibility test converts through `yDisp` but the rect must NOT —
+    /// subtracting it anchored the HUD a whole content-offset short (one
+    /// keyboard height per stranded frame on mosh tabs, reported
+    /// 2026-08-10). Multi-row widths honor `selectionClampRect` so the box
+    /// hugs the pane the selection lives in.
+    public func selectionUIRect () -> CGRect? {
+        guard terminal != nil else { return nil }
+        let cell = cellDimension
+        return withTerminal { terminal -> CGRect? in
+            guard selection.active, selection.hasSelectionRange else { return nil }
+            let (first, last) = Position.compare(selection.start, selection.end) == .before
+                ? (selection.start, selection.end)
+                : (selection.end, selection.start)
+            let yDisp = terminal.displayBuffer.yDisp
+            let startRow = first.row - yDisp
+            let endRow = last.row - yDisp
+            guard endRow >= 0, startRow < terminal.rows else { return nil }
+            let cols: (lo: Int, hi: Int)
+            if startRow == endRow {
+                cols = (first.col, last.col)
+            } else if let clamp = selection.clampRect {
+                cols = (clamp.columns.lowerBound, clamp.columns.upperBound)
+            } else {
+                cols = (0, terminal.cols - 1)
+            }
+            return CGRect(
+                x: CGFloat(cols.lo) * cell.width,
+                y: CGFloat(max(0, startRow) + yDisp) * cell.height,
+                width: CGFloat(cols.hi - cols.lo + 1) * cell.width,
+                height: CGFloat(min(terminal.rows - 1, endRow) - max(0, startRow) + 1) * cell.height)
+        }
+    }
+
+    /// Multiplex patch: seed a word selection at a gesture location — what
+    /// a plain tap/long press does while the app owns selection chrome.
+    /// Character-granular drags afterwards, exactly like the double-tap
+    /// selection path.
+    private func seedAppSelection (at hit: Position) {
+        withTerminal { terminal in
+            selection.selectWordOrExpression(at: hit, in: terminal.displayBuffer)
+            selection.selectionMode = .character
+        }
+        enableSelectionPanGesture()
+        frameDriver.markDirty()
+    }
+
+    /// Reports whole-cell drag distance as bounded wheel presses, or as cursor keys when an
+    /// alternate-screen application relies on Alternate Scroll Mode instead of mouse tracking.
+    func forwardWheelDrag(
+        distance: CGFloat,
+        gestureRecognizer: UIGestureRecognizer
+    ) {
+        let cellHeight = cellDimension.height
+        guard cellHeight > 0 else { return }
+
+        // Route before banking. Travel that a Shift bypass or a reset mode suppressed is
+        // dropped, so the first report the same drag sends once its route returns does not
+        // include movement the application was never meant to see.
+        let route = withTerminal { terminal in
+            ProgramScrollRouting.route(
+                allowMouseReporting: allowMouseReporting,
+                shiftBypassesMouseReporting:
+                    shiftBypassesMouseReportingLocked(for: gestureRecognizer),
+                mouseTracking: terminal.mouseMode != .off,
+                alternateBuffer: terminal.isDisplayBufferAlternate,
+                alternateScrollMode: terminal.alternateScrollMode)
+        }
+        guard route != .none else {
+            wheelDragAccumulator.reset()
+            return
+        }
+
+        let lines = wheelDragAccumulator.takeWholeLines(
+            distance: distance,
+            cellHeight: cellHeight,
+            route: route)
+        guard lines != 0 else { return }
+
+        switch route {
+        case .mouse:
+            let wantedReports = WheelReportBudget.requestedReports(
+                lineCount: lines,
+                isPrecise: true)
+            let reports = wheelReportBudget.grant(wantedReports)
+            guard reports > 0 else { return }
+            withTerminal { terminal in
+                let hit = calculateTapHitLocked(point: gestureRecognizer.location(in: self))
+                guard let grid = hit.grid.toScreenCoordinate(from: terminal.displayBuffer) else {
+                    return
+                }
+                let flags = terminal.encodeButton(
+                    button: lines > 0 ? 4 : 5,
+                    release: false,
+                    shift: false,
+                    meta: false,
+                    control: false)
+                for _ in 0..<reports {
+                    terminal.sendEvent(
+                        buttonFlags: flags,
+                        x: grid.col,
+                        y: grid.row,
+                        pixelX: hit.pixels.col,
+                        pixelY: hit.pixels.row)
+                }
+            }
+        case .cursorKeys:
+            let keys = wheelReportBudget.grant(
+                WheelReportBudget.requestedKeys(lineCount: lines))
+            for _ in 0..<keys {
+                if lines > 0 {
+                    sendKeyUp()
+                } else {
+                    sendKeyDown()
+                }
+            }
+        case .none:
+            break
         }
     }
    
@@ -1681,28 +1852,34 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         switch gestureRecognizer.state {
         case .began:
             let hit = calculateTapHit(gesture: gestureRecognizer).grid
-            if selection.active {
-                var extend = false
-                if near (selection.start, hit) {
-                    selection.pivot = selection.end
-                    extend = true
-                } else if near (selection.end, hit) {
-                    selection.pivot = selection.start
-                    extend = true
+            let extended = withTerminal { _ -> Bool in
+                if selection.active {
+                    var extend = false
+                    if near (selection.start, hit) {
+                        selection.pivot = selection.end
+                        extend = true
+                    } else if near (selection.end, hit) {
+                        selection.pivot = selection.start
+                        extend = true
+                    }
+                    if extend {
+                        selection.pivotExtend(bufferPosition: hit)
+                        return true
+                    }
                 }
-                if extend {
-                    selection.pivotExtend(bufferPosition: hit)
-                    requestDisplay()
-                    break
-                }
+                return false
+            }
+            if extended {
+                requestDisplay()
+                break
             }
             panStart = hit
         case .changed:
             let absoluteY = gestureRecognizer.location (in: self).y - contentOffset.y
             let hit = calculateTapHit(gesture: gestureRecognizer).grid
-            if selection.active {
+            if withTerminal({ _ in selection.active }) {
                 stopSelectionTimer()
-                selection.pivotExtend(bufferPosition: hit)
+                withTerminal { _ in selection.pivotExtend(bufferPosition: hit) }
                 gestureRecognizer.setTranslation(CGPoint.zero, in: self)
                 if absoluteY < 0 || absoluteY > bounds.height {
                     startSelectionTimer {
@@ -1726,27 +1903,28 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             }
         case .ended:
             stopSelectionTimer()
-            if selection.active {
+            if withTerminal({ _ in selection.active }) {
                 showContextMenu (forRegion: makeContextMenuRegionForSelection(), pos: calculateTapHit(gesture: gestureRecognizer).grid)
             }
             break
         case .cancelled:
             stopSelectionTimer()
-            selection.active = false
+            withTerminal { _ in selection.active = false }
         default:
             break
         }
     }
     
     var panMouseGesture: UIPanGestureRecognizer?
-    // Multiplex patch: the gate yields to an active selection drag, and the
-    // recognizer also accepts indirect (trackpad/mouse wheel) scrolls.
-    private lazy var remoteScrollGate = RemoteScrollGestureGate (terminalView: self)
     func enableMousePanGesture () {
         guard panMouseGesture == nil else {
             return
         }
         let gesture = UIPanGestureRecognizer (target: self, action: #selector(panMouseHandler))
+        // Multiplex patch: the gate yields to an active selection drag, and
+        // the recognizer also accepts indirect (trackpad/mouse wheel)
+        // scrolls. No touch-count split: while pans go remote the scroll
+        // view's own pan is disabled outright (`updateRemotePanGesture`).
         gesture.allowedScrollTypesMask = .all
         gesture.delegate = remoteScrollGate
         addGestureRecognizer(gesture)
@@ -1860,9 +2038,8 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// per touch so runtime mouse-mode flips and the Copy Mode
     /// `allowMouseReporting` toggle are always honored.
     private func remoteOwnsImmediateTaps(for gestureRecognizer: UIGestureRecognizer) -> Bool {
-        allowMouseReporting
-            && !shiftBypassesMouseReporting(for: gestureRecognizer)
-            && terminal.mouseMode.sendButtonPress()
+        guard terminal != nil else { return false }
+        return tapAction(tapCount: 1, gestureRecognizer: gestureRecognizer) != .localSingleTap
     }
 
     /// Multiplex patch: the dynamic form of the tap failure chain. Mouse-off
@@ -1938,7 +2115,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                 let oldRange = linkHighlightRange
                 linkHighlightRange = nil
                 invalidateLinkHighlight(oldRange: oldRange, newRange: nil)
-                queuePendingDisplay()
+                frameDriver.markDirty()
             }
         default:
             break
@@ -1956,7 +2133,9 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
         let hit = calculateTapHit(point: point).grid
         let mode: Terminal.LinkLookupMode = linkReporting == .explicit ? .explicitOnly : .explicitAndImplicit
-        let link = terminal.link(at: .buffer(hit), mode: mode)
+        let link = withTerminal { terminal in
+            terminal.link(at: .buffer(hit), mode: mode)
+        }
         if link != lastReportedLink {
             lastReportedLink = link
         }
@@ -1973,7 +2152,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                 let oldRange = linkHighlightRange
                 linkHighlightRange = nil
                 invalidateLinkHighlight(oldRange: oldRange, newRange: nil)
-                queuePendingDisplay()
+                frameDriver.markDirty()
             }
             return
         }
@@ -1981,13 +2160,15 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             return
         }
         let hit = calculateTapHit(point: point).grid
-        let match = terminal.linkMatch(at: .buffer(hit), mode: .explicitAndImplicit)
+        let match = withTerminal { terminal in
+            terminal.linkMatch(at: .buffer(hit), mode: .explicitAndImplicit)
+        }
         let newRange = match?.rowRanges
         if newRange != linkHighlightRange {
             let oldRange = linkHighlightRange
             linkHighlightRange = newRange
             invalidateLinkHighlight(oldRange: oldRange, newRange: newRange)
-            queuePendingDisplay()
+            frameDriver.markDirty()
         }
     }
     
@@ -2066,6 +2247,46 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     
     var _nativeFg, _nativeBg: TTColor!
     var settingFg = false, settingBg = false
+    func setNativeForegroundColorLocked (_ newValue: UIColor)
+    {
+        terminal.terminalLock.preconditionLocked()
+        if settingFg { return }
+        settingFg = true
+        _nativeFg = newValue
+        terminal.foregroundColor = newValue.getTerminalColor()
+        refreshCachedViewState()
+        settingFg = false
+    }
+
+    func setNativeBackgroundColorLocked (_ newValue: UIColor)
+    {
+        terminal.terminalLock.preconditionLocked()
+        if settingBg { return }
+        settingBg = true
+        _nativeBg = newValue
+        terminal.backgroundColor = newValue.getTerminalColor()
+        refreshCachedViewState()
+        settingBg = false
+    }
+
+    func setNativeForegroundColorFromTerminal (_ newValue: UIColor)
+    {
+        if settingFg { return }
+        settingFg = true
+        _nativeFg = newValue
+        refreshCachedViewState()
+        settingFg = false
+    }
+
+    func setNativeBackgroundColorFromTerminal (_ newValue: UIColor)
+    {
+        if settingBg { return }
+        settingBg = true
+        _nativeBg = newValue
+        refreshCachedViewState()
+        settingBg = false
+    }
+
     /**
      * This will set the native foreground color to the specified native color (UIColor or NSColor)
      * and will have this reflected into the underlying's terminal `foregroundColor` and
@@ -2074,11 +2295,13 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     public var nativeForegroundColor: UIColor {
         get { _nativeFg }
         set {
-            if settingFg { return }
-            settingFg = true
-            _nativeFg = newValue
-            terminal.foregroundColor = nativeForegroundColor.getTerminalColor ()
-            settingFg = false
+            guard terminal != nil else {
+                setNativeForegroundColorFromTerminal(newValue)
+                return
+            }
+            withTerminal { _ in
+                setNativeForegroundColorLocked(newValue)
+            }
         }
     }
     
@@ -2090,26 +2313,34 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     public var nativeBackgroundColor: UIColor {
         get { _nativeBg }
         set {
-            if settingBg { return }
-            settingBg = true
-            _nativeBg = newValue
-            terminal.backgroundColor = nativeBackgroundColor.getTerminalColor ()
+            guard terminal != nil else {
+                setNativeBackgroundColorFromTerminal(newValue)
+                return
+            }
+            withTerminal { _ in
+                setNativeBackgroundColorLocked(newValue)
+            }
             colorsChanged()
-            settingBg = false
         }
     }
 
     /// Controls the color for the caret
     public var caretColor: UIColor {
         get { caretView?.caretColor ?? UIColor.black }
-        set { caretView?.caretColor = newValue }
+        set {
+            cursorColorIsDefault = false
+            caretView?.caretColor = newValue
+        }
     }
     
     /// Controls the color for the text in the caret when using a block cursor, if not set
     /// the cursor will render with the foreground color
     public var caretTextColor: UIColor? {
         get { caretView?.caretTextColor }
-        set { caretView?.caretTextColor = newValue }
+        set {
+            cursorTextColorIsDefault = newValue == nil
+            caretView?.caretTextColor = newValue
+        }
     }
     
     /// Controls weather to use high ansi colors, if false terminal will use bold text instead of high ansi colors
@@ -2118,8 +2349,8 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// Controls whether this view applies the terminal's BiDi presentation state.
     public var bidiHostPolicy: BidiHostPolicy = .respectTerminal {
         didSet {
-            terminal.updateFullScreen()
-            queuePendingDisplay()
+            withTerminal { $0.updateFullScreen() }
+            frameDriver.markDirty()
             updateCursorPosition()
         }
     }
@@ -2127,16 +2358,26 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// When true, block element (U+2580-U+259F) and box drawing (U+2500-U+257F) characters use custom rendering.
     public var customBlockGlyphs: Bool = true {
         didSet {
-            terminal.updateFullScreen()
-            queuePendingDisplay()
+            withTerminal { $0.updateFullScreen() }
+            frameDriver.markDirty()
+        }
+    }
+
+    /// Host-supplied fallback for symbol glyphs (for example Nerd Font icons)
+    /// that the selected font does not contain. `nil`, the default, disables
+    /// the feature entirely. See ``TerminalGlyphFallbackProvider``.
+    public var glyphFallbackProvider: (any TerminalGlyphFallbackProvider)? = nil {
+        didSet {
+            withTerminal { $0.updateFullScreen() }
+            frameDriver.markDirty()
         }
     }
 
     /// When true, custom block/box glyphs use anti-aliasing instead of pixel-aligned edges.
     public var antiAliasCustomBlockGlyphs: Bool = false {
         didSet {
-            terminal.updateFullScreen()
-            queuePendingDisplay()
+            withTerminal { $0.updateFullScreen() }
+            frameDriver.markDirty()
         }
     }
 
@@ -2148,8 +2389,8 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
         set {
             _selectedTextBackgroundColor = newValue
-            terminal.updateFullScreen()
-            queuePendingDisplay()
+            withTerminal { $0.updateFullScreen() }
+            frameDriver.markDirty()
         }
     }
 
@@ -2161,8 +2402,8 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
         set {
             _selectedTextForegroundColor = newValue
-            terminal.updateFullScreen()
-            queuePendingDisplay()
+            withTerminal { $0.updateFullScreen() }
+            frameDriver.markDirty()
         }
     }
     
@@ -2208,12 +2449,13 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// for callers that don't have a UIResponder hook into the menu
     /// system (where `selectNone` would otherwise come from).
     public func clearSelection() {
-        selection?.selectNone()
+        guard terminal != nil else { return }
+        withTerminal { _ in selection?.selectNone() }
         // Multiplex patch: programmatic clears (the app-owned selection
         // chrome's teardown) must also retire the selection drag recognizer
         // and repaint, or a stale highlight and gesture linger.
         disableSelectionPanGesture()
-        queuePendingDisplay()
+        frameDriver.markDirty()
     }
 
     /// Programmatically presents SwiftTerm's standard Copy / Paste /
@@ -2237,16 +2479,16 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     var lineDescent: CGFloat = 0
     var lineLeading: CGFloat = 0
     
-    open func bufferActivated(source: Terminal) {
-        resetManualScrollTracking()
-        updateScroller ()
-        // Multiplex patch: entering/leaving the alternate buffer flips
-        // whether pans scroll the remote or the local scrollback.
-        updateRemotePanGesture ()
+    nonisolated open func bufferActivated(source: Terminal) {
+        eventQueue.post(.bufferActivated)
     }
     
-    open func send(source: Terminal, data: ArraySlice<UInt8>) {
-        terminalDelegate?.send (source: self, data: data)
+    nonisolated open func send(source: Terminal, data: ArraySlice<UInt8>) {
+        let capturedData = Array(data)
+        onMain { [weak self] in
+            guard let self else { return }
+            self.terminalDelegate?.send(source: self, data: capturedData[...])
+        }
     }
     
     /**
@@ -2254,7 +2496,10 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
      */
     open func getOptimalFrameSize () -> CGRect
     {
-        return CGRect (x: 0, y: 0, width: cellDimension.width * CGFloat(terminal.cols), height: cellDimension.height * CGFloat(terminal.rows))
+        let size = withTerminal { terminal in
+            (cols: terminal.cols, rows: terminal.rows)
+        }
+        return CGRect (x: 0, y: 0, width: cellDimension.width * CGFloat(size.cols), height: cellDimension.height * CGFloat(size.rows))
     }
     
     func getImageScale () -> CGFloat {
@@ -2270,7 +2515,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     {
     }
     
-    func scale (image: UIImage, size: CGSize) -> UIImage {
+    nonisolated func scale (image: UIImage, size: CGSize) -> UIImage {
         UIGraphicsBeginImageContext(size)
         
         let srcRatio = image.size.height/image.size.width
@@ -2292,7 +2537,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         return ret
     }
     
-    func drawImageInStripe (image: TTImage, srcY: CGFloat, width: CGFloat, srcHeight: CGFloat, dstHeight: CGFloat, size: CGSize) -> TTImage? {
+    nonisolated func drawImageInStripe (image: TTImage, srcY: CGFloat, width: CGFloat, srcHeight: CGFloat, dstHeight: CGFloat, size: CGSize) -> TTImage? {
         let srcRect = CGRect(x: 0, y: CGFloat(srcY), width: image.size.width, height: srcHeight)
         guard let cropCG = image.cgImage?.cropping(to: srcRect) else {
             return nil
@@ -2315,25 +2560,27 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         return stripe
     }
 
-    open func scrolled(source terminal: Terminal, yDisp: Int) {
-        //XselectionView.notifyScrolled(source: terminal)
-        updateScroller()
-        terminalDelegate?.scrolled(source: self, position: scrollPosition)
-    }
-    
-    open func linefeed(source: Terminal) {
-        // Preserve manual selection while output is streaming when mouse reporting is disabled.
-        if allowMouseReporting {
-            selection.selectNone()
-            disableSelectionPanGesture()
-        }
-    }
-    
     func updateScroller ()
     {
+        // May be queued from a callback fired during Terminal.init, before
+        // the constructing thread finished assigning `terminal`.
+        guard terminal != nil else { return }
+        withTerminal { _ in
+            updateScrollerLocked()
+        }
+    }
+
+    func updateScrollerLocked ()
+    {
+        terminal.terminalLock.preconditionLocked()
         let displayBuffer = terminal.displayBuffer
+        // UIKit can change `contentOffset` synchronously when `contentSize`
+        // changes. Suppress the observer so it does not take the terminal lock
+        // again.
+        updatingContentOffsetFromTerminal = true
         contentSize = CGSize (width: CGFloat (displayBuffer.cols) * cellDimension.width,
                               height: CGFloat (displayBuffer.lines.count) * cellDimension.height)
+        updatingContentOffsetFromTerminal = false
         // Let the gesture own contentOffset while the finger is physically down
         // (isTracking), and while frozen history coasts under momentum —
         // re-asserting it there fights the drag and blocks the user from reaching
@@ -2359,25 +2606,6 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         //Xscroller.knobProportion = scrollThumbsize
     }
 
-#if canImport(MetalKit)
-    func metalVisibleRange() -> ClosedRange<Int>? {
-        let buffer = terminal.displayBuffer
-        guard buffer.lines.count > 0, cellDimension.height > 0, bounds.height > 0 else {
-            return nil
-        }
-        let contentHeight = CGFloat(buffer.lines.count) * cellDimension.height
-        let maxOffset = max(0, contentHeight - bounds.height)
-        let offsetY = min(max(0, contentOffset.y), maxOffset)
-        let firstRow = max(0, Int(floor(offsetY / cellDimension.height)))
-        let lastRow = min(buffer.lines.count - 1,
-                          Int(floor((offsetY + bounds.height - 1) / cellDimension.height)))
-        if firstRow > lastRow {
-            return nil
-        }
-        return firstRow...lastRow
-    }
-#endif
-    
     var userScrolling = false
     private var updatingContentOffsetFromTerminal = false
     private var manualScrollOffsetWithinRow: CGFloat = 0
@@ -2415,6 +2643,13 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
 
     private func setManualScrolling(_ enabled: Bool) {
+        withTerminal { terminal in
+            setManualScrollingLocked(enabled, terminal: terminal)
+        }
+    }
+
+    private func setManualScrollingLocked(_ enabled: Bool, terminal: Terminal) {
+        terminal.terminalLock.preconditionLocked()
         userScrolling = enabled
         terminal.userScrolling = enabled
         if !enabled {
@@ -2427,11 +2662,13 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
 
     private func resetManualScrollTracking() {
-        setManualScrolling(false)
-
-        let displayBuffer = terminal.displayBuffer
-        terminal.setViewYDisp(maxDisplayRow(in: displayBuffer))
-        let bottomOffset = min(CGFloat(displayBuffer.yDisp) * cellDimension.height, maxContentOffsetY())
+        let bottomRow = withTerminal { terminal -> Int in
+            setManualScrollingLocked(false, terminal: terminal)
+            let displayBuffer = terminal.displayBuffer
+            terminal.setViewYDisp(maxDisplayRow(in: displayBuffer))
+            return displayBuffer.yDisp
+        }
+        let bottomOffset = min(CGFloat(bottomRow) * cellDimension.height, maxContentOffsetY())
         setContentOffsetFromTerminal(CGPoint(x: 0, y: bottomOffset))
     }
 
@@ -2440,8 +2677,6 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             return
         }
 
-        let displayBuffer = terminal.displayBuffer
-        let maxRow = maxDisplayRow(in: displayBuffer)
         let maxContentOffset = maxContentOffsetY()
         let offsetY = min(max(contentOffset.y, 0), maxContentOffset)
 
@@ -2451,10 +2686,14 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         // short of the exact maximum, so the freeze never disengaged.
         let atBottomThreshold = max(contentOffsetTolerance, cellDimension.height / 2)
         if offsetY >= maxContentOffset - atBottomThreshold {
-            if displayBuffer.yDisp != maxRow {
-                terminal.setViewYDisp(maxRow)
+            withTerminal { terminal in
+                let displayBuffer = terminal.displayBuffer
+                let maxRow = maxDisplayRow(in: displayBuffer)
+                if displayBuffer.yDisp != maxRow {
+                    terminal.setViewYDisp(maxRow)
+                }
+                setManualScrollingLocked(false, terminal: terminal)
             }
-            setManualScrolling(false)
             return
         }
 
@@ -2472,12 +2711,17 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             return
         }
 
-        let row = max(0, min(maxRow, Int(floor((offsetY + contentOffsetTolerance) / cellDimension.height))))
-        manualScrollOffsetWithinRow = offsetY - CGFloat(row) * cellDimension.height
-        if displayBuffer.yDisp != row {
-            terminal.setViewYDisp(row)
+        withTerminal { terminal in
+            let displayBuffer = terminal.displayBuffer
+            let maxRow = maxDisplayRow(in: displayBuffer)
+            let row = max(0, min(maxRow, Int(floor((offsetY + contentOffsetTolerance) /
+                cellDimension.height))))
+            manualScrollOffsetWithinRow = offsetY - CGFloat(row) * cellDimension.height
+            if displayBuffer.yDisp != row {
+                terminal.setViewYDisp(row)
+            }
+            setManualScrollingLocked(true, terminal: terminal)
         }
-        setManualScrolling(true)
     }
 
     func getCurrentGraphicsContext () -> CGContext?
@@ -2488,7 +2732,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     func requestDisplay() {
 #if canImport(MetalKit)
         if useMetalRenderer {
-            queueMetalDisplay()
+            frameDriver.markDirty()
             return
         }
 #endif
@@ -2502,6 +2746,18 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         #else
         UIScreen.main.scale
         #endif
+    }
+
+    /// Multiplex patch: the scale the Metal renderer rasterizes at. The
+    /// MTKView sizes its drawable from the window's real scale, but
+    /// `backingScaleFactor()` is 1.0 on visionOS. The layer contentsScale and
+    /// trait displayScale carry the real value once attached; the backing
+    /// factor stays the floor for pre-attach frames.
+    func metalRenderingScaleFactor () -> CGFloat
+    {
+        max(metalView?.layer.contentsScale ?? layer.contentsScale,
+            traitCollection.displayScale,
+            backingScaleFactor())
     }
     
     override public func draw (_ dirtyRect: CGRect) {
@@ -2517,7 +2773,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         // Without these two lines, on font changes, some junk is being displayed
         // Once we test the font change, we could disable these two lines, and
         // enable the #if false in drawterminalContents that should be coping with this now
-        nativeBackgroundColor.set ()
+        effectiveNativeBackgroundColor.set ()
         context.fill ([dirtyRect])
 
         // drawTerminalContents and CoreText expect the AppKit coordinate system
@@ -2542,7 +2798,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 #if canImport(MetalKit)
         if useMetalRenderer, let metalView = metalView {
             metalView.frame = bounds
-            requestMetalDisplay()
+            frameDriver.markDirty()
         } else {
 	    if sizeChanged || originChanged {
                 setNeedsDisplay(bounds)
@@ -2562,7 +2818,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             syncYDispFromContentOffset()
 #if canImport(MetalKit)
             if useMetalRenderer, metalView != nil {
-                requestMetalDisplay()
+                frameDriver.markDirty()
             }
 #endif
         }
@@ -2596,12 +2852,11 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     // iOS Keyboard input
     
     // UITextInputTraits
-    // Multiplex patch: settable so the host app can choose its keyboard
-    // policy. Multiplex keeps `.default`, preserving the user's selected
-    // language and multistage IME. Was get-only upstream.
-    public var keyboardType: UIKeyboardType = .`default`
-    
-    public var keyboardAppearance: UIKeyboardAppearance = .`default`
+    // Multiplex patch: `keyboardType` is settable (stored at the end of the
+    // class) so the host app can choose its keyboard policy. Multiplex keeps
+    // `.default`, preserving the user's selected language and multistage IME.
+
+public var keyboardAppearance: UIKeyboardAppearance = .`default`
     public var returnKeyType: UIReturnKeyType = .`default`
     
     // This is wrong, but I can not find another good one
@@ -2638,7 +2893,6 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         set { }
     }
 
-
     open override var canBecomeFirstResponder: Bool {
         true
     }
@@ -2647,29 +2901,23 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         true
     }
     
+    /// Whether the delete key has anything to act on.
+    ///
+    /// `open` rather than `public` because the answer belongs to the embedder: this
+    /// reports the input-session shadow, which is empty at an ordinary shell prompt,
+    /// while `deleteBackward()` — already `open` — sends a backspace in that same state.
+    /// A host that knows its far side always has something to delete can say so.
+    ///
     /// Multiplex patch: a terminal's document is the remote screen, not this
-    /// view's local input mirror, so this always answers true.
+    /// view's local input mirror, so this always answers true. Text that
+    /// arrived any other way — typed before the attach, sent by another
+    /// client, echoed by the remote — is on screen and deletable while the
+    /// mirror is still empty. `deleteBackward` sends 0x7f (or the kitty
+    /// backspace event) and the remote alone decides what that does.
     ///
-    /// `textInputStorage` holds only what was typed through *this* view's text
-    /// input session. Text that arrived any other way — typed before the
-    /// attach, sent by another client, echoed by the remote, or left in a
-    /// composer when the app reattaches — is on screen and deletable while the
-    /// mirror is still empty, so reporting that mirror answered a question
-    /// about the wrong document. Backspace is unconditionally meaningful here:
-    /// `deleteBackward` sends 0x7f (or the kitty backspace event) and the remote
-    /// alone decides what that does. Nothing in SwiftTerm reads this property —
-    /// real editing addresses `textInputStorage` through ranges — so it is
-    /// advisory to UIKit only.
-    ///
-    /// ⚠ This does NOT restore held-backspace auto-repeat (tested: no change).
-    /// Once iOS accelerates a held delete it deletes word-wise, which reads the
-    /// document's actual characters to find boundaries — an empty mirror
-    /// starves that regardless of what this property claims. Same root cause as
-    /// upstream SwiftTerm #271 ("will not auto-repeat if it encounters a
-    /// space"), still open and undiagnosed there. Fixing it needs the document
-    /// stocked with real filler characters, which lands on the buffer that also
-    /// carries marked text and the Korean resyllabification transaction.
-    public var hasText: Bool {
+    /// ⚠ This does NOT restore held-backspace auto-repeat (tested: no change)
+    /// — see the input filler below, upstream SwiftTerm #271.
+    open var hasText: Bool {
         return true
     }
 
@@ -2702,10 +2950,6 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     // inspects the last character).
     static let inputFillerLength = 16
     static let inputFillerCharacter: Character = "x"
-
-    /// Count of filler characters at the head of `textInputStorage`. Non-zero
-    /// only while the buffer is *entirely* filler — see the invariant above.
-    var inputFillerCount = 0
 
     /// Stocks the buffer with filler when it holds nothing real, so a held
     /// delete key always has characters to consume. No-op during composition.
@@ -2806,7 +3050,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         // the pressesBegan Shift+Return cases used on real iPads/visionOS.
         if applyModifiers, text == "\n", _markedTextRange == nil, macPhysicalShiftHeld() {
             resetInputBuffer()
-            if terminal.keyboardEnhancementFlags.isEmpty {
+            if withTerminal({ $0.keyboardEnhancementFlags }).isEmpty {
                 send([10])
             } else {
                 _ = sendKittyEvent(KittyKeyEvent(key: .functional(.enter),
@@ -2817,7 +3061,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                                                  baseLayoutKey: nil,
                                                  composing: false))
             }
-            queuePendingDisplay()
+            frameDriver.markDirty()
             return
         }
         let hadPendingAutoPeriodDelete = pendingAutoPeriodDeleteWasSpace
@@ -2861,9 +3105,9 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 
         endTextInputEdit()
 
-        if !terminal.keyboardEnhancementFlags.isEmpty {
+        if !withTerminal({ $0.keyboardEnhancementFlags }).isEmpty {
             sendKittyTextInput(textToInsert, applyModifiers: applyModifiers)
-        } else if applyModifiers && (terminalAccessory?.controlModifier ?? controlModifier ?? false) {
+        } else if applyModifiers && (terminalAccessory?.controlModifier ?? controlModifier) {
             self.send(applyControlToEventCharacters(textToInsert))
             terminalAccessory?.controlModifier = false
             controlModifier = false
@@ -2880,7 +3124,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             }
         }
 
-        queuePendingDisplay()
+        frameDriver.markDirty()
     }
 
     func insertTextFromAccessory(_ text: String) {
@@ -2900,9 +3144,13 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         commitTextInput(text, applyModifiers: true)
     }
     private func kittyEncoder() -> KittyKeyboardEncoder {
-        KittyKeyboardEncoder(flags: terminal.keyboardEnhancementFlags,
-                             applicationCursor: terminal.applicationCursor,
-                             backspaceSendsControlH: backspaceSendsControlH)
+        let terminalState = withTerminal { terminal in
+            (terminal.keyboardEnhancementFlags, terminal.applicationCursor, terminal.applicationKeypad)
+        }
+        return KittyKeyboardEncoder(flags: terminalState.0,
+                                    applicationCursor: terminalState.1,
+                                    applicationKeypad: terminalState.2,
+                                    backspaceSendsControlH: backspaceSendsControlH)
     }
 
     private func kittyModifiers(from key: UIKey, includeOption: Bool) -> KittyKeyboardModifiers {
@@ -2965,7 +3213,8 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         // pressesBegan owns it before UIKit's text-input fallback drops the
         // physical Shift modifier. With enhancement flags active, Shift+Enter
         // encodes as CSI 13;2u (plain Return stays legacy CR per the spec);
-        // the flags-empty path has its own Shift+Return case in pressesBegan.
+        // the flags-empty path has its own Shift+Return case in pressesBegan
+        // and leaves unmodified Return to UIKit (IME commits stay intact).
         case .keyboardReturnOrEnter, .keyboardReturn:
             return .enter
         case .keyboardTab:
@@ -3136,17 +3385,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
 
     private func isKittyModifierKey(_ key: KittyFunctionalKey) -> Bool {
-        switch key {
-        case .leftShift, .rightShift,
-             .leftControl, .rightControl,
-             .leftAlt, .rightAlt,
-             .leftSuper, .rightSuper,
-             .capsLock, .numLock, .scrollLock,
-             .isoLevel3Shift, .isoLevel5Shift:
-            return true
-        default:
-            return false
-        }
+        IOSKittyInputPolicy.isModifierKey(key)
     }
 
     private var kittyIsComposing: Bool {
@@ -3217,8 +3456,8 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
 
     private func sendKittyTextInput(_ text: String, applyModifiers: Bool) {
-        let flags = terminal.keyboardEnhancementFlags
-        let controlActive = applyModifiers && (terminalAccessory?.controlModifier ?? controlModifier ?? false)
+        let flags = withTerminal { $0.keyboardEnhancementFlags }
+        let controlActive = applyModifiers && (terminalAccessory?.controlModifier ?? controlModifier)
         let metaActive = applyModifiers && metaModifier
         if controlActive {
             terminalAccessory?.controlModifier = false
@@ -3236,13 +3475,16 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                 var modifiers: KittyKeyboardModifiers = []
                 if controlActive { modifiers.insert(.ctrl) }
                 if metaActive { modifiers.insert(.alt) }
-                _ = sendKittyEvent(KittyKeyEvent(key: .functional(.enter),
-                                                 modifiers: modifiers,
-                                                 eventType: .press,
-                                                 text: nil,
-                                                 shiftedKey: nil,
-                                                 baseLayoutKey: nil,
-                                                 composing: kittyIsComposing))
+                let sent = sendKittyEvent(KittyKeyEvent(key: .functional(.enter),
+                                                        modifiers: modifiers,
+                                                        eventType: .press,
+                                                        text: nil,
+                                                        shiftedKey: nil,
+                                                        baseLayoutKey: nil,
+                                                        composing: kittyIsComposing))
+                if sent, let pendingEvent, pendingEvent.key.keyCode == .keyboardReturnOrEnter {
+                    recordReportedKittyPress(pendingEvent.key.keyCode, flags: flags)
+                }
             } else {
                 send(data: returnByteSequence [0...])
             }
@@ -3260,34 +3502,54 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                                       shiftedKey: nil,
                                       baseLayoutKey: nil,
                                       composing: kittyIsComposing)
-            _ = sendKittyEvent(event)
+            if sendKittyEvent(event), let pendingEvent {
+                recordReportedKittyPress(pendingEvent.key.keyCode, flags: flags)
+            }
             return
         }
 
         let event: KittyKeyEvent
+        let reportedKeyCode: UIKeyboardHIDUsage?
         if text.unicodeScalars.count == 1,
            let pendingEvent,
            let kittyEvent = kittyTextEvent(from: pendingEvent.key, eventType: pendingEvent.eventType, text: text) {
             event = kittyEvent
+            reportedKeyCode = pendingEvent.key.keyCode
         } else {
             let modifiers: KittyKeyboardModifiers = metaActive ? [.alt] : []
             event = kittyTextEventFromText(text, modifiers: modifiers, eventType: .press)
+            reportedKeyCode = nil
         }
-        _ = sendKittyEvent(event)
+        if sendKittyEvent(event), let reportedKeyCode {
+            recordReportedKittyPress(reportedKeyCode, flags: flags)
+        }
+    }
+
+    /// Remembers that a kitty press was reported for a hardware key, so that
+    /// `pressesEnded` reports the matching release.
+    private func recordReportedKittyPress(_ keyCode: UIKeyboardHIDUsage, flags: KittyKeyboardFlags) {
+        guard flags.contains(.reportEvents) else { return }
+        reportedKittyPresses.record(keyCode)
     }
 
     private func sendBackspaceKey() {
-        if terminal.keyboardEnhancementFlags.isEmpty {
+        let flags = withTerminal { $0.keyboardEnhancementFlags }
+        if flags.isEmpty {
             send([backspaceSendsControlH ? 8 : 0x7f])
             return
         }
-        _ = sendKittyEvent(KittyKeyEvent(key: .functional(.backspace),
-                                         modifiers: [],
-                                         eventType: .press,
-                                         text: nil,
-                                         shiftedKey: nil,
-                                         baseLayoutKey: nil,
-                                         composing: kittyIsComposing))
+        let pendingEvent = pendingKittyKeyEvent
+        pendingKittyKeyEvent = nil
+        let sent = sendKittyEvent(KittyKeyEvent(key: .functional(.backspace),
+                                                modifiers: [],
+                                                eventType: .press,
+                                                text: nil,
+                                                shiftedKey: nil,
+                                                baseLayoutKey: nil,
+                                                composing: kittyIsComposing))
+        if sent, let pendingEvent, pendingEvent.key.keyCode == .keyboardDeleteOrBackspace {
+            recordReportedKittyPress(pendingEvent.key.keyCode, flags: flags)
+        }
     }
 
     // this is necessary because something in the iOS IME seems to prevent
@@ -3314,7 +3576,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 
         sendBackspaceKey()
         send(txt: String(composed))
-        queuePendingDisplay()
+        frameDriver.markDirty()
         return true
     }
 
@@ -3362,7 +3624,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                 sendBackspaceKey()
             }
             send(txt: edit.textToInsert)
-            queuePendingDisplay()
+            frameDriver.markDirty()
             return .completed
         }
     }
@@ -3396,7 +3658,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             sendBackspaceKey()
         }
         send(txt: edit.textToInsert)
-        queuePendingDisplay()
+        frameDriver.markDirty()
         return true
     }
 
@@ -3417,12 +3679,14 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 
     func ensureCaretIsVisible ()
     {
-        guard !terminal.synchronizedOutputActive else { return }
-        let displayBuffer = terminal.displayBuffer
-        let realCaret = displayBuffer.y + displayBuffer.yBase
-        let viewportEnd = displayBuffer.yDisp + displayBuffer.rows
-
-        if userScrolling || terminal.userScrolling || realCaret >= viewportEnd || realCaret < displayBuffer.yDisp {
+        let shouldUpdate = withTerminal { terminal -> Bool in
+            guard !terminal.synchronizedOutputActive else { return false }
+            let displayBuffer = terminal.displayBuffer
+            let realCaret = displayBuffer.y + displayBuffer.yBase
+            let viewportEnd = displayBuffer.yDisp + displayBuffer.rows
+            return userScrolling || terminal.userScrolling || realCaret >= viewportEnd || realCaret < displayBuffer.yDisp
+        }
+        if shouldUpdate {
             resetManualScrollTracking()
             updateScroller()
         }
@@ -3552,12 +3816,15 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         let response = super.becomeFirstResponder()
         if response {
             caretView?.updateCursorStyle()
-            terminal.setTerminalFocus(true)
+            withTerminal { $0.setTerminalFocus(true) }
             // Multiplex patch: route Mac hardware Ctrl+chords to this view
             if ProcessInfo.processInfo.isiOSAppOnMac {
                 TerminalView.macControlKeyTarget = self
                 TerminalView.setupMacControlKeyBridgeIfNeeded()
             }
+#if canImport(MetalKit)
+            frameDriver.markDirty()
+#endif
         }
         return response
     }
@@ -3566,17 +3833,49 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         let code = super.resignFirstResponder()
         
         if code {
-            terminal.setTerminalFocus(false)
-            caretView?.disableAnimations()
-            caretView?.updateView()
-            keyRepeat?.invalidate()
-            keyRepeat = nil
+            withTerminal { $0.setTerminalFocus(false) }
+            caretView?.updateCursorStyle()
+#if canImport(MetalKit)
+            frameDriver.markDirty()
+#endif
+            stopAllKeyRepeats()
+            reportedKittyPresses.removeAll()
             
             terminalAccessory?.cancelTimer()
         }
         return code
     }
-    var keyRepeat: Timer?
+    private var keyRepeats: [UIKeyboardHIDUsage: Timer] = [:]
+    private var reportedKittyPresses = IOSKittyReportedPresses<UIKeyboardHIDUsage>()
+
+    /// Starts auto-repeat for `keyCode`. As with a hardware keyboard, only
+    /// the most recent key repeats, so any other repeat stops first. The
+    /// release of a different key does not stop this repeat.
+    private final func startKeyRepeat(for keyCode: UIKeyboardHIDUsage,
+                                _ tick: @escaping @MainActor @Sendable (TerminalView) -> Void) {
+        stopAllKeyRepeats()
+        let timer = Timer(fire: Date(timeInterval: 0.4, since: Date()),
+                          interval: 0.1,
+                          repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                tick(self)
+            }
+        }
+        keyRepeats[keyCode] = timer
+        RunLoop.current.add(timer, forMode: .default)
+    }
+
+    private func stopKeyRepeat(for keyCode: UIKeyboardHIDUsage) {
+        keyRepeats.removeValue(forKey: keyCode)?.invalidate()
+    }
+
+    private func stopAllKeyRepeats() {
+        for timer in keyRepeats.values {
+            timer.invalidate()
+        }
+        keyRepeats.removeAll()
+    }
 
     private struct PendingKittyKeyEvent {
         let key: UIKey
@@ -3617,13 +3916,6 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         var expiresAt: TimeInterval
     }
 
-    private var macBridgedPresses: [MacBridgedPress] = []
-    private var macPrefixFollowUpArmed = false
-    private var macPendingPrefixKeyCode: GCKeyCode?
-    private var macPendingPrefixFallback = ""
-    private var macPendingPrefixShifted = false
-    private var macPendingPrefixGeneration = 0
-
     /// Designed-for-iPad's UIKit pointer recognizer misses some physical Mac
     /// secondary-button reports. GameController sees the mouse at HID level;
     /// combine that button with UIPointerInteraction's absolute location and
@@ -3644,7 +3936,10 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                 object: nil,
                 queue: .main
             ) { note in
-                installMacSecondaryClickHandler(on: note.object as? GCMouse)
+                nonisolated(unsafe) let mouse = note.object as? GCMouse
+                MainActor.assumeIsolated {
+                    installMacSecondaryClickHandler(on: mouse)
+                }
             }
         }
     }
@@ -3653,13 +3948,15 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         guard let mouse, let button = mouse.mouseInput?.rightButton else { return }
         mouse.handlerQueue = .main
         button.pressedChangedHandler = { _, _, pressed in
-            guard pressed,
-                  let target = macSecondaryClickTarget,
-                  let location = target.lastPointerLocation,
-                  target.window != nil,
-                  target.bounds.contains(location)
-            else { return }
-            target.handleSecondaryClick(at: location)
+            MainActor.assumeIsolated {
+                guard pressed,
+                      let target = macSecondaryClickTarget,
+                      let location = target.lastPointerLocation,
+                      target.window != nil,
+                      target.bounds.contains(location)
+                else { return }
+                target.handleSecondaryClick(at: location)
+            }
         }
     }
 
@@ -3669,7 +3966,10 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         installMacControlKeyHandler(on: GCKeyboard.coalesced)
         NotificationCenter.default.addObserver(forName: .GCKeyboardDidConnect,
                                                object: nil, queue: .main) { note in
-            installMacControlKeyHandler(on: note.object as? GCKeyboard)
+            nonisolated(unsafe) let keyboard = note.object as? GCKeyboard
+            MainActor.assumeIsolated {
+                installMacControlKeyHandler(on: keyboard)
+            }
         }
     }
 
@@ -3681,6 +3981,8 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         // ordered input path.
         keyboard.handlerQueue = .main
         input.keyChangedHandler = { input, _, keyCode, pressed in
+            nonisolated(unsafe) let input = input
+            MainActor.assumeIsolated {
             guard pressed,
                   let target = macControlKeyTarget,
                   target.isFirstResponder,
@@ -3731,6 +4033,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                 // A multiplexer waits for its next key, not for an app-authored
                 // deadline. Keep the bridge armed until that one key arrives.
                 target.macPrefixFollowUpArmed = true
+            }
             }
         }
     }
@@ -3877,7 +4180,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         text: String,
         shifted: Bool
     ) {
-        guard !terminal.keyboardEnhancementFlags.isEmpty,
+        guard !withTerminal({ $0.keyboardEnhancementFlags }).isEmpty,
               text.unicodeScalars.count == 1,
               let textScalar = text.unicodeScalars.first,
               let physicalBase = Self.macPlainCharacter(for: keyCode, shifted: false)?
@@ -3951,7 +4254,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
 
     func sendMacControl(_ character: String) {
-        if !terminal.keyboardEnhancementFlags.isEmpty,
+        if !withTerminal({ $0.keyboardEnhancementFlags }).isEmpty,
            character.unicodeScalars.count == 1, let scalar = character.unicodeScalars.first {
             _ = sendKittyEvent(KittyKeyEvent(key: .unicode(scalar.value),
                                              modifiers: [.ctrl],
@@ -3971,10 +4274,27 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     open override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         var didHandleEvent = false
         let wasCommandActive = commandActive
-        let kittyFlags = terminal.keyboardEnhancementFlags
+        let terminalState = withTerminal { terminal in
+            (terminal.keyboardEnhancementFlags, terminal.applicationCursor)
+        }
+        let kittyFlags = terminalState.0
 
         if _markedTextRange != nil {
             pendingKittyKeyEvent = nil
+            for press in presses {
+                guard let key = press.key,
+                      let functionKey = kittyFunctionalKey(for: key.keyCode),
+                      IOSKittyInputPolicy.shouldReportModifierDuringComposition(
+                        key: functionKey,
+                        flags: kittyFlags),
+                      let kittyEvent = kittyKeyEvent(from: key, eventType: .press),
+                      sendKittyEvent(kittyEvent) else {
+                    continue
+                }
+                if kittyFlags.contains(.reportEvents) {
+                    reportedKittyPresses.record(key.keyCode)
+                }
+            }
             super.pressesBegan(presses, with: event)
             return
         }
@@ -3999,6 +4319,73 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                 continue
             }
             macPrefixFollowUpWillUseUIKit(key)
+            if kittyFlags.isEmpty,
+               key.modifierFlags.contains(.command),
+               !(key.modifierFlags.contains(.alternate) && key.charactersIgnoringModifiers == "o") {
+                continue
+            }
+            // Multiplex patch: without kitty flags there is no protocol-level
+            // Shift+Enter, and UIKit's text-input fallback (insertText "\n")
+            // drops the physical Shift modifier — so claim the press here and
+            // send LF (Ctrl+J). Every CLI agent composer treats LF as
+            // insert-newline (Claude Code, Codex, Pi — verified under tmux
+            // 3.6a, which forwards the byte untouched), while shells and
+            // full-screen apps treat it like Enter. Unmodified Return keeps
+            // the UIKit path so IME commits stay intact.
+            if kittyFlags.isEmpty,
+               key.modifierFlags.contains(.shift),
+               key.keyCode == .keyboardReturnOrEnter || key.keyCode == .keyboardReturn
+                || key.keyCode == .keypadEnter {
+                let sendableData = SendData.bytes([10])
+                didHandleEvent = true
+                startKeyRepeat(for: key.keyCode) { view in
+                    view.sendData(data: sendableData)
+                }
+                sendData (data: sendableData)
+                continue
+            }
+            if kittyFlags.isEmpty,
+               !key.modifierFlags.contains(.command),
+               (!key.modifierFlags.contains(.alternate) || optionAsMetaKey),
+               let functionKey = kittyFunctionalKey(for: key.keyCode),
+               // Multiplex patch: Return is classified for the kitty branch
+               // only; without flags it stays on UIKit's text path.
+               functionKey != .enter,
+               !isKittyModifierKey(functionKey) {
+                let modifiers = kittyModifiers(from: key, includeOption: optionAsMetaKey)
+                let isUnmodifiedPageKey = IOSKittyInputPolicy.shouldScrollPageLocally(
+                    key: functionKey,
+                    modifiers: modifiers,
+                    applicationCursor: terminalState.1)
+                if isUnmodifiedPageKey {
+                    if functionKey == .pageUp {
+                        pageUp()
+                    } else {
+                        pageDown()
+                    }
+                    didHandleEvent = true
+                    continue
+                }
+                let functionKeyText = kittyTextForFunctionalKey(functionKey, uiKey: key)
+                let pressEvent = KittyKeyEvent(key: .functional(functionKey),
+                                               modifiers: modifiers,
+                                               eventType: .press,
+                                               text: functionKeyText,
+                                               shiftedKey: nil,
+                                               baseLayoutKey: nil,
+                                               composing: kittyIsComposing)
+                if sendKittyEvent(pressEvent) {
+                    didHandleEvent = true
+                    startKeyRepeat(for: key.keyCode) { view in
+                        let repeatEvent = IOSKittyInputPolicy.repeatEvent(
+                            from: pressEvent,
+                            eventType: .repeatPress,
+                            composing: view.kittyIsComposing)
+                        _ = view.sendKittyEvent(repeatEvent)
+                    }
+                }
+                continue
+            }
             if !kittyFlags.isEmpty {
                 if key.modifierFlags.contains([.alternate, .command]) && key.charactersIgnoringModifiers == "o" {
                     optionAsMetaKey.toggle()
@@ -4011,7 +4398,12 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                     if isModifierKey && !kittyFlags.contains(.reportAllKeys) {
                         continue
                     }
-                    if (functionKey == .pageUp || functionKey == .pageDown) && !terminal.applicationCursor {
+                    let includeOption = optionAsMetaKey || functionKey == .leftAlt || functionKey == .rightAlt
+                    let modifiers = kittyModifiers(from: key, includeOption: includeOption)
+                    if IOSKittyInputPolicy.shouldScrollPageLocally(
+                        key: functionKey,
+                        modifiers: modifiers,
+                        applicationCursor: terminalState.1) {
                         if functionKey == .pageUp {
                             pageUp()
                         } else {
@@ -4020,8 +4412,6 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                         didHandleEvent = true
                         continue
                     }
-                    let includeOption = optionAsMetaKey || functionKey == .leftAlt || functionKey == .rightAlt
-                    let modifiers = kittyModifiers(from: key, includeOption: includeOption)
                     let functionKeyText = kittyTextForFunctionalKey(functionKey, uiKey: key)
                     let pressEvent = KittyKeyEvent(key: .functional(functionKey),
                                                    modifiers: modifiers,
@@ -4032,21 +4422,17 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                                                    composing: kittyIsComposing)
                     if sendKittyEvent(pressEvent) {
                         didHandleEvent = true
-                        keyRepeat?.invalidate()
+                        if kittyFlags.contains(.reportEvents) {
+                            reportedKittyPresses.record(key.keyCode)
+                        }
                         if !isModifierKey {
-                            keyRepeat = Timer(fire: Date(timeInterval: 0.4, since: Date()),
-                                              interval: 0.1,
-                                              repeats: true) { _ in
-                                let repeatEvent = KittyKeyEvent(key: .functional(functionKey),
-                                                                modifiers: modifiers,
-                                                                eventType: repeatEventType,
-                                                                text: functionKeyText,
-                                                                shiftedKey: nil,
-                                                                baseLayoutKey: nil,
-                                                                composing: self.kittyIsComposing)
-                                _ = self.sendKittyEvent(repeatEvent)
+                            startKeyRepeat(for: key.keyCode) { view in
+                                let repeatEvent = IOSKittyInputPolicy.repeatEvent(
+                                    from: pressEvent,
+                                    eventType: repeatEventType,
+                                    composing: view.kittyIsComposing)
+                                _ = view.sendKittyEvent(repeatEvent)
                             }
-                            RunLoop.current.add(keyRepeat!, forMode: .default)
                         }
                     }
                     continue
@@ -4055,21 +4441,16 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                     if let kittyEvent = kittyTextEvent(from: key, eventType: .press),
                        sendKittyEvent(kittyEvent) {
                         didHandleEvent = true
-                        let modifiers = kittyEvent.modifiers
-                        keyRepeat?.invalidate()
-                        keyRepeat = Timer(fire: Date(timeInterval: 0.4, since: Date()),
-                                          interval: 0.1,
-                                          repeats: true) { _ in
-                            let repeatEvent = KittyKeyEvent(key: kittyEvent.key,
-                                                            modifiers: modifiers,
-                                                            eventType: repeatEventType,
-                                                            text: nil,
-                                                            shiftedKey: kittyEvent.shiftedKey,
-                                                            baseLayoutKey: nil,
-                                                            composing: self.kittyIsComposing)
-                            _ = self.sendKittyEvent(repeatEvent)
+                        if kittyFlags.contains(.reportEvents) {
+                            reportedKittyPresses.record(key.keyCode)
                         }
-                        RunLoop.current.add(keyRepeat!, forMode: .default)
+                        startKeyRepeat(for: key.keyCode) { view in
+                            let repeatEvent = IOSKittyInputPolicy.repeatEvent(
+                                from: kittyEvent,
+                                eventType: repeatEventType,
+                                composing: view.kittyIsComposing)
+                            _ = view.sendKittyEvent(repeatEvent)
+                        }
                         continue
                     }
                 }
@@ -4109,16 +4490,16 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             case .keyboardScrollLock:
                 break // ignored
             case .keyboardUpArrow:
-                data = .bytes (terminal.applicationCursor ? EscapeSequences.moveUpApp : EscapeSequences.moveUpNormal)
+                data = .bytes (withTerminal({ $0.applicationCursor }) ? EscapeSequences.moveUpApp : EscapeSequences.moveUpNormal)
             case .keyboardDownArrow:
-                data = .bytes (terminal.applicationCursor ? EscapeSequences.moveDownApp : EscapeSequences.moveDownNormal)
+                data = .bytes (withTerminal({ $0.applicationCursor }) ? EscapeSequences.moveDownApp : EscapeSequences.moveDownNormal)
             case .keyboardLeftArrow:
                 if key.modifierFlags.contains ([.alternate]) {
                     data = .bytes (EscapeSequences.emacsBack)
                 } else if key.modifierFlags.contains ([.control]) {
                     data = .bytes (EscapeSequences.controlLeft)
                 } else {
-                    data = .bytes (terminal.applicationCursor ? EscapeSequences.moveLeftApp : EscapeSequences.moveLeftNormal)
+                    data = .bytes (withTerminal({ $0.applicationCursor }) ? EscapeSequences.moveLeftApp : EscapeSequences.moveLeftNormal)
                 }
             case .keyboardRightArrow:
                 if key.modifierFlags.contains ([.alternate]) {
@@ -4126,26 +4507,26 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                 } else if key.modifierFlags.contains ([.control]) {
                     data = .bytes (EscapeSequences.controlRight)
                 } else {
-                    data = .bytes (terminal.applicationCursor ? EscapeSequences.moveRightApp : EscapeSequences.moveRightNormal)
+                    data = .bytes (withTerminal({ $0.applicationCursor }) ? EscapeSequences.moveRightApp : EscapeSequences.moveRightNormal)
                 }
             case .keyboardPageUp:
-                if terminal.applicationCursor {
+                if withTerminal({ $0.applicationCursor }) {
                     data = .bytes (EscapeSequences.cmdPageUp)
                 } else {
                     pageUp()
                 }
 
             case .keyboardPageDown:
-                if terminal.applicationCursor {
+                if withTerminal({ $0.applicationCursor }) {
                     data = .bytes (EscapeSequences.cmdPageDown)
                 } else {
                     pageDown()
                 }
             case .keyboardHome:
-                data = .bytes (terminal.applicationCursor ? EscapeSequences.moveHomeApp : EscapeSequences.moveHomeNormal)
+                data = .bytes (withTerminal({ $0.applicationCursor }) ? EscapeSequences.moveHomeApp : EscapeSequences.moveHomeNormal)
                 
             case .keyboardEnd:
-                data = .bytes (terminal.applicationCursor ? EscapeSequences.moveEndApp : EscapeSequences.moveEndNormal)
+                data = .bytes (withTerminal({ $0.applicationCursor }) ? EscapeSequences.moveEndApp : EscapeSequences.moveEndNormal)
             case .keyboardDeleteForward:
                 data = .bytes (EscapeSequences.cmdDelKey)
                 
@@ -4182,7 +4563,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             case .keyboardF9:
                 data = .bytes (EscapeSequences.cmdF [8])
             case .keyboardF10:
-                data = .bytes (EscapeSequences.cmdF [8])
+                data = .bytes (EscapeSequences.cmdF [9])
             case .keyboardF11:
                 data = .bytes (EscapeSequences.cmdF [10])
             case .keyboardF12, .keyboardF13, .keyboardF14, .keyboardF15, .keyboardF16,
@@ -4191,27 +4572,24 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                 break
             case .keyboardPause, .keyboardStop, .keyboardMute, .keyboardVolumeUp, .keyboardVolumeDown:
                 break
-
-            // Multiplex patch: without kitty flags there is no protocol-level
-            // Shift+Enter, and UIKit's text-input fallback (insertText "\n")
-            // drops the physical Shift modifier — so claim the press here and
-            // send LF (Ctrl+J). Every CLI agent composer treats LF as
-            // insert-newline (Claude Code, Codex, Pi — verified under tmux
-            // 3.6a, which forwards the byte untouched), while shells and
-            // full-screen apps treat it like Enter. Unmodified Return keeps
-            // the UIKit path so IME commits stay intact.
-            case .keyboardReturnOrEnter, .keyboardReturn, .keypadEnter:
-                if key.modifierFlags.contains(.shift) {
-                    data = .bytes([10])
-                } else {
-                    fallthrough
-                }
-
+                
             default:
                 if key.modifierFlags.contains ([.alternate, .command]) && key.charactersIgnoringModifiers == "o" {
                     optionAsMetaKey.toggle()
                 } else if (key.modifierFlags.contains (.alternate) && optionAsMetaKey) || metaModifier {
-                    data = .text("\u{1b}\(key.charactersIgnoringModifiers)")
+                    // Meta prefixes the Control-transformed character for a
+                    // combined chord, just as in the enhanced keyboard encoder.
+                    if key.modifierFlags.contains(.control) {
+                        let controlBytes = applyControlToEventCharacters(key.charactersIgnoringModifiers)
+                        if controlBytes.isEmpty {
+                            // Keep the legacy Meta input for keys with no Control mapping.
+                            data = .text("\u{1b}\(key.charactersIgnoringModifiers)")
+                        } else {
+                            data = .bytes([0x1b] + controlBytes)
+                        }
+                    } else {
+                        data = .text("\u{1b}\(key.charactersIgnoringModifiers)")
+                    }
                     metaModifier = false
                 } else if key.modifierFlags.contains (.control) {
                     let controlBytes = applyControlToEventCharacters(key.charactersIgnoringModifiers)
@@ -4222,13 +4600,9 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             }
             if let sendableData = data {
                 didHandleEvent = true
-                keyRepeat?.invalidate()
-                keyRepeat = Timer (fire: Date(timeInterval: 0.4, since: Date()),
-                                   interval: 0.1,
-                                   repeats: true) { timer in
-                    self.sendData(data: sendableData)
+                startKeyRepeat(for: key.keyCode) { view in
+                    view.sendData(data: sendableData)
                 }
-                RunLoop.current.add(keyRepeat!, forMode: .default)
                 sendData (data: sendableData)
             }
         }
@@ -4238,10 +4612,10 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                 updateLinkHighlightIfNeeded(at: point, modifiers: [.command], force: true)
             }
             if linkHighlightMode == .alwaysWithModifier {
-                terminal.updateFullScreen()
+                withTerminal { $0.updateFullScreen() }
             }
             if linkHighlightMode == .alwaysWithModifier || linkHighlightMode == .hoverWithModifier {
-                queuePendingDisplay()
+                frameDriver.markDirty()
             }
         }
         if didHandleEvent == false {
@@ -4250,11 +4624,10 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
     
     public override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-        keyRepeat?.invalidate()
-        keyRepeat = nil
         let wasCommandActive = commandActive
         for press in presses {
             guard let key = press.key else { continue }
+            stopKeyRepeat(for: key.keyCode)
             switch key.keyCode {
             case .keyboardLeftGUI, .keyboardRightGUI:
                 activeCommandKeys.remove(key.keyCode)
@@ -4273,36 +4646,52 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
         if commandActive != wasCommandActive {
             if linkHighlightMode == .alwaysWithModifier {
-                terminal.updateFullScreen()
+                withTerminal { $0.updateFullScreen() }
             }
             if linkHighlightMode == .alwaysWithModifier || linkHighlightMode == .hoverWithModifier {
-                queuePendingDisplay()
+                frameDriver.markDirty()
             }
         }
-        let flags = terminal.keyboardEnhancementFlags
-        if flags.contains(.reportEvents) {
-            for press in presses {
-                guard let key = press.key else { continue }
-                let hasAltOrCtrl = key.modifierFlags.contains(.control) || (optionAsMetaKey && key.modifierFlags.contains(.alternate))
-                let functionKey = kittyFunctionalKey(for: key.keyCode)
-                if let functionKey, isKittyModifierKey(functionKey) && !flags.contains(.reportAllKeys) {
-                    continue
-                }
-                if let functionKey,
-                   !flags.contains(.reportAllKeys),
-                   (functionKey == .tab || functionKey == .enter || functionKey == .backspace) {
-                    continue
-                }
-                let shouldHandle = flags.contains(.reportAllKeys) || hasAltOrCtrl || functionKey != nil
-                if shouldHandle, let kittyEvent = kittyKeyEvent(from: key, eventType: .release, text: nil) {
-                    _ = sendKittyEvent(kittyEvent)
-                }
+        let flags = withTerminal { $0.keyboardEnhancementFlags }
+        for press in presses {
+            guard let key = press.key else { continue }
+            let wasReported = reportedKittyPresses.finish(key.keyCode)
+            if flags.contains(.reportEvents),
+               wasReported,
+               var kittyEvent = kittyKeyEvent(from: key, eventType: .release, text: nil) {
+                // A composition can start after this key's press. The matching
+                // release must still reach the application.
+                kittyEvent.composing = false
+                _ = sendKittyEvent(kittyEvent)
             }
         }
         super.pressesEnded(presses, with: event)
     }
+
+    public override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        let flags = withTerminal { $0.keyboardEnhancementFlags }
+        for press in presses {
+            // A press with no key is not a keyboard key. Do not reset the
+            // state of keys whose press was reported: their release events
+            // must still be sent when they end.
+            guard let key = press.key else { continue }
+            stopKeyRepeat(for: key.keyCode)
+            let wasReported = reportedKittyPresses.finish(key.keyCode)
+            if flags.contains(.reportEvents),
+               wasReported,
+               var kittyEvent = kittyKeyEvent(from: key, eventType: .release, text: nil) {
+                kittyEvent.composing = false
+                _ = sendKittyEvent(kittyEvent)
+            }
+            if key.keyCode == .keyboardLeftGUI || key.keyCode == .keyboardRightGUI {
+                activeCommandKeys.remove(key.keyCode)
+            }
+        }
+        commandActive = !activeCommandKeys.isEmpty
+        super.pressesCancelled(presses, with: event)
+    }
     
-    var pendingSelectionChanged = false
+    nonisolated let selectionChangePending = Locked(false)
     
     var buttonBackgroundColor: UIColor = .white
     var buttonShadowColor: UIColor = .black
@@ -4326,20 +4715,24 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
     }
     
-    open func showCursor(source: Terminal) {
-        guard let caretView else { return }
-        if caretView.superview == nil {
-            addSubview(caretView)
-        }
+    nonisolated open func showCursor(source: Terminal) {
+        frameSignal.markDirty()
     }
 
-    open func hideCursor(source: Terminal) {
-        caretView?.removeFromSuperview()
+    nonisolated open func hideCursor(source: Terminal) {
+        frameSignal.markDirty()
     }
     
-    open func cursorStyleChanged (source: Terminal, newStyle: CursorStyle) {
-        caretView?.style = newStyle
-        updateCaretView()
+    nonisolated open func cursorStyleChanged (source: Terminal, newStyle: CursorStyle) {
+        let style = newStyle
+        onMain { [weak self] in
+            guard let self else { return }
+            self.caretView?.style = style
+            self.updateCaretView()
+#if canImport(MetalKit)
+            self.frameDriver.markDirty()
+#endif
+        }
     }
     /**
      * Opacity of the terminal's default background, in the 0...1 range (values are clamped).
@@ -4363,60 +4756,88 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 
     /// Controls how this view responds to the bell character; `.sound`
     /// preserves the historical behavior of invoking the delegate's `bell`
-    public var bellStyle: BellStyle = .sound
+    public var bellStyle: BellStyle = .sound {
+        didSet {
+            bellPolicy.setStyle(bellStyle)
+        }
+    }
 
-    open func bell(source: Terminal) {
-        switch bellStyle {
-        case .none:
+    /// Gate consulted when a queued bell is delivered on the main thread.
+    let bellPolicy = BellPolicy()
+
+    /// Coalescing channel for idempotent notifications (io-gaps.md G6).
+    nonisolated let eventQueue = TerminalEventQueue()
+    nonisolated let programStatusState = Locked<[TerminalProgramStatus]>([])
+
+    nonisolated open func bell(source: Terminal) {
+        // See the macOS view and io-gaps.md G9: push and forget, debounce at
+        // the drain.
+        eventQueue.post(.bell)
+    }
+
+    /// Applies one coalesced event. Main thread.
+    func applyTerminalEvent (_ event: TerminalEvent) {
+        switch event {
+        case .bufferActivated:
+            resetManualScrollTracking()
+            updateScroller()
+            refreshProgramScrollGesture()
+        case .mouseModeChanged:
+            // iOS has no tracking-area equivalent to update.
             break
-        case .sound:
-            terminalDelegate?.bell (source: self)
-        case .visual:
-            flashVisualBell ()
+        case .bell:
+            deliverBell()
+        case .programStatusChanged:
+            terminalDelegate?.programStatusChanged(source: self, records: programStatusRecords)
+        }
+    }
+
+    private func deliverBell () {
+        guard bellPolicy.shouldDeliver() else { return }
+        switch bellStyle {
+        case .none: break
+        case .sound: terminalDelegate?.bell(source: self)
+        case .visual: flashVisualBell()
         case .soundAndVisual:
-            terminalDelegate?.bell (source: self)
-            flashVisualBell ()
+            terminalDelegate?.bell(source: self)
+            flashVisualBell()
         }
     }
 
     /// Briefly flashes the view with the foreground color, the "visual bell"
     func flashVisualBell ()
     {
-        let flash = CALayer ()
+        let flash = CALayer()
         flash.frame = bounds
         flash.backgroundColor = nativeForegroundColor.cgColor
         flash.opacity = 0
-        layer.addSublayer (flash)
-
-        CATransaction.begin ()
-        CATransaction.setCompletionBlock {
-            flash.removeFromSuperlayer ()
-        }
-        let animation = CAKeyframeAnimation (keyPath: "opacity")
+        layer.addSublayer(flash)
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { flash.removeFromSuperlayer() }
+        let animation = CAKeyframeAnimation(keyPath: "opacity")
         animation.values = [0.0, 0.35, 0.0]
         animation.keyTimes = [0, 0.3, 1]
         animation.duration = 0.2
-        flash.add (animation, forKey: "visualBell")
-        CATransaction.commit ()
+        flash.add(animation, forKey: "visualBell")
+        CATransaction.commit()
     }
 
-    public func progressReport(source: Terminal, report: Terminal.ProgressReport) {
-        if Thread.isMainThread {
-            handleProgressReport(report)
-        } else {
-            DispatchQueue.main.async { [weak self] in
-                self?.handleProgressReport(report)
-            }
+    public nonisolated func progressReport(source: Terminal, report: Terminal.ProgressReport) {
+        onMain { [weak self] in
+            self?.handleProgressReport(report)
         }
     }
 
-    open func selectionChanged(source: Terminal) {
-        if pendingSelectionChanged {
-            return
+    nonisolated open func selectionChanged(source: Terminal) {
+        let mustSchedule = selectionChangePending.withLock { pending in
+            guard !pending else { return false }
+            pending = true
+            return true
         }
-        pendingSelectionChanged = true
-        DispatchQueue.main.async {
-            self.pendingSelectionChanged = false
+        guard mustSchedule else { return }
+        onMain { [weak self] in
+            guard let self, self.terminal != nil else { return }
+            self.selectionChangePending.withLock { $0 = false }
 
             self.inputDelegate?.selectionWillChange (self)
             self.inputDelegate?.selectionDidChange(self)
@@ -4424,64 +4845,73 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             // Multiplex patch: report the selection's content-coordinate
             // box to the app-owned selection chrome (nil = cleared).
             self.selectionUIHandler?(self.selectionUIRect())
- 
-#if canImport(MetalKit)
-            if self.metalView != nil {
-                self.metalDirtyRange = self.metalVisibleRange()
-                self.queueMetalDisplay()
-            } else {
-                self.setNeedsDisplay(self.bounds)
-            }
-#else
-            self.setNeedsDisplay(self.bounds)
-#endif
-            
-            if !self.selection.active {
+
+            // Every renderer: the Core Graphics path draws from
+            // the render snapshot, which only a frame tick refreshes, so
+            // `setNeedsDisplay` alone repaints the previous frame.
+            self.invalidateTerminalContents()
+
+            if !self.withTerminal({ _ in self.selection.active }) {
                 // Multiplex patch: route through hideContextMenu so this view's
                 // own record of the menu is cleared with it.
                 self.hideContextMenu()
-                self.selection.selectNone()
+                self.withTerminal { _ in self.selection.selectNone() }
                 self.disableSelectionPanGesture()
             }
         }
     }
 
-    open func isProcessTrusted(source: Terminal) -> Bool {
+    nonisolated open func isProcessTrusted(source: Terminal) -> Bool {
         true
     }
 
-    open func cellSizeInPixels(source: Terminal) -> (width: Int, height: Int)? {
-        let scale = getImageScale()
-        let width = Int(round(cellDimension.width * scale))
-        let height = Int(round(cellDimension.height * scale))
-        return (width, height)
+    nonisolated open func cellSizeInPixels(source: Terminal) -> (width: Int, height: Int)? {
+        cachedCellPixelSizeValue()
+    }
+
+    nonisolated open func terminalControlBytesForPaste(source: Terminal) -> Set<UInt8> {
+        TerminalPasteControls.approximateTerminalControlBytes
     }
     
-    open func mouseModeChanged(source: Terminal) {
-        // Multiplex patch: pan handling depends on mouse mode *and* the
-        // active buffer — recompute both here and in bufferActivated.
+    nonisolated open func mouseModeChanged(source: Terminal) {
+        let mouseMode = source.mouseMode
+        onMain { [weak self] in
+            guard let self else { return }
+            self.refreshProgramScrollGesture(mouseMode: mouseMode)
+        }
+    }
+
+    // Multiplex patch: pan handling depends on mouse mode *and* the active
+    // buffer *and* the app's copy-mode/select-text flags — one policy for
+    // every caller (mode changes, buffer switches, allowMouseReporting).
+    private func refreshProgramScrollGesture(mouseMode: Terminal.MouseMode? = nil) {
         updateRemotePanGesture()
     }
     
-    open func setTerminalTitle(source: Terminal, title: String) {
-        DispatchQueue.main.async {
-            self.terminalDelegate?.setTerminalTitle(source: self, title: title)
+    nonisolated open func setTerminalTitle(source: Terminal, title: String) {
+        let capturedTitle = title
+        onMain { [weak self] in
+            guard let self else { return }
+            self.terminalDelegate?.setTerminalTitle(source: self, title: capturedTitle)
         }
     }
   
-    open func sizeChanged(source: Terminal) {
-        DispatchQueue.main.async {
-            self.terminalDelegate?.sizeChanged(source: self, newCols: source.cols, newRows: source.rows)
+    nonisolated open func sizeChanged(source: Terminal) {
+        let cols = source.cols
+        let rows = source.rows
+        onMain { [weak self] in
+            guard let self else { return }
+            self.terminalDelegate?.sizeChanged(source: self, newCols: cols, newRows: rows)
             self.updateScroller()
         }
     }
   
-    open func setTerminalIconTitle(source: Terminal, title: String) {
-        //
+    nonisolated open func setTerminalIconTitle(source: Terminal, title: String) {
+        let _ = title
     }
   
     // Terminal.Delegate method implementation
-    open func windowCommand(source: Terminal, command: Terminal.WindowManipulationCommand) -> [UInt8]? {
+    nonisolated open func windowCommand(source: Terminal, command: Terminal.WindowManipulationCommand) -> [UInt8]? {
         switch command {
         case .reportTextAreaPixelDimension, .reportTerminalWindowPixelDimension:
             guard let cellSize = cellSizeInPixels(source: source) else { return nil }
@@ -4501,17 +4931,225 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
     }
     
-    public func clipboardCopy(source: Terminal, content: Data) {
-        terminalDelegate?.clipboardCopy(source: self, content: content)
+    public nonisolated func clipboardCopy(source: Terminal, content: Data) {
+        let capturedContent = content
+        onMain { [weak self] in
+            guard let self else { return }
+            self.terminalDelegate?.clipboardCopy(source: self, content: capturedContent)
+        }
     }
     
-    public func clipboardRead(source: Terminal) -> Data? {
-        return terminalDelegate?.clipboardRead(source: self)
+    public nonisolated func clipboardRead(source: Terminal) -> Data? {
+        if Thread.isMainThread && !source.terminalLock.isLockedByCurrentThread {
+            return MainActor.assumeIsolated {
+                terminalDelegate?.clipboardRead(source: self)
+            }
+        }
+
+        // Avoid main.sync here: OSC 52 can query the clipboard while the main
+        // thread is parsing with the terminal lock held, which would deadlock.
+        let selectionChars = "c"
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let content = self.terminalDelegate?.clipboardRead(source: self) else {
+                return
+            }
+            let base64 = content.base64EncodedString()
+            let reply = Array("\u{1b}]52;\(selectionChars);\(base64)\u{1b}\\".utf8)
+            self.send(data: reply[...])
+        }
+        return nil
     }
 
-    public func iTermContent (source: Terminal, content: ArraySlice<UInt8>) {
-        terminalDelegate?.iTermContent(source: self, content: content)
+    /// UIKit has no primary selection, so only the standard clipboard exists.
+    @MainActor
+    func kittyPlatformTypeIdentifiers(location: KittyClipboardLocation) -> [String]? {
+        guard location == .standard else { return nil }
+        return UIPasteboard.general.types
     }
+
+    @MainActor
+    func kittyPlatformChangeCount(location: KittyClipboardLocation) -> UInt64 {
+        guard location == .standard else { return 0 }
+        return UInt64(bitPattern: Int64(UIPasteboard.general.changeCount))
+    }
+
+    /// The data stored under one platform type identifier.
+    @MainActor
+    func kittyPlatformData(location: KittyClipboardLocation, identifier: String) -> Data? {
+        guard location == .standard else { return nil }
+        return UIPasteboard.general.data(forPasteboardType: identifier)
+    }
+
+    /// Publishes every entry as one logical pasteboard item.
+    @MainActor
+    func kittyPlatformPublish(
+        location: KittyClipboardLocation,
+        items: [(identifier: String, data: Data)]
+    ) -> KittyClipboardWriteResult {
+        guard location == .standard else { return .unsupported }
+        var item: [String: Any] = [:]
+        for entry in items {
+            item[entry.identifier] = entry.data
+        }
+        UIPasteboard.general.setItems([item])
+        return .success
+    }
+
+    public nonisolated func iTermContent (source: Terminal, content: ArraySlice<UInt8>) {
+        let capturedContent = Array(content)
+        onMain { [weak self] in
+            guard let self else { return }
+            self.terminalDelegate?.iTermContent(source: self, content: capturedContent[...])
+        }
+    }
+
+    // Keep new stored properties at the end of the class. Moving the existing
+    // render-path fields changes their Release layout and can reduce throughput.
+    nonisolated let kittyClipboardBridge = AppleKittyClipboardBridge()
+
+    // MARK: - Multiplex patch stored state (kept last, per the note above)
+
+    /// Multiplex patch: inactive tabs must keep parsing bytes so their buffer
+    /// and scrollback remain current, but they do not need frames, UIKit
+    /// invalidations, cursor placement, or accessibility notifications while
+    /// fully obscured. Drives the frame driver's host-visibility input (which
+    /// also reports DEC 2033 visibility to the remote); the first frame after
+    /// re-showing repaints the whole screen.
+    public var renderUpdatesEnabled: Bool = true {
+        didSet {
+            guard renderUpdatesEnabled != oldValue else { return }
+            frameDriver?.setHostVisibleOnMain(renderUpdatesEnabled)
+            guard renderUpdatesEnabled, terminal != nil else { return }
+            withTerminal { $0.updateFullScreen() }
+            frameDriver.markDirty()
+        }
+    }
+
+    /// Multiplex patch: allow a resolved link to be activated without the
+    /// pointer state `linkHighlightMode` demands. Touch never hovers, so a
+    /// touch-only device could otherwise activate explicit OSC 8 links at
+    /// best and implicit URLs never. This only affects activation — hover
+    /// underlining still follows `linkHighlightMode`.
+    public var linkActivationIgnoresHighlight = false
+
+    /// Multiplex patch: app-owned policy for an activated link. Implicit
+    /// detection matches filesystem paths (`./src/main.swift`, `/etc/hosts`)
+    /// as readily as URLs, and those are everywhere in terminal output — a
+    /// long press over one must still open the selection menu. Returning
+    /// false declines the match and lets the gesture continue as if no link
+    /// were there. Install with a weak capture: the view owns this closure.
+    ///
+    /// `rowTexts` is the implicit match split at its hard-wrap seams
+    /// (empty for explicit links and single-row matches) — the app-side
+    /// glue detector's evidence.
+    ///
+    /// `position` is the pressed cell in buffer coordinates (row includes
+    /// the scrollback offset) — on a multiplexer's composited screen it
+    /// names the pane under the finger, which the app needs to resolve a
+    /// relative path against that pane's cwd rather than the active one's.
+    public var linkActivationHandler: ((_ link: String, _ params: [String: String], _ rowTexts: [String], _ position: Position) -> Bool)?
+
+    private var lastMacSecondaryClickAt: TimeInterval = -.infinity
+
+    /// Multiplex patch: keep IME composition local in a floating label until
+    /// UIKit commits it; provisional marked text must never enter the PTY.
+    var markedTextOverlay: UILabel?
+
+    /// Multiplex patch: true while this view believes its selection context
+    /// menu is on screen. Kept in step by `showContextMenu`/`hideContextMenu`
+    /// and cleared by every menu action, so it can never outlive the menu and
+    /// swallow a tap. See `dismissLocalSelectionUI`.
+    var contextMenuPresented = false
+
+    /// Multiplex patch: when set, a long press over a cell this filter claims
+    /// becomes a remote mouse drag instead of the selection menu. The filter
+    /// receives the screen cell (zero-based, what the wire will report) and
+    /// that cell's character, and must answer quickly — it runs at gesture
+    /// time. Only consulted while the client requested button tracking
+    /// (1002/1003), so a plain shell never loses its long press.
+    public var longPressMouseDragFilter: ((_ cell: (col: Int, row: Int), _ content: Character?) -> Bool)?
+
+    private var mouseDragPressFlags: Int?
+    private var mouseDragReleaseFlags = 0
+    private var mouseDragLastCell: Position?
+
+    var remoteScrollResidual: CGFloat = 0
+
+    // Multiplex patch: wheel reports are pinned to the pan's START location.
+    // A pan's live location moves with the drag (on visionOS it is the gaze
+    // hit at pinch time plus the hand's unbounded translation), so a long
+    // scroll walks the reported coordinate off the content and the row clamp
+    // pins it to row 0 — herdr's tab bar, where a wheel event switches tabs.
+    // Desktop wheel semantics scroll the point under the pointer at gesture
+    // start; anchoring restores that.
+    var remoteScrollAnchor: CGPoint?
+
+    /// Multiplex patch: an app-owned tmux copy-mode HUD disables mouse
+    /// reporting so UIKit can select text locally, but tmux may still render
+    /// in the primary buffer. In that narrow state, keep pans remote by
+    /// translating them to cursor keys. Selection drags continue to win in
+    /// `RemoteScrollGestureGate` below.
+    public var forceRemoteCursorScroll: Bool = false {
+        didSet {
+            guard forceRemoteCursorScroll != oldValue else { return }
+            updateRemotePanGesture()
+        }
+    }
+
+    /// Multiplex patch: while set, the APP owns selection chrome. The
+    /// deprecated UIMenuController never shows (`showContextMenu` no-ops),
+    /// a plain tap or long press seeds a word selection directly — no
+    /// PASTE/SELECT menu detour — and every selection change reports the
+    /// selection's CONTENT-coordinate rectangle (`selectionUIRect`; nil
+    /// when the selection clears) so the app can float its own actions
+    /// beside it as sibling subviews. Set only while the app's
+    /// select-text mode runs; nil restores the stock UIKit selection flow.
+    public var selectionUIHandler: ((CGRect?) -> Void)?
+
+    /// Multiplex patch: the app's replacement for the selection context menu
+    /// OUTSIDE select-text mode. A long press / secondary click that does not
+    /// activate a link, or a direct double tap, reports its screen region and
+    /// buffer position here instead of showing deprecated UIMenuController —
+    /// the app draws its own SELECT / SELECT ALL / PASTE block there.
+    public var selectionMenuHandler: ((CGRect, Position) -> Void)?
+
+    /// Multiplex patch: set by the app while its selection block is on
+    /// screen. A tap dismisses-and-consumes exactly like the native menu
+    /// (`dismissLocalSelectionUI` calls and clears it); the app also clears
+    /// it whenever it hides the block itself.
+    public var appMenuDismiss: (() -> Void)?
+
+    /// Multiplex patch: an app-owned select-text HUD over a mouse-capturing
+    /// full-screen app (tmux, herdr). Like the copy-mode state above it turns
+    /// mouse reporting off so taps run the native selection gestures — but
+    /// unlike copy mode there is no remote view that answers cursor keys, so
+    /// a pan falling through to the alternate-screen branch would type
+    /// arrows into the remote app. While set, pans are not forwarded at all
+    /// (the alternate buffer has no local scrollback to move either).
+    public var suppressRemotePanScroll: Bool = false {
+        didSet {
+            guard suppressRemotePanScroll != oldValue else { return }
+            updateRemotePanGesture()
+        }
+    }
+
+    // Multiplex patch: the gate yields to an active selection drag.
+    private lazy var remoteScrollGate = RemoteScrollGestureGate (terminalView: self)
+
+    /// Multiplex patch: settable so the host app can choose its keyboard
+    /// policy (was get-only upstream). Multiplex keeps `.default`.
+    public var keyboardType: UIKeyboardType = .`default`
+
+    /// Count of filler characters at the head of `textInputStorage`. Non-zero
+    /// only while the buffer is *entirely* filler — see the input filler.
+    var inputFillerCount = 0
+
+    private var macBridgedPresses: [MacBridgedPress] = []
+    private var macPrefixFollowUpArmed = false
+    private var macPendingPrefixKeyCode: GCKeyCode?
+    private var macPendingPrefixFallback = ""
+    private var macPendingPrefixShifted = false
+    private var macPendingPrefixGeneration = 0
 }
 
 // Multiplex patch: delegate for the remote-scroll pan. A separate object —
@@ -4534,7 +5172,7 @@ private class RemoteScrollGestureGate: NSObject, UIGestureRecognizerDelegate {
 
 // Default implementations for TerminalViewDelegate
 
-extension TerminalViewDelegate {
+extension TerminalViewDelegate {    
     public func bell (source: TerminalView)
     {
         #if os(iOS)
@@ -4552,14 +5190,23 @@ extension TerminalViewDelegate {
     public func clipboardRead(source: TerminalView) -> Data? {
         return nil
     }
+
 }
 
 extension TerminalView: UIAccessibilityReadingContent {
     private func accessibilityBaseAttributes() -> [NSAttributedString.Key: Any] {
-        getAttributes(CharData.defaultAttr, withUrl: false) ?? [.font: fontSet.normal]
+        terminal.terminalLock.preconditionLocked()
+        return getAttributes(CharData.defaultAttr, withUrl: false) ?? [.font: fontSet.normal]
     }
 
     private func accessibilityAttributedLine(_ row: Int, endCol: Int = -1) -> NSAttributedString {
+        withTerminal { _ in
+            accessibilityAttributedLineLocked(row, endCol: endCol)
+        }
+    }
+
+    private func accessibilityAttributedLineLocked(_ row: Int, endCol: Int = -1) -> NSAttributedString {
+        terminal.terminalLock.preconditionLocked()
         guard row >= 0, row < terminal.displayBuffer.lines.count else {
             return NSAttributedString(string: "")
         }
@@ -4574,18 +5221,25 @@ extension TerminalView: UIAccessibilityReadingContent {
         let result = NSMutableAttributedString()
         var column = 0
         while column < lineLimit {
-            let cell = line[column]
+            let cell = line.packedView(at: column)
             let width = max(1, Int(cell.width))
-            let character = cell.code == 0 ? " " : terminal.getCharacter(for: cell)
+            let text = cell.code == 0 ? " " : cell.getText()
             let attributes = getAttributes(cell.attribute, withUrl: false)
                 ?? accessibilityBaseAttributes()
-            result.append(NSAttributedString(string: String(character), attributes: attributes))
+            result.append(NSAttributedString(string: text, attributes: attributes))
             column += width
         }
         return result
     }
 
     private func accessibilityAttributedDisplayText(start: Position, end: Position) -> NSAttributedString {
+        withTerminal { _ in
+            accessibilityAttributedDisplayTextLocked(start: start, end: end)
+        }
+    }
+
+    private func accessibilityAttributedDisplayTextLocked(start: Position, end: Position) -> NSAttributedString {
+        terminal.terminalLock.preconditionLocked()
         let buffer = terminal.displayBuffer
         guard !buffer.lines.isEmpty else {
             return NSAttributedString(string: "")
@@ -4629,7 +5283,7 @@ extension TerminalView: UIAccessibilityReadingContent {
 
         var bufferLine = buffer.lines[start.row]
         if bufferLine.hasAnyContent() {
-            currentLine.append(accessibilityAttributedLine(start.row, endCol: start.row < end.row ? -1 : end.col))
+            currentLine.append(accessibilityAttributedLineLocked(start.row, endCol: start.row < end.row ? -1 : end.col))
         }
 
         var line = start.row + 1
@@ -4646,7 +5300,7 @@ extension TerminalView: UIAccessibilityReadingContent {
                     lines.append(currentLine)
                 }
 
-                currentLine.append(accessibilityAttributedLine(line))
+                currentLine.append(accessibilityAttributedLineLocked(line))
             } else {
                 if !isWrapped || blanks.isEmpty {
                     blanks.append(NSMutableAttributedString())
@@ -4667,7 +5321,7 @@ extension TerminalView: UIAccessibilityReadingContent {
                     lines.append(currentLine)
                 }
 
-                currentLine.append(accessibilityAttributedLine(end.row, endCol: end.col))
+                currentLine.append(accessibilityAttributedLineLocked(end.row, endCol: end.col))
             }
         }
 
@@ -4686,7 +5340,13 @@ extension TerminalView: UIAccessibilityReadingContent {
     }
     
     func startingLine(forLineNumber lineNumber: Int) -> Int {
-        let lineWidth = terminal.buffer.lines[lineNumber].count
+        withTerminal { _ in
+            startingLineLocked(forLineNumber: lineNumber)
+        }
+    }
+
+    func startingLineLocked(forLineNumber lineNumber: Int) -> Int {
+        terminal.terminalLock.preconditionLocked()
         var startingLine = lineNumber
         while startingLine >= 1 {
             startingLine -= 1
@@ -4706,7 +5366,13 @@ extension TerminalView: UIAccessibilityReadingContent {
     }
 
     func endingLine(forLineNumber lineNumber: Int) -> Int {
-        let lineWidth = terminal.buffer.lines[lineNumber].count
+        withTerminal { _ in
+            endingLineLocked(forLineNumber: lineNumber)
+        }
+    }
+
+    func endingLineLocked(forLineNumber lineNumber: Int) -> Int {
+        terminal.terminalLock.preconditionLocked()
         var endingLine = lineNumber
         while (endingLine < terminal.buffer.lines.count - 1) {
             let start = Position(col: 0, row: endingLine)
@@ -4723,28 +5389,33 @@ extension TerminalView: UIAccessibilityReadingContent {
     }
 
     public func accessibilityContent(forLineNumber lineNumber: Int) -> String? {
-        var startingLine = startingLine(forLineNumber: lineNumber)
-        var endingLine = endingLine(forLineNumber: lineNumber)
-        let start = Position(col: 0, row: startingLine)
-        let end = Position(col: terminal.buffer.lines[endingLine].count,
-                           row: endingLine)
-        var text =  terminal.getDisplayText(start: start, end: end)
-        return terminal.getDisplayText(start: start, end: end)
+        withTerminal { terminal in
+            let startingLine = startingLineLocked(forLineNumber: lineNumber)
+            let endingLine = endingLineLocked(forLineNumber: lineNumber)
+            let start = Position(col: 0, row: startingLine)
+            let end = Position(col: terminal.buffer.lines[endingLine].count,
+                               row: endingLine)
+            return terminal.getDisplayText(start: start, end: end)
+        }
     }
 
     public func accessibilityFrame(forLineNumber lineNumber: Int) -> CGRect {
         let topVisibleLine = Int(contentOffset.y/cellDimension.height)
         let offset = contentOffset.y - CGFloat(topVisibleLine) * cellDimension.height
-        var startingLine = startingLine(forLineNumber: lineNumber)
-        var endingLine = endingLine(forLineNumber: lineNumber)
-        var verticalWidth = CGFloat(endingLine - startingLine + 1)
-        let lineOffset =  cellDimension.height * CGFloat (startingLine - topVisibleLine + 1)
+        let metrics = withTerminal { terminal in
+            let startingLine = startingLineLocked(forLineNumber: lineNumber)
+            let endingLine = endingLineLocked(forLineNumber: lineNumber)
+            return (startingLine: startingLine,
+                    endingLine: endingLine,
+                    columnCount: terminal.buffer.lines[lineNumber].count)
+        }
+        let verticalWidth = CGFloat(metrics.endingLine - metrics.startingLine + 1)
+        let lineOffset =  cellDimension.height * CGFloat (metrics.startingLine - topVisibleLine + 1)
         let lineOrigin = CGPoint(x: 0, y: lineOffset)
-        let columnCount = terminal.buffer.lines[lineNumber].count
-        var rect = CGRect(
+        let rect = CGRect(
             x: lineOrigin.x,
             y: lineOrigin.y + 3 - offset,
-            width: CGFloat(columnCount) * cellDimension.width,
+            width: CGFloat(metrics.columnCount) * cellDimension.width,
             height: verticalWidth * cellDimension.height)
         return rect
     }
@@ -4753,29 +5424,35 @@ extension TerminalView: UIAccessibilityReadingContent {
         let pageHeight = max(bounds.height, cellDimension.height)
         let lines = Int(floor(pageHeight/cellDimension.height))
         let startLine = Int(floor(contentOffset.y / cellDimension.height))
-        let start = Position(col: 0, row: startLine)
-        let end = Position(col: terminal.buffer.lines[startLine].count,
-                           row: startLine + lines)
-        return terminal.getDisplayText(start: start, end: end)
+        return withTerminal { terminal in
+            let start = Position(col: 0, row: startLine)
+            let end = Position(col: terminal.buffer.lines[startLine].count,
+                               row: startLine + lines)
+            return terminal.getDisplayText(start: start, end: end)
+        }
     }
 
     public func accessibilityAttributedContent(forLineNumber lineNumber: Int) -> NSAttributedString? {
-        var startingLine = startingLine(forLineNumber: lineNumber)
-        var endingLine = endingLine(forLineNumber: lineNumber)
-        var start = Position(col: 0, row: startingLine)
-        var end = Position(col: terminal.buffer.lines[endingLine].count,
-                           row: endingLine)
-        return accessibilityAttributedDisplayText(start: start, end: end)
+        withTerminal { terminal in
+            let startingLine = startingLineLocked(forLineNumber: lineNumber)
+            let endingLine = endingLineLocked(forLineNumber: lineNumber)
+            let start = Position(col: 0, row: startingLine)
+            let end = Position(col: terminal.buffer.lines[endingLine].count,
+                               row: endingLine)
+            return accessibilityAttributedDisplayTextLocked(start: start, end: end)
+        }
     }
 
     public func accessibilityAttributedPageContent() -> NSAttributedString? {
         let pageHeight = max(bounds.height, cellDimension.height)
         let lines = Int(floor(pageHeight/cellDimension.height))
         let startLine = Int(floor(contentOffset.y / cellDimension.height))
-        let start = Position(col: 0, row: startLine)
-        let end = Position(col: terminal.buffer.lines[startLine].count,
-                           row: startLine + lines)
-        return accessibilityAttributedDisplayText(start: start, end: end)
+        return withTerminal { terminal in
+            let start = Position(col: 0, row: startLine)
+            let end = Position(col: terminal.buffer.lines[startLine].count,
+                               row: startLine + lines)
+            return accessibilityAttributedDisplayTextLocked(start: start, end: end)
+        }
     }
 }
 
@@ -4792,3 +5469,5 @@ extension TerminalView: UIAccessibilityReadingContent {
 #endif
 
 #endif
+
+#endif // !SWIFTTERM_EMBEDDED

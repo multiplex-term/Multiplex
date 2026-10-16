@@ -460,7 +460,11 @@ final class TerminalSurfaceView: UIView {
             for observer in keyboardObservers {
                 NotificationCenter.default.removeObserver(observer)
             }
-            cancelKeyboardSettleRemeasures()
+            // Inlined `cancelKeyboardSettleRemeasures()`: SwiftTerm 2's
+            // delegate protocol is @MainActor, so this coordinator is too,
+            // and its nonisolated deinit may read storage but not call
+            // isolated methods.
+            for item in keyboardSettleWorkItems { item.cancel() }
             #if DEBUG
             keyboardLogSettleWorkItem?.cancel()
             #endif
@@ -569,7 +573,7 @@ final class TerminalSurfaceView: UIView {
             let baseTop = TerminalSurfaceView.terminalInsets.top
             let appliedNudge = max(0, topConstraint.constant - baseTop)
             let rawHeight = view.bounds.height + appliedNudge
-            let rows = view.getTerminal().rows
+            let rows = view.terminalDimensions.rows
             guard rows > 0 else { return }
             let cellHeight = view.getOptimalFrameSize().height / CGFloat(rows)
             guard cellHeight > 0 else { return }
@@ -833,8 +837,7 @@ final class TerminalSurfaceView: UIView {
 
 extension TerminalView {
     /// True while the user is actively typing into this terminal — read from
-    /// the same send-path stamp the fork's immediate-display window uses, so
-    /// every input road (IME commits, the key rail, kitty-encoded hardware
+    /// the fork's send-path input stamp, so every input road (IME commits, the key rail, kitty-encoded hardware
     /// keys, dictation chunks) counts, and none has to report separately.
     /// Chrome uses it to defer work that has no business running between
     /// keystrokes: the focused-pane agent probe and the gaze hover-region

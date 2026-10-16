@@ -8,6 +8,9 @@ SwiftTerm provides terminal emulation for macOS, iOS, and visionOS applications.
 This guide walks through adding the dependency and embedding a terminal view on
 each platform.
 
+For a Foundation-free, headless build targeting Embedded Swift or WASI
+WebAssembly, see <doc:PortableBuilds>.
+
 ## Adding SwiftTerm to Your Project
 
 Add SwiftTerm as a Swift Package Manager dependency. In your `Package.swift`:
@@ -52,6 +55,8 @@ class ViewController: NSViewController, LocalProcessTerminalViewDelegate {
         terminalView.startProcess()
     }
 
+    // Resizing the window here? Do not animate it, and compare frames rather
+    // than using a re-entrancy flag — see <doc:Embedding>.
     func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}
     func setTerminalTitle(source: LocalProcessTerminalView, title: String) {
         view.window?.title = title
@@ -174,6 +179,10 @@ See <doc:HeadlessUsage> for more detail.
 
 ## Platform Availability
 
+Embedded Swift and WASI WebAssembly use the portable headless core rather than
+the view and local-process APIs listed below. See <doc:PortableBuilds> for the
+required package traits and build settings.
+
 | Feature | macOS 13+ | iOS 13+ | visionOS 1+ | Linux | Windows |
 |---------|-----------|---------|-------------|-------|---------|
 | Core engine (``Terminal``) | Yes | Yes | Yes | Yes | Yes |
@@ -185,6 +194,8 @@ See <doc:HeadlessUsage> for more detail.
 
 ## Next Steps
 
+- <doc:Embedding> — Threading rules, and the delegate callbacks where a
+  reasonable-looking implementation costs performance
 - <doc:Customization> — Change fonts, colors, cursor style, and behavior
 - <doc:GraphicsSupport> — Display inline images with Sixel, iTerm2, or Kitty
 - <doc:SSHIntegration> — Connect the terminal to a remote host

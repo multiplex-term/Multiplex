@@ -6,6 +6,7 @@
 //  Created by Miguel de Icaza on 3/20/20.
 //
 
+#if !SWIFTTERM_EMBEDDED
 #if os(iOS) || os(visionOS)
 import Foundation
 import UIKit
@@ -20,8 +21,16 @@ class CaretView: UIView {
     /// CJK). Used to center its glyph within the caret, matching the text.
     var glyphColumnWidth: Int = 1
     var powerlineCodePoint: UInt32?
+    var renderCursorColor = UIColor.gray
+    var renderTextColor = UIColor.black
+    var renderCustomBlockGlyphs = true
+    var renderNormalFont: UIFont?
     var bgColor: CGColor
-    var tracksFocus = true
+    var tracksFocus = true {
+        didSet {
+            updateCursorStyle()
+        }
+    }
     
     public init (frame: CGRect, cursorStyle: CursorStyle, terminal: TerminalView)
     {
@@ -81,21 +90,36 @@ class CaretView: UIView {
         }
     }
     
-    func setText (ch: CharData) {
-        glyphColumnWidth = max(1, Int(ch.width))
-        powerlineCodePoint = PowerlineRenderer.glyph(for: UInt32(ch.code)) == nil ? nil : UInt32(ch.code)
-        let character = terminal?.terminal.getCharacter(for: ch) ?? " "
+    func setText (_ data: CaretRenderData) {
+        glyphColumnWidth = max(1, Int(data.width))
+        renderCursorColor = data.cursorColor
+        renderTextColor = data.textColor
+        renderCustomBlockGlyphs = data.customBlockGlyphs
+        renderNormalFont = data.normalFont
+        let hideBlinkingText = !data.textBlinkVisible && data.cellAttribute.style.contains(.blink)
+        if hideBlinkingText {
+            powerlineCodePoint = nil
+        } else {
+            powerlineCodePoint = PowerlineRenderer.glyph(for: UInt32(data.code)) == nil
+                ? nil : UInt32(data.code)
+        }
+        let character = hideBlinkingText ? " " : data.character
+        // A host glyph fallback carries an explicit font; appending a
+        // variation selector would only fight it.
+        let usesGlyphFallback = data.attributes[SwiftTermGlyphPolicyKey] != nil
         let res = NSAttributedString (
-            string: UnicodeUtil.textPresentationAdjusted (character),
-            attributes: terminal?.getAttributedValue(ch.attribute, usingFg: caretColor, andBg: caretTextColor ?? terminal?.nativeForegroundColor ?? TTColor.black))
+            string: usesGlyphFallback ? String (character)
+                                      : UnicodeUtil.textPresentationAdjusted (character),
+            attributes: data.attributes)
         ctline = CTLineCreateWithAttributedString(res)
         setNeedsDisplay(bounds)
     }
     
     func updateCursorStyle () {
+        let canBlink = !tracksFocus || (superview?.isFirstResponder ?? true)
         switch style {
         case .blinkUnderline, .blinkBlock, .blinkBar:
-            updateAnimation(to: true)
+            updateAnimation(to: canBlink)
         case .steadyBar, .steadyBlock, .steadyUnderline:
             updateAnimation(to: false)
         }
@@ -105,6 +129,25 @@ class CaretView: UIView {
     func disableAnimations() {
         layer.removeAllAnimations()
         layer.opacity = 1
+    }
+
+    /// Makes the cursor visible now and delays the next blink cycle. Repeated
+    /// input therefore keeps the cursor visible until typing pauses.
+    func resetBlinkAfterInput () {
+        let canBlink = !tracksFocus || (superview?.isFirstResponder ?? true)
+        guard canBlink else { return }
+        switch style {
+        case .blinkUnderline, .blinkBlock, .blinkBar:
+            layer.removeAllAnimations()
+            layer.opacity = 1
+            guard window != nil else { return }
+            UIView.animate(withDuration: 0.7, delay: 0.7,
+                           options: [.autoreverse, .repeat, .curveEaseIn]) {
+                self.layer.opacity = 0
+            }
+        case .steadyBar, .steadyBlock, .steadyUnderline:
+            break
+        }
     }
     
     public var defaultCaretColor = UIColor.gray
@@ -139,3 +182,5 @@ class CaretView: UIView {
 
 }
 #endif
+
+#endif // !SWIFTTERM_EMBEDDED

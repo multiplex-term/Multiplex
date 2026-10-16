@@ -5,8 +5,9 @@
 //  Created by Miguel de Icaza on 3/4/20.
 //
 
+#if !SWIFTTERM_EMBEDDED
 import Foundation
-#if !os(iOS) && !os(tvOS) && !os(Windows)
+#if !os(WASI) && !os(iOS) && !os(tvOS) && !os(Windows) && !os(Android)
 
 /**
  * APIs to assist in controlling a Unix pseudo-terminal from Swift.
@@ -92,13 +93,43 @@ public class PseudoTerminalHelpers {
             }
         }
 
+        // Build the signal state before fork. The child must use only
+        // async-signal-safe system calls until execve.
+        var defaultAction = sigaction()
+#if canImport(Darwin)
+        defaultAction.__sigaction_u.__sa_handler = SIG_DFL
+#elseif canImport(Musl)
+        defaultAction.__sa_handler.sa_handler = SIG_DFL
+#else
+        defaultAction.__sigaction_handler.sa_handler = SIG_DFL
+#endif
+        sigemptyset(&defaultAction.sa_mask)
+        defaultAction.sa_flags = 0
+        var emptyMask = sigset_t()
+        sigemptyset(&emptyMask)
         var master: Int32 = 0
-        
+
         let pid = forkpty(&master, nil, nil, &desiredWindowSize)
         if pid < 0 {
             return nil
         }
         if pid == 0 {
+            // Signal ignores and the calling thread's mask survive exec.
+            // A server can ignore SIGINT for a DispatchSource or block it on
+            // a worker thread. Do not pass that policy to terminal programs.
+            // Reset dispositions before unblocking, so no inherited handler
+            // can run in the child between fork and exec. Some platforms
+            // reserve signal numbers; sigaction rejects those with EINVAL.
+            var number: Int32 = 1
+            while number < NSIG {
+                if number != SIGKILL && number != SIGSTOP {
+                    _ = sigaction(number, &defaultAction, nil)
+                }
+                number += 1
+            }
+            if sigprocmask(SIG_SETMASK, &emptyMask, nil) != 0 {
+                _exit(127)
+            }
             if let cCurrentDirectory {
                 _ = chdir(cCurrentDirectory)
             }
@@ -132,5 +163,48 @@ public class PseudoTerminalHelpers {
         let status = ioctl (fd, 0x4004667f /* FIONREAD */, &size)
         return (status, size)
     }
+
+    /// Reads the enabled `termios.c_cc` bytes from a PTY.
+    ///
+    /// The result contains only C0 and DEL values. A disabled entry, NUL, and
+    /// values outside that range are not returned. The caller must use the
+    /// approximation when this method returns `nil`.
+    public static func terminalControlBytesForPaste(
+        masterPtyDescriptor: Int32
+    ) -> Set<UInt8>? {
+        guard masterPtyDescriptor >= 0 else { return nil }
+
+        var attributes = termios()
+        guard tcgetattr(masterPtyDescriptor, &attributes) == 0 else { return nil }
+
+        var indices: [Int32] = [
+            VEOF, VEOL, VERASE, VINTR, VKILL, VQUIT, VSTART, VSTOP, VSUSP,
+        ]
+#if os(macOS)
+        indices += [VDISCARD, VDSUSP, VEOL2, VLNEXT, VREPRINT, VSTATUS, VWERASE]
+#elseif os(Linux)
+        indices += [VDISCARD, VEOL2, VLNEXT, VREPRINT, VSWTC, VWERASE]
+#endif
+
+        let disabledValue = fpathconf(masterPtyDescriptor, Int32(_PC_VDISABLE))
+        let disabledByte: UInt8? = disabledValue >= 0 && disabledValue <= 0xff
+            ? UInt8(disabledValue)
+            : nil
+        let controlCharacters = withUnsafeBytes(of: &attributes.c_cc) { Array($0) }
+
+        var result: Set<UInt8> = []
+        for indexValue in indices {
+            let index = Int(indexValue)
+            guard controlCharacters.indices.contains(index) else { continue }
+            let byte = controlCharacters[index]
+            guard byte != 0 else { continue }
+            if let disabledByte, byte == disabledByte { continue }
+            guard byte < 0x20 || byte == 0x7f else { continue }
+            result.insert(byte)
+        }
+        return result
+    }
 }
 #endif
+
+#endif // !SWIFTTERM_EMBEDDED

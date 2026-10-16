@@ -423,17 +423,22 @@ enum TerminalFocusArbiter {
 
     private static func performDebugResizeDrag() {
         guard let view = current, let filter = view.longPressMouseDragFilter else { return }
-        let terminal = view.getTerminal()
+        // One copied snapshot of the visible screen rather than a lock per
+        // cell. Its text skips a wide glyph's trailing cell (width 0), so
+        // walking the cell widths recovers each cell's column.
+        let snapshot = view.terminalStateSnapshot()
+        let terminal = snapshot.dimensions
         // herdr draws several vertical-bar columns (sidebar edge, pane
         // frames); the shared divider of a side-by-side split is the bar
         // column nearest the grid's horizontal center. Drag at that column's
         // median bar row.
         var rowsByColumn: [Int: [Int]] = [:]
-        for row in 0..<terminal.rows {
-            for col in 0..<terminal.cols {
-                let content = terminal.getCharacter(col: col, row: row)
-                if HerdrPaneBorder.isVerticalBar(content), filter((col, row), content) {
-                    rowsByColumn[col, default: []].append(row)
+        for line in snapshot.visibleRows {
+            var characters = line.text.makeIterator()
+            for (col, width) in line.cellWidths.enumerated() where width != 0 {
+                guard let content = characters.next() else { break }
+                if HerdrPaneBorder.isVerticalBar(content), filter((col, line.row), content) {
+                    rowsByColumn[col, default: []].append(line.row)
                 }
             }
         }

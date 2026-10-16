@@ -281,9 +281,9 @@ final class TerminalSessionController {
             // screen coordinates, and a press up in scrollback names no
             // pane (the composite screen is the only pane-mapped surface).
             var cell: (col: Int, row: Int)?
-            if let terminal = view?.getTerminal() {
-                let screenRow = position.row - terminal.buffer.yDisp
-                if screenRow >= 0 && screenRow < terminal.rows {
+            if let state = view?.terminalStateSnapshot() {
+                let screenRow = position.row - state.viewportRow
+                if screenRow >= 0 && screenRow < state.dimensions.rows {
                     cell = (col: position.col, row: screenRow)
                 }
             }
@@ -644,7 +644,7 @@ final class TerminalSessionController {
         if let hint = AgentSignature.classifyTerminal(
             title: title,
             visibleLines: terminalScreenSnapshot().lines,
-            isAlternateScreen: terminalView?.getTerminal().isCurrentBufferAlternate ?? false,
+            isAlternateScreen: terminalView?.isAlternateBufferActive ?? false,
             previous: directShellAgent ?? terminalAgentHint
         ) {
             terminalAgentHint = hint
@@ -798,15 +798,11 @@ final class TerminalSessionController {
 
     private func terminalScreenSnapshot() -> (lines: [String], isAlternate: Bool) {
         guard let terminalView else { return ([], false) }
-        let terminal = terminalView.getTerminal()
-        let rows = max(0, terminal.getDims().rows)
-        let lines = (0..<rows).compactMap { row in
-            terminal.getLine(row: row)?.translateToString(
-                trimRight: true,
-                skipNullCellsFollowingWide: true
-            )
-        }
-        return (lines, terminal.isCurrentBufferAlternate)
+        // Copied reads: the terminal lives behind SwiftTerm's lock, and its
+        // parse runs on the feed thread.
+        let rows = max(0, terminalView.terminalDimensions.rows)
+        let lines = terminalView.visibleRowsText(0..<rows)
+        return (lines, terminalView.isAlternateBufferActive)
     }
 
     private func stopDirectShellMonitoring() {
@@ -2027,7 +2023,7 @@ final class TerminalSessionController {
     @discardableResult
     func sendTalkback(submit: Bool) -> Bool {
         guard talkbackSendState == .ready else { return false }
-        let bracketed = terminalView?.getTerminal().bracketedPasteMode == true
+        let bracketed = terminalView?.terminalStateSnapshot().bracketedPasteMode == true
         let payload = TalkbackMessage.payload(
             body: talkback.text,
             paths: talkback.readyPaths,
@@ -2270,6 +2266,21 @@ final class TerminalSessionController {
         self.connection = nil
         self.moshSession = nil
         Task { await transport?.close() }
+        // Closing is final — this path never runs on a tab move — so release
+        // the view's frame driver and renderer: SwiftTerm 2 leaves both to
+        // an explicit owner call.
+        if let terminalView {
+            Self.closeTerminalUI(terminalView)
+        }
+    }
+
+    /// `updateUiClosed()` answers false while a Metal surface still has GPU
+    /// work in flight; it must be retried until the renderer lets go.
+    private static func closeTerminalUI(_ view: TerminalView, attempt: Int = 0) {
+        guard !view.updateUiClosed(), attempt < 20 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(50)) {
+            closeTerminalUI(view, attempt: attempt + 1)
+        }
     }
 
     /// The RECONNECT chip. The user is driving now, so their attempt also
