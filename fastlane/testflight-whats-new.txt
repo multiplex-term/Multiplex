@@ -1,3 +1,7 @@
 NEW SINCE 1.5.0
+• herdr: Select Text stays inside the pane you pressed on herdr 0.9 and later. A multi-line copy no longer picks up the sidebar's border or drops the pane's right edge, and a zoomed pane selects as the whole pane.
+
+PLEASE TRY
+1. On a host running herdr 0.9 or later, long-press text in a pane, tap SELECT ALL, then COPY and paste it into Notes; no sidebar text or border characters should come along, and the pane's last columns should be there. Try it with the sidebar collapsed (Ctrl-B, then b) and expanded, in a split, and on a zoomed pane.
 
 Feedback: screenshot in TestFlight

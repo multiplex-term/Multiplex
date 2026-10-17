@@ -1335,6 +1335,7 @@ final class TerminalWindowViewController: UIViewController,
             // + TAB browse summon (no target) keeps the active pane.
             let cell = target == nil
                 ? nil : workspace.controller(for: anchorID)?.pathPressScreenCell
+            let screenSize = workspace.controller(for: anchorID)?.screenSize
             let cwd = await workspace.controller(for: anchorID)?
                 .paneWorkingDirectory(pressedAt: cell)
             guard let anchor = route.tabs.first(where: { $0.id == anchorID }) else { return }
@@ -1347,6 +1348,7 @@ final class TerminalWindowViewController: UIViewController,
                         startDirectory: cwd,
                         anchorSession: anchorSession,
                         anchorCell: cell,
+                        anchorScreenSize: screenSize,
                         target: target
                     )
                 )
@@ -1364,6 +1366,7 @@ final class TerminalWindowViewController: UIViewController,
                 startDirectory: cwd,
                 anchorSession: anchorSession,
                 anchorCell: cell,
+                anchorScreenSize: screenSize,
                 target: target
             )
             dock(tab, after: anchorID)

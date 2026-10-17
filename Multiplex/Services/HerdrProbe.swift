@@ -420,14 +420,18 @@ enum HerdrProbe {
     private struct Layout: Decodable {
         var tabID: String
         var focusedPaneID: String?
-        /// Screen-cell rects per pane (0.7.5) — already in the attached
-        /// client's coordinate space, sidebar and tab bar accounted for.
+        /// The tab's whole pane area, in the same coordinates as the pane
+        /// rects — where those sit on screen is `layoutScreenOrigin`'s call.
+        var area: LayoutRect?
+        /// Per-pane rects (0.7.5+). A zoomed layout keeps every pane's
+        /// split rect; only the zoomed pane shows.
         var panes: [LayoutPane]?
+        var zoomed: Bool?
 
         enum CodingKeys: String, CodingKey {
             case tabID = "tab_id"
             case focusedPaneID = "focused_pane_id"
-            case panes
+            case area, panes, zoomed
         }
     }
 
@@ -855,12 +859,15 @@ enum HerdrProbe {
     /// first, `parseFocusedPaneWorkingDirectory`'s discipline), the focused
     /// pane otherwise. In a split, the two panes' cwds routinely differ,
     /// and "relative to the pane's directory" must mean the pane that
-    /// printed the path.
+    /// printed the path. `screenSize` is the attached client's grid, which
+    /// placing the layout's rects on screen needs (`layoutScreenOrigin`).
     static func parsePaneWorkingDirectory(
-        _ output: String, atScreenCell cell: (col: Int, row: Int)?
+        _ output: String,
+        atScreenCell cell: (col: Int, row: Int)?,
+        screenSize: (cols: Int, rows: Int)?
     ) -> String? {
-        if let cell,
-           let pressed = parsePaneScreenRects(output).first(where: {
+        if let cell, let screenSize,
+           let pressed = parsePaneScreenRects(output, screenSize: screenSize).first(where: {
                $0.rect.contains(col: cell.col, row: cell.row)
            }),
            let snapshot = firstDecodedLine(in: output, decodeSnapshot),
@@ -874,22 +881,33 @@ enum HerdrProbe {
     }
 
     /// Every visible pane's screen rectangle out of one snapshot exec — the
-    /// select-text mode's clamp candidates. The layout rects are already in
-    /// the attached client's screen cells (sidebar and tab bar included in
-    /// x/y), but they count drawn borders; each pane's `viewport_rows` names
-    /// its content height, so the difference halves into a symmetric inset.
-    /// Focus comes from the layout's `focused` flags backed by the
-    /// snapshot's global focused pane; any missing piece drops that pane
-    /// (an empty answer keeps the caller on whole-screen behavior).
-    static func parsePaneScreenRects(_ output: String) -> [PaneScreenRectEntry] {
+    /// select-text mode's clamp candidates. The layout rects count drawn
+    /// borders; each pane's `viewport_rows` names its content height, so
+    /// the difference halves into a symmetric inset. Where the rects sit on
+    /// screen depends on the attached client's grid (`screenSize`, the size
+    /// this tab reports) — see `layoutScreenOrigin`. A zoomed layout still
+    /// lists every pane at its split rect, but only the zoomed pane (the
+    /// focused one) shows, across the whole area. Focus comes from the
+    /// layout's `focused` flags backed by the snapshot's global focused
+    /// pane; any missing piece drops that pane (an empty answer keeps the
+    /// caller on whole-screen behavior).
+    static func parsePaneScreenRects(
+        _ output: String, screenSize: (cols: Int, rows: Int)
+    ) -> [PaneScreenRectEntry] {
         guard let snapshot = firstDecodedLine(in: output, decodeSnapshot),
               let focusedTab = snapshot.focusedTabID,
               let layout = snapshot.layouts.first(where: { $0.tabID == focusedTab }),
-              let panes = layout.panes
+              let panes = layout.panes,
+              let origin = layoutScreenOrigin(layout, screenSize: screenSize)
         else { return [] }
         let focusedPaneID = layout.focusedPaneID ?? snapshot.focusedPaneID
-        return panes.compactMap { pane in
-            guard let rect = pane.rect,
+        let shown: [(pane: LayoutPane, rect: LayoutRect?)] = if layout.zoomed == true {
+            panes.filter { $0.paneID == focusedPaneID }.map { (pane: $0, rect: layout.area) }
+        } else {
+            panes.map { (pane: $0, rect: $0.rect) }
+        }
+        return shown.compactMap { pane, rect in
+            guard let rect,
                   rect.x >= 0, rect.y >= 0, rect.width > 0, rect.height > 0
             else { return nil }
             var inset = 0
@@ -898,10 +916,10 @@ enum HerdrProbe {
                viewportRows > 0, viewportRows <= rect.height {
                 inset = (rect.height - viewportRows) / 2
             }
-            let colLo = rect.x + inset
-            let colHi = rect.x + rect.width - 1 - inset
-            let rowLo = rect.y + inset
-            let rowHi = rect.y + rect.height - 1 - inset
+            let colLo = origin.col + rect.x + inset
+            let colHi = origin.col + rect.x + rect.width - 1 - inset
+            let rowLo = origin.row + rect.y + inset
+            let rowHi = origin.row + rect.y + rect.height - 1 - inset
             guard colLo <= colHi, rowLo <= rowHi else { return nil }
             return PaneScreenRectEntry(
                 id: pane.paneID,
@@ -909,6 +927,30 @@ enum HerdrProbe {
                 isFocused: pane.focused ?? (pane.paneID == focusedPaneID)
             )
         }
+    }
+
+    /// The screen cell a layout's rect coordinate (0, 0) lands on. 0.7.5
+    /// reports rects in the client's screen cells — its `area` already sits
+    /// past the sidebar and tab bar (x26 y1). 0.9 reports them relative to
+    /// that area, which then sits at (0, 0) and leaves the chrome only as
+    /// the gap between the area and the client's grid (verified 0.9.3 /
+    /// protocol 22, 2026-10-17: the expanded sidebar's 26 columns, the
+    /// collapsed rail's 4, the 1-row tab bar, mobile's 2-row header).
+    /// herdr draws that chrome left of and above the panes, so the gap is
+    /// the offset; a `tab_bar_position = "bottom"` config reads the same
+    /// from the snapshot and clamps one row low. An area that overflows the
+    /// grid describes another client's viewport — nil, since no clamp beats
+    /// a wrong one. A layout without an area keeps the screen-cell reading.
+    private static func layoutScreenOrigin(
+        _ layout: Layout, screenSize: (cols: Int, rows: Int)
+    ) -> (col: Int, row: Int)? {
+        guard let area = layout.area else { return (col: 0, row: 0) }
+        guard area.x >= 0, area.y >= 0,
+              area.x + area.width <= screenSize.cols,
+              area.y + area.height <= screenSize.rows
+        else { return nil }
+        if area.x > 0 || area.y > 0 { return (col: 0, row: 0) }
+        return (col: screenSize.cols - area.width, row: screenSize.rows - area.height)
     }
 
     /// herdr 0.7.5 has no focus-pane-by-id — `pane focus` is strictly

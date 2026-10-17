@@ -428,7 +428,16 @@ routing, tab moves, keyboard avoidance, or secret fields.
   in the fork): entry and every resize run one read-only control exec
   listing EVERY visible pane — tmux `list-panes -F` geometry (content
   cells, no inset), herdr the snapshot's layout rects border-inset by
-  the `viewport_rows` oracle — and the target is the pane under the gesture
+  the `viewport_rows` oracle and placed on screen against the tab's grid
+  (`layoutScreenOrigin`). ⚠ herdr 0.9 reports those rects relative to the
+  pane area, whose origin is (0, 0); the sidebar/rail and tab bar exist
+  only as the gap between `area` and the client grid. 0.7.5 reported screen
+  cells. Read as screen cells, 0.9's rects swept the collapsed rail's `│`
+  into an iPhone tester's copies and cut the pane's right edge (TestFlight,
+  2026-10-12). A `tab_bar_position = "bottom"` config is indistinguishable
+  from the snapshot and clamps one row low; an area overflowing the grid
+  (another client's viewport) clamps nothing; a zoomed layout clamps to the
+  focused pane across the area — and the target is the pane under the gesture
   that raised the block (the focused pane when no position rides along), so
   drags can't bleed across a split, Select All means the pane
   (not herdr's sidebar/tab bar), and extraction joins per-pane-row

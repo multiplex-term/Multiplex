@@ -221,6 +221,11 @@ final class TerminalSessionController {
     /// active-pane fallback.
     private(set) var pathPressScreenCell: (col: Int, row: Int)?
 
+    /// The grid this tab reports to the remote — the attached client's
+    /// screen as the backend lays it out, which herdr's content-relative
+    /// pane rects need to land on screen cells.
+    var screenSize: (cols: Int, rows: Int) { (cols: lastCols, rows: lastRows) }
+
     #if !os(visionOS)
     /// The terminal's app-owned dictation controls, from the pane's side:
     /// LISTENING while the microphone is open, or a short failure the user
@@ -1027,7 +1032,7 @@ final class TerminalSessionController {
                     else { return nil }
                     let round = switch backend {
                     case .tmux: TmuxProbe.parsePaneRects(output)
-                    case .herdr: HerdrProbe.parsePaneScreenRects(output)
+                    case .herdr: HerdrProbe.parsePaneScreenRects(output, screenSize: screenSize)
                     }
                     // No answer keeps the current no-clamp behavior;
                     // retrying could not distinguish a host without the
@@ -2225,7 +2230,9 @@ final class TerminalSessionController {
             let output = (try? await connection.exec(
                 HerdrProbe.snapshotCommand(sessionName: sessionName)
             )) ?? ""
-            return HerdrProbe.parsePaneWorkingDirectory(output, atScreenCell: cell)
+            return HerdrProbe.parsePaneWorkingDirectory(
+                output, atScreenCell: cell, screenSize: screenSize
+            )
         case nil:
             return nil
         }

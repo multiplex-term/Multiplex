@@ -235,17 +235,19 @@ final class HerdrProbeTests: XCTestCase {
     func testPaneScreenRectsComeFromTheFocusedLayout() throws {
         let snapshot = try fixtureSnapshot()
         // Fixture: focused tab w1:t1 holds one pane, rect x26 y1 54×23 with
-        // viewport_rows 23 == rect height → no border inset.
+        // viewport_rows 23 == rect height → no border inset. 0.7.5's area
+        // (x26 y1) already sits past the chrome: screen cells, as reported.
+        let screen = (cols: 80, rows: 24)
         XCTAssertEqual(
-            HerdrProbe.parsePaneScreenRects(snapshot),
+            HerdrProbe.parsePaneScreenRects(snapshot, screenSize: screen),
             [PaneScreenRectEntry(
                 id: "w1:p1",
                 rect: PaneScreenRect(columns: 26...79, rows: 1...23),
                 isFocused: true
             )]
         )
-        XCTAssertEqual(HerdrProbe.parsePaneScreenRects("not an envelope"), [])
-        XCTAssertEqual(HerdrProbe.parsePaneScreenRects(""), [])
+        XCTAssertEqual(HerdrProbe.parsePaneScreenRects("not an envelope", screenSize: screen), [])
+        XCTAssertEqual(HerdrProbe.parsePaneScreenRects("", screenSize: screen), [])
     }
 
     func testPaneScreenRectsInsetDrawnBordersPerPane() {
@@ -266,7 +268,7 @@ final class HerdrProbeTests: XCTestCase {
             + #""rect":{"x":10,"y":2,"width":40,"height":23}},"#
             + #"{"pane_id":"w1:p2","focused":false,"#
             + #""rect":{"x":50,"y":2,"width":40,"height":23}}]}]}}}"#
-        XCTAssertEqual(HerdrProbe.parsePaneScreenRects(snapshot), [
+        XCTAssertEqual(HerdrProbe.parsePaneScreenRects(snapshot, screenSize: (cols: 90, rows: 25)), [
             PaneScreenRectEntry(
                 id: "w1:p1",
                 rect: PaneScreenRect(columns: 11...48, rows: 3...23),
@@ -278,6 +280,168 @@ final class HerdrProbeTests: XCTestCase {
                 isFocused: false
             ),
         ])
+    }
+
+    /// One focused tab as herdr 0.9.3 (protocol 22) reports it, trimmed from
+    /// live captures (2026-10-17): the layout's area sits at (0, 0) and the
+    /// pane rects are relative to it, whatever chrome the client draws.
+    /// Each pane's cwd is /home/dev/<pane number>.
+    private func contentRelativeSnapshot(
+        area: (width: Int, height: Int),
+        panes: [(id: String, rect: (x: Int, y: Int, width: Int, height: Int), viewportRows: Int)],
+        focused: String,
+        zoomed: Bool = false
+    ) -> String {
+        let paneRows = panes.map { pane in
+            let cwd = "/home/dev/" + pane.id.replacingOccurrences(of: "w1:", with: "")
+            return #"{"pane_id":"\#(pane.id)","tab_id":"w1:t1","cwd":"\#(cwd)","#
+                + #""agent_status":"unknown","scroll":{"viewport_rows":\#(pane.viewportRows)}}"#
+        }
+        let layoutPanes = panes.map { pane in
+            #"{"pane_id":"\#(pane.id)","focused":\#(pane.id == focused),"rect":{"#
+                + #""x":\#(pane.rect.x),"y":\#(pane.rect.y),"#
+                + #""width":\#(pane.rect.width),"height":\#(pane.rect.height)}}"#
+        }
+        return #"{"id":"cli:api:snapshot","result":{"snapshot":{"#
+            + #""version":"0.9.3","protocol":22,"focused_workspace_id":"w1","#
+            + #""focused_tab_id":"w1:t1","focused_pane_id":"\#(focused)","#
+            + #""workspaces":[{"workspace_id":"w1","number":1,"label":"one","#
+            + #""active_tab_id":"w1:t1"}],"#
+            + #""panes":["# + paneRows.joined(separator: ",") + "],"
+            + #""layouts":[{"tab_id":"w1:t1","focused_pane_id":"\#(focused)","#
+            + #""zoomed":\#(zoomed),"area":{"x":0,"y":0,"#
+            + #""width":\#(area.width),"height":\#(area.height)},"#
+            + #""panes":["# + layoutPanes.joined(separator: ",") + "]}]}}}"
+    }
+
+    func testContentRelativeRectsLandPastTheChrome() {
+        // The TestFlight report's geometry (iPhone, 68×40 grid): the
+        // collapsed sidebar rail takes 4 columns and the tab bar 1 row, yet
+        // 0.9.3 reports the one pane at x0 y0 64×39. Read as screen cells,
+        // the clamp swept the rail's │ and cut the pane's last 4 columns.
+        XCTAssertEqual(
+            HerdrProbe.parsePaneScreenRects(
+                contentRelativeSnapshot(
+                    area: (width: 64, height: 39),
+                    panes: [("w1:p1", (0, 0, 64, 39), 39)],
+                    focused: "w1:p1"
+                ),
+                screenSize: (cols: 68, rows: 40)
+            ),
+            [PaneScreenRectEntry(
+                id: "w1:p1",
+                rect: PaneScreenRect(columns: 4...67, rows: 1...39),
+                isFocused: true
+            )]
+        )
+        // The expanded sidebar: 26 columns (border included) on 69×50.
+        XCTAssertEqual(
+            HerdrProbe.parsePaneScreenRects(
+                contentRelativeSnapshot(
+                    area: (width: 43, height: 49),
+                    panes: [("w1:p1", (0, 0, 43, 49), 49)],
+                    focused: "w1:p1"
+                ),
+                screenSize: (cols: 69, rows: 50)
+            ).map(\.rect),
+            [PaneScreenRect(columns: 26...68, rows: 1...49)]
+        )
+        // Mobile layout (≤64 columns): no rail, a 2-row header on top.
+        XCTAssertEqual(
+            HerdrProbe.parsePaneScreenRects(
+                contentRelativeSnapshot(
+                    area: (width: 60, height: 38),
+                    panes: [("w1:p1", (0, 0, 60, 38), 38)],
+                    focused: "w1:p1"
+                ),
+                screenSize: (cols: 60, rows: 40)
+            ).map(\.rect),
+            [PaneScreenRect(columns: 0...59, rows: 2...39)]
+        )
+    }
+
+    func testContentRelativeSplitsInsetEachBoxedPane() {
+        // 0.9.3 boxes every split pane (pane_gaps): 100×30 behind the
+        // collapsed rail, side by side, then stacked — each box one cell
+        // past its rect's edge, per the viewport_rows oracle.
+        XCTAssertEqual(
+            HerdrProbe.parsePaneScreenRects(
+                contentRelativeSnapshot(
+                    area: (width: 96, height: 29),
+                    panes: [("w1:p1", (0, 0, 48, 29), 27), ("w1:p2", (48, 0, 48, 29), 27)],
+                    focused: "w1:p2"
+                ),
+                screenSize: (cols: 100, rows: 30)
+            ),
+            [
+                PaneScreenRectEntry(
+                    id: "w1:p1",
+                    rect: PaneScreenRect(columns: 5...50, rows: 2...28),
+                    isFocused: false
+                ),
+                PaneScreenRectEntry(
+                    id: "w1:p2",
+                    rect: PaneScreenRect(columns: 53...98, rows: 2...28),
+                    isFocused: true
+                ),
+            ]
+        )
+        XCTAssertEqual(
+            HerdrProbe.parsePaneScreenRects(
+                contentRelativeSnapshot(
+                    area: (width: 96, height: 29),
+                    panes: [("w1:p1", (0, 0, 96, 15), 13), ("w1:p2", (0, 15, 96, 14), 12)],
+                    focused: "w1:p1"
+                ),
+                screenSize: (cols: 100, rows: 30)
+            ).map(\.rect),
+            [
+                PaneScreenRect(columns: 5...98, rows: 2...14),
+                PaneScreenRect(columns: 5...98, rows: 17...28),
+            ]
+        )
+    }
+
+    func testZoomedLayoutClampsToTheZoomedPaneAcrossTheArea() {
+        // Zoom keeps both split rects in the layout; only the focused pane
+        // shows, boxed across the whole area (viewport_rows 27 of 29).
+        XCTAssertEqual(
+            HerdrProbe.parsePaneScreenRects(
+                contentRelativeSnapshot(
+                    area: (width: 96, height: 29),
+                    panes: [("w1:p1", (0, 0, 96, 15), 13), ("w1:p2", (0, 15, 96, 14), 27)],
+                    focused: "w1:p2",
+                    zoomed: true
+                ),
+                screenSize: (cols: 100, rows: 30)
+            ),
+            [PaneScreenRectEntry(
+                id: "w1:p2",
+                rect: PaneScreenRect(columns: 5...98, rows: 2...28),
+                isFocused: true
+            )]
+        )
+    }
+
+    func testAreaOverflowingTheGridClampsNothing() throws {
+        // The shared viewport still sized to another, larger client: the
+        // rects describe its screen, not this one — whole-screen beats a
+        // wrong clamp, in either coordinate shape.
+        XCTAssertEqual(
+            HerdrProbe.parsePaneScreenRects(
+                contentRelativeSnapshot(
+                    area: (width: 96, height: 29),
+                    panes: [("w1:p1", (0, 0, 96, 29), 29)],
+                    focused: "w1:p1"
+                ),
+                screenSize: (cols: 69, rows: 50)
+            ),
+            []
+        )
+        XCTAssertEqual(
+            HerdrProbe.parsePaneScreenRects(try fixtureSnapshot(), screenSize: (cols: 69, rows: 24)),
+            []
+        )
     }
 
     func testForeignAgentKeepsStatusWithoutClaimingAKind() throws {
@@ -734,9 +898,10 @@ final class HerdrProbeTests: XCTestCase {
             + #""rect":{"x":0,"y":1,"width":40,"height":23}},"#
             + #"{"pane_id":"w1:p2","focused":false,"#
             + #""rect":{"x":41,"y":1,"width":39,"height":23}}]}]}}}"#
+        let screen = (cols: 80, rows: 24)
         XCTAssertEqual(
             HerdrProbe.parsePaneWorkingDirectory(
-                snapshot, atScreenCell: (col: 50, row: 5)
+                snapshot, atScreenCell: (col: 50, row: 5), screenSize: screen
             ),
             "/home/dev/right/repo"
         )
@@ -744,18 +909,43 @@ final class HerdrProbeTests: XCTestCase {
         // pressed pane without a spliceable cwd all keep the focused pane's
         // answer.
         XCTAssertEqual(
-            HerdrProbe.parsePaneWorkingDirectory(snapshot, atScreenCell: nil),
+            HerdrProbe.parsePaneWorkingDirectory(snapshot, atScreenCell: nil, screenSize: screen),
             "/home/dev/left"
         )
         XCTAssertEqual(
             HerdrProbe.parsePaneWorkingDirectory(
-                snapshot, atScreenCell: (col: 40, row: 5)
+                snapshot, atScreenCell: (col: 40, row: 5), screenSize: screen
             ),
             "/home/dev/left"
         )
         XCTAssertNil(HerdrProbe.parsePaneWorkingDirectory(
-            "Error: no server\n", atScreenCell: (col: 1, row: 1)
+            "Error: no server\n", atScreenCell: (col: 1, row: 1), screenSize: screen
         ))
+    }
+
+    func testParsePaneWorkingDirectoryPlacesContentRelativeRects() {
+        // 0.9.3 side by side behind the collapsed rail (100×30). Screen
+        // column 50 is the left pane's last content cell; read as screen
+        // cells, the right pane's rect (49...94) claimed it.
+        let snapshot = contentRelativeSnapshot(
+            area: (width: 96, height: 29),
+            panes: [("w1:p1", (0, 0, 48, 29), 27), ("w1:p2", (48, 0, 48, 29), 27)],
+            focused: "w1:p2"
+        )
+        let screen = (cols: 100, rows: 30)
+        XCTAssertEqual(
+            HerdrProbe.parsePaneWorkingDirectory(
+                snapshot, atScreenCell: (col: 50, row: 5), screenSize: screen
+            ),
+            "/home/dev/p1"
+        )
+        // The boxes' shared edge is no pane's content: the focused pane answers.
+        XCTAssertEqual(
+            HerdrProbe.parsePaneWorkingDirectory(
+                snapshot, atScreenCell: (col: 51, row: 5), screenSize: screen
+            ),
+            "/home/dev/p2"
+        )
     }
 
     func testParseFocusedPaneWorkingDirectoryNeverGuessesWithoutFocus() {
