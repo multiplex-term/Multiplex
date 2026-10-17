@@ -230,6 +230,17 @@ final class TerminalWorkspace {
         /// when it is on the given host; auxiliary-active windows decline so a
         /// document never gets evicted.
         var openFileViewer: @MainActor (_ hostID: UUID, TerminalPathTarget) -> Bool = { _, _ in false }
+        /// The window's active tab, when it has one — read live, like the
+        /// other members.
+        var activeTabID: @MainActor () -> UUID? = { nil }
+        /// Inserts an already-registered auxiliary tab after `anchor`,
+        /// taking the window's focus only when `activate` says so — the
+        /// agent browser's dock.
+        var dock: @MainActor (_ tab: TerminalRoute, _ anchor: UUID, _ activate: Bool) -> Void = { _, _, _ in }
+        /// The window's own close path (route + controller).
+        var close: @MainActor (UUID) -> Void = { _ in }
+        /// Whether the window's scene is on screen right now.
+        var isForeground: @MainActor () -> Bool = { false }
     }
 
     private(set) var windows: [WindowEntry] = []
@@ -304,9 +315,10 @@ final class TerminalWorkspace {
     /// match.
     private func openTab(
         hostID: UUID, sessionName: String,
-        backend: Host.SessionBackend
+        backend: Host.SessionBackend,
+        in windows: [WindowEntry]? = nil
     ) -> (WindowEntry, UUID)? {
-        for entry in windows {
+        for entry in windows ?? self.windows {
             if let tab = entry.tabs.first(where: {
                 $0.hostID == hostID
                     && $0.sessionName == sessionName
@@ -316,6 +328,47 @@ final class TerminalWorkspace {
             }
         }
         return nil
+    }
+
+    /// Where an agent tab for this host docks: beside the tab attached to
+    /// the agent's own session, else beside the host's active tab, else
+    /// beside any of the host's tabs — searched over windows on screen
+    /// first. A restored window for the same session can sit in the
+    /// background, where a docked tab would be invisible (and laid out at
+    /// zero size).
+    func agentDockTarget(
+        hostID: UUID,
+        session: SessionKey?
+    ) -> (entry: WindowEntry, anchorTabID: UUID)? {
+        let foreground = windows.filter { $0.isForeground() }
+        let background = windows.filter { !$0.isForeground() }
+        for group in [foreground, background] {
+            if let session, let (entry, tabID) = openTab(
+                hostID: hostID, sessionName: session.name, backend: session.backend, in: group) {
+                return (entry, tabID)
+            }
+            for entry in group {
+                if let active = entry.activeTabID(),
+                   entry.tabs.contains(where: { $0.id == active && $0.hostID == hostID }) {
+                    return (entry, active)
+                }
+            }
+            for entry in group {
+                if let tab = entry.tabs.last(where: { $0.hostID == hostID }) {
+                    return (entry, tab.id)
+                }
+            }
+        }
+        return nil
+    }
+
+    /// Close a tab through the window that holds it, as the user would.
+    func closeAgentTab(_ tabID: UUID) {
+        if let entry = windows.first(where: { $0.tabs.contains { $0.id == tabID } }) {
+            entry.close(tabID)
+        } else {
+            closeTab(tabID)
+        }
     }
 
     /// Take every tab out of a sibling window; the source closes itself.

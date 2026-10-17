@@ -1,3 +1,4 @@
+import Network
 import Observation
 import UIKit
 import WebKit
@@ -12,6 +13,14 @@ import WebKit
 /// is re-presented through the same `TerminalLinkSheet` confirmation a pane
 /// press gets, never followed directly. The viewport has no script bridge and
 /// no send path into any terminal; it is a monitor, not an input surface.
+///
+/// An AGENT tab (`agent != nil`, opened by `AgentBrowserService` for
+/// `mpx browser`) is the same pane plus: helpers in an isolated content
+/// world the page cannot reach (still no message handler — the page gets no
+/// bridge either way), the host's own cookie jar
+/// (`WKWebsiteDataStore(forIdentifier: host.id)`, never the user's), and its
+/// `Agent.route` — through the host's proxy (shipping), or the DEBUG device
+/// route, where navigation also passes `AgentBrowserAddressPolicy`.
 ///
 /// Lifetime is the process, on purpose: controllers live in
 /// `TerminalWorkspace` only, are created before their tab enters any route,
@@ -30,6 +39,31 @@ final class ViewportController: AuxiliaryPaneController {
     private let host: Host
     /// The source host's display name — the viewport's tether label.
     var hostName: String { host.name }
+
+    /// What makes a viewport an agent tab.
+    struct Agent {
+        enum Route {
+            /// Through the host (`AgentBrowserProxy`): the data store's proxy,
+            /// and the device-side forward a host loopback URL needs before
+            /// it loads (false when the port is busy).
+            case host(ProxyConfiguration, forwardLoopback: @MainActor (URL) async -> Bool)
+            /// DEBUG only: from the device's own network.
+            case device
+        }
+
+        /// The agent's name for the tab (`t1`, `t2`, …).
+        var handle: String
+        /// Required content rules: the loopback guard on the host route,
+        /// the private-network block on the device route.
+        var ruleList: WKContentRuleList
+        var route: Route
+        /// Called once when the tab closes for real — forwards must not
+        /// outlive a host's last agent tab.
+        var onClose: @MainActor () -> Void
+    }
+
+    /// Non-nil for a tab `mpx browser` opened and drives.
+    let agent: Agent?
 
     @ObservationIgnored private(set) var webView: WKWebView!
     @ObservationIgnored private var bridge: ViewportWebBridge!
@@ -56,6 +90,10 @@ final class ViewportController: AuxiliaryPaneController {
 
     /// The rail's compact verdict for the page on screen.
     var railTag: String {
+        agent == nil ? reachTag : "AGENT · " + reachTag
+    }
+
+    private var reachTag: String {
         switch currentReach {
         case .internet: "NET"
         case .lan: "LAN"
@@ -63,10 +101,11 @@ final class ViewportController: AuxiliaryPaneController {
         }
     }
 
-    init(tabID: UUID, offer: ViewportOffer, host: Host) {
+    init(tabID: UUID, offer: ViewportOffer, host: Host, agent: Agent? = nil) {
         self.tabID = tabID
         self.offer = offer
         self.host = host
+        self.agent = agent
         self.currentURL = offer.url
         self.currentReach = offer.reach
         self.lastRequestedURL = offer.url
@@ -76,7 +115,13 @@ final class ViewportController: AuxiliaryPaneController {
         // server's login survives reload. No user scripts, no message
         // handlers — pages get no bridge into the app.
         configuration.websiteDataStore = .default()
+        if let agent {
+            Self.configureForAgent(configuration, agent: agent, hostID: host.id)
+        }
         let webView = WKWebView(frame: .zero, configuration: configuration)
+        #if DEBUG
+        if agent != nil { webView.isInspectable = true }
+        #endif
         webView.allowsBackForwardNavigationGestures = true
         webView.isOpaque = false
         webView.backgroundColor = .clear
@@ -106,7 +151,9 @@ final class ViewportController: AuxiliaryPaneController {
             },
         ]
 
-        webView.load(URLRequest(url: offer.url))
+        // An agent tab's service loads it once its store is prepared (the
+        // forwards' cookie must be in the tab's own session first).
+        if agent == nil { webView.load(URLRequest(url: offer.url)) }
     }
 
     private func syncTelemetry() {
@@ -129,7 +176,7 @@ final class ViewportController: AuxiliaryPaneController {
     /// to the confirmed offer before the first commit.
     var displayURL: URL { currentURL ?? offer.url }
 
-    var tabLabel: String { TerminalRoute.viewportLabel(displayURL.absoluteString) }
+    var tabLabel: String { TerminalRoute.viewportLabel(displayURL.absoluteString, agent: agent != nil) }
 
     var routeMode: TerminalRoute.Mode { .viewport(urlString: displayURL.absoluteString) }
 
@@ -152,12 +199,25 @@ final class ViewportController: AuxiliaryPaneController {
     func navigate(toTyped input: String) -> Bool {
         guard let typed = ViewportOffer.fromTypedInput(input, host: host)
         else { return false }
-        failure = nil
-        lastRequestedURL = typed.url
-        currentReach = typed.reach
-        currentURL = typed.url
-        webView.load(URLRequest(url: typed.url))
+        load(typed)
         return true
+    }
+
+    /// Loads an admitted offer (a typed address, or an agent's navigation).
+    func load(_ offer: ViewportOffer) {
+        failure = nil
+        lastRequestedURL = offer.url
+        currentReach = offer.reach
+        currentURL = offer.url
+        webView.load(URLRequest(url: offer.url))
+    }
+
+    /// Swaps an agent tab's content rules (the loopback guard follows the
+    /// host's forwards). Applies to loads from now on.
+    func applyAgentRuleList(_ list: WKContentRuleList) {
+        let content = webView.configuration.userContentController
+        content.removeAllContentRuleLists()
+        content.add(list)
     }
 
     func stopLoading() {
@@ -199,6 +259,7 @@ final class ViewportController: AuxiliaryPaneController {
     /// Tab is closing for real (never called on a move): stop work and break
     /// the delegate cycle so the web process can wind down.
     func shutdown() {
+        agent?.onClose()
         observations.removeAll()
         webView.stopLoading()
         webView.navigationDelegate = nil
@@ -230,6 +291,10 @@ final class ViewportController: AuxiliaryPaneController {
     /// discipline has something to say about it — surfaced for confirmation.
     fileprivate func policy(for url: URL?) -> WKNavigationActionPolicy {
         guard let url, let scheme = url.scheme?.lowercased() else { return .cancel }
+        if case .device = agent?.route, !AgentBrowserAddressPolicy.admits(url, host: host) {
+            failure = AgentBrowserAddressPolicy.blockedError(url).message
+            return .cancel
+        }
         if scheme == "http" || scheme == "https" || scheme == "about" {
             return .allow
         }
@@ -237,6 +302,51 @@ final class ViewportController: AuxiliaryPaneController {
             externalLink = link
         }
         return .cancel
+    }
+}
+
+extension ViewportController {
+    /// The agent tab's WebKit setup: isolated helper + page console hook,
+    /// the host's own data store and route, its content rules, and the
+    /// scheduling policy for a tab that is not on screen.
+    private static func configureForAgent(
+        _ configuration: WKWebViewConfiguration,
+        agent: Agent,
+        hostID: UUID
+    ) {
+        // Random per tab, so it cannot collide with a page's own events.
+        let consoleEvent = "mpx-console-" + UUID().uuidString
+        let store = WKWebsiteDataStore(forIdentifier: hostID)
+        if case .host(let proxy, _) = agent.route {
+            // Set before the store's first load: WebKit keeps pooled
+            // connections that a later proxy change does not reach.
+            store.proxyConfigurations = [proxy]
+        }
+        configuration.websiteDataStore = store
+        configuration.preferences.inactiveSchedulingPolicy = AgentBrowserService.inactiveSchedulingPolicy
+        let content = configuration.userContentController
+        // Helper first: it must be listening before the hook dispatches.
+        content.addUserScript(WKUserScript(
+            source: AgentBrowserScript.helper(consoleEvent: consoleEvent),
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true,
+            in: AgentBrowserService.helperWorld
+        ))
+        content.addUserScript(WKUserScript(
+            source: AgentBrowserScript.consoleHook(consoleEvent: consoleEvent),
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true,
+            in: .page
+        ))
+        content.add(agent.ruleList)
+        // WebRTC is UDP straight from the device: no proxy and no content
+        // rule sees it. Agent tabs go without (best effort — page world).
+        content.addUserScript(WKUserScript(
+            source: AgentBrowserScript.noWebRTC,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: false,
+            in: .page
+        ))
     }
 }
 
@@ -256,9 +366,19 @@ private final class ViewportWebBridge: NSObject, WKNavigationDelegate, WKUIDeleg
         decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
     ) {
         MainActor.assumeIsolated {
-            decisionHandler(
-                controller?.policy(for: navigationAction.request.url) ?? .cancel
-            )
+            guard let controller else { return decisionHandler(.cancel) }
+            let url = navigationAction.request.url
+            // Host route: a link or redirect to another host loopback port
+            // waits for its device-side forward, then loads.
+            if let url, case .host(_, let forward) = controller.agent?.route,
+               AgentBrowserAddressPolicy.loopbackPort(url) != nil {
+                Task { @MainActor in
+                    let ready = await forward(url)
+                    decisionHandler(ready ? controller.policy(for: url) : .cancel)
+                }
+                return
+            }
+            decisionHandler(controller.policy(for: url))
         }
     }
 

@@ -87,7 +87,8 @@ approaches. Don't re-litigate a recorded decision without new facts.
 - `input-and-windows.md` — keyboard focus, key rail/ornament cluster,
   terminal window chrome, dictation, Copy Mode / Select Text, scene routing
   and tab moves, keyboard avoidance, secret fields, held-backspace filler.
-- `links-and-viewers.md` — link/path confirmation, ⌗ viewport, ▤ file viewer.
+- `links-and-viewers.md` — link/path confirmation, ⌗ viewport, agent
+  browser (`mpx browser` agent tabs), ▤ file viewer.
 - `backends-and-probe.md` — tmux invocation facts, mixed tmux+herdr hosts,
   the herdr adaptation, session creation (setup scripts, per-host tmux conf,
   systemd-run), file attach/drop.

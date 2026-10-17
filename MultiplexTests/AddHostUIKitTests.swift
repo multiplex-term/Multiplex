@@ -235,6 +235,7 @@ final class AddHostUIKitTests: XCTestCase {
             "New session tmux conf",
             "Session setup scripts",
             "Agent launch models",
+            "Agent browser",
             "Transport",
             "Host key",
         ])

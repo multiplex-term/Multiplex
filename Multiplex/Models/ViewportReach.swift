@@ -37,7 +37,10 @@ enum ViewportReach: Equatable {
     /// The same verdict for a bare host — callers that already hold the
     /// authority (schemeless link resolution) skip building a probe URL.
     static func classify(host: String) -> ViewportReach {
-        let lowered = host.lowercased()
+        // A fully qualified spelling (`localhost.`, `nas.local.`) names the
+        // same machine as the bare one.
+        var lowered = host.lowercased()
+        while lowered.hasSuffix("."), lowered.count > 1 { lowered.removeLast() }
         // An IPv4-mapped IPv6 literal names its IPv4 payload; unmap once so
         // every spelling takes the plain IPv4 verdict below.
         let host = ipv4MappedLiteral(lowered) ?? lowered
@@ -70,9 +73,12 @@ enum ViewportReach: Equatable {
             if octets[0] == 169, octets[1] == 254 { return true }
             return false
         }
-        // IPv6 unique-local (fc00::/7) and link-local (fe80::/10).
-        if host.hasPrefix("fc") || host.hasPrefix("fd") || host.hasPrefix("fe80:") {
-            return host.contains(":")
+        // IPv6 unique-local (fc00::/7) and link-local (fe80::/10 —
+        // fe80 through febf).
+        if host.contains(":"),
+           host.hasPrefix("fc") || host.hasPrefix("fd")
+            || ["fe8", "fe9", "fea", "feb"].contains(where: host.hasPrefix) {
+            return true
         }
         if host.hasSuffix(".local") { return true }
         // An unqualified single-label name resolves through the local

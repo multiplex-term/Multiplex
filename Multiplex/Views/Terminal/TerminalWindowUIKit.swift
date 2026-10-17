@@ -1089,6 +1089,16 @@ final class TerminalWindowViewController: UIViewController,
                 else { return false }
                 openFileViewer(target: target)
                 return true
+            },
+            activeTabID: { [weak self] in self?.route.activeTabID },
+            dock: { [weak self] tab, anchorID, activate in
+                self?.dock(tab, after: anchorID, activate: activate)
+            },
+            close: { [weak self] tabID in
+                self?.closeTab(tabID)
+            },
+            isForeground: { [weak self] in
+                self?.view.window?.windowScene?.activationState == .foregroundActive
             }
         ))
     }
@@ -1453,14 +1463,14 @@ final class TerminalWindowViewController: UIViewController,
         dock(tab, after: anchorID)
     }
 
-    private func dock(_ tab: TerminalRoute, after anchorID: UUID) {
+    private func dock(_ tab: TerminalRoute, after anchorID: UUID, activate: Bool = true) {
         mutateRoute { route in
             if let index = route.tabs.firstIndex(where: { $0.id == anchorID }) {
                 route.tabs.insert(tab, at: index + 1)
             } else {
                 route.tabs.append(tab)
             }
-            route.activate(tab.id)
+            if activate { route.activate(tab.id) }
         }
     }
 

@@ -58,6 +58,7 @@ struct AddHostFormState {
     /// silently changes the other.
     var secondaryBackends: Set<Host.SessionBackend> = []
     var useMosh = false
+    var agentBrowser = false
     var moshServerPath = ""
     var moshPorts = ""
     var workingDirectories: [WorkingDirectory] = []
@@ -96,6 +97,7 @@ struct AddHostFormState {
         sessionBackend = host.sessionBackend
         secondaryBackends = host.secondaryBackends
         useMosh = host.useMosh
+        agentBrowser = host.agentBrowser
         moshServerPath = host.moshServerPath ?? ""
         moshPorts = host.moshPorts ?? ""
         workingDirectories = host.workingDirs.map { WorkingDirectory(path: $0) }
@@ -189,6 +191,7 @@ struct AddHostFormState {
         host.backgroundKeepAlive = backgroundKeepAlive
         host.backendSelection = backendSelection
         host.useMosh = useMosh
+        host.agentBrowser = agentBrowser
         let serverPath = moshServerPath.trimmingCharacters(in: .whitespaces)
         host.moshServerPath = serverPath.isEmpty ? nil : serverPath
         let ports = moshPorts.trimmingCharacters(in: .whitespaces)
@@ -326,6 +329,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
 
     private var hostSection: AddHostSectionView!
     private var monitoringSection: AddHostSectionView!
+    private var agentBrowserSection: AddHostSectionView!
     private var credentialsSection: AddHostSectionView!
     private var testSection: AddHostSectionView!
     /// Not "Host identity" — that title belongs to the address section above.
@@ -763,6 +767,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         )
         scriptsSection.accessibilityIdentifier = "addhost.section.scripts"
         agentModelsSection = makeAgentModelsSection()
+        agentBrowserSection = makeAgentBrowserSection()
         transportSection = AddHostSectionView(
             title: String(localized: "Transport"), detail: nil, rows: []
         )
@@ -786,6 +791,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
             tmuxConfSection,
             scriptsSection,
             agentModelsSection,
+            agentBrowserSection,
             transportSection,
             hostKeySection,
         ].forEach { manualStack.addArrangedSubview($0) }
@@ -882,6 +888,41 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         )
         section.accessibilityIdentifier = "addhost.section.monitoring"
         return section
+    }
+
+    private func makeAgentBrowserSection() -> AddHostSectionView {
+        let control = SettingsBooleanRow(
+            title: String(localized: "Let agents drive a browser"),
+            isOn: form.agentBrowser,
+            accessibilityHint: String(
+                localized: "Agents on this host can open and operate web pages in Multiplex"
+            )
+        ) { [weak self] enabled in
+            guard let self else { return }
+            self.form.agentBrowser = enabled
+            self.agentBrowserSection.setDetail(self.agentBrowserDetail)
+        }
+        let section = AddHostSectionView(
+            title: String(localized: "Agent browser"),
+            detail: agentBrowserDetail,
+            rows: [control]
+        )
+        section.accessibilityIdentifier = "addhost.section.agentbrowser"
+        return section
+    }
+
+    private var agentBrowserDetail: String {
+        form.agentBrowser
+            ? String(localized: """
+                While Multiplex is open, agents on this host can open web pages beside \
+                your terminal and read, click, and type in them with `mpx browser` \
+                (mpx 0.2 or later; `mpx skill install` teaches an agent how). Agent tabs \
+                load through this host over SSH, so they see the host's network and never \
+                your device's; they keep their own cookies and never see your own tabs.
+                """)
+            : String(localized: """
+                Off: agents on this host cannot open pages in Multiplex.
+                """)
     }
 
     /// One caption for both switches — they answer the same question at two

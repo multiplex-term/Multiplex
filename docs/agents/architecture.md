@@ -75,6 +75,8 @@ UIKit scene runtime (MultiplexSceneDelegate + UIKitSceneRootViewController;
                      one summoned side-panel controller by its HOST tab id
     ViewportController   one per ⌗ viewport tab; owns the WKWebView so
                      moves re-parent the live page; in-memory only
+                     (an AGENT tab: isolated helper world, the host's
+                     own data store, its route + loopback guard)
     FileViewerController one per ▤ file-viewer tab; dials its OWN lazy
                      SSHConnection; in-memory only (shares the
                      isAuxiliaryPane rules with the viewport); its
@@ -107,6 +109,14 @@ UIKit scene runtime (MultiplexSceneDelegate + UIKitSceneRootViewController;
                      over a throwaway SSHConnection
       Mosh/*         clean-room mosh stack, pure + unit-tested against
                      RFC 7253 / real mosh-server
+  AgentBrowserService  `mpx browser` for opted-in hosts: one
+                     AgentBrowserLink each (own SSHConnection, PTY-less
+                     shell running `mpx bridge`, JSON lines, ping + stale
+                     request guard); acts only on AGENT viewport tabs it
+                     opened, via AgentBrowserDriver (WebKit calls)
+    AgentBrowserProxy  host route: loopback CONNECT proxy for the tabs'
+                     data store + device-loopback forwards (cookie-admitted),
+                     every connection an SSH direct-tcpip from the host
   TerminalFocusArbiter  app-wide single owner of keyboard focus
 ```
 

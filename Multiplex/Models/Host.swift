@@ -94,6 +94,14 @@ struct Host: Identifiable, Codable, Hashable {
     /// The credentials above still authenticate the SSH bootstrap that
     /// launches `mosh-server`; deck probing stays on SSH either way.
     var useMosh: Bool = false
+    /// Let agents on this host drive web pages in the app through
+    /// `mpx browser` (the agent browser). On, the app keeps one extra SSH
+    /// connection to the host while it is in front, running `mpx bridge`;
+    /// agent tabs dock beside the host's terminals with a cookie jar of
+    /// their own. Off (the default) — it is consent for a host to steer
+    /// something on this device, so a record that predates the switch never
+    /// inherits it. Rides the synced record.
+    var agentBrowser: Bool = false
     /// The session backend the probe and attach paths use. Rides the synced
     /// record, and deliberately participates in
     /// `connectionModelConfiguration`: flipping it must tear down and
@@ -338,6 +346,7 @@ extension Host {
             Bool.self, forKey: .backgroundKeepAlive
         ) ?? false
         useMosh = try container.decodeIfPresent(Bool.self, forKey: .useMosh) ?? false
+        agentBrowser = try container.decodeIfPresent(Bool.self, forKey: .agentBrowser) ?? false
         // Decode via the raw string so an unknown value — a record written
         // by a newer schema that grew a third backend — degrades to tmux
         // instead of throwing this host (and with it the whole list) away.
@@ -375,9 +384,10 @@ extension Host {
     }
 
     /// Hashable identity for the connection model and the wall feed that
-    /// drives it. Command-setup, setup-script, launch-model, and new-session
-    /// tmux conf edits must not tear down the probe connection; every other
-    /// current/future Host field remains part of the identity — `isEnabled`
+    /// drives it. Command-setup, setup-script, launch-model, new-session
+    /// tmux conf, and agent-browser edits must not tear down the probe
+    /// connection; every other current/future Host field remains part of
+    /// the identity — `isEnabled`
     /// deliberately included, so a host switched off on another device
     /// restarts the wall feed here, which is where the live probe is dropped.
     /// (`backgroundKeepAlive` is in the identity only by that default rule —
@@ -389,6 +399,8 @@ extension Host {
         configuration.sessionScripts = []
         configuration.agentLaunchModels = [:]
         configuration.newSessionTmuxConf = Host.defaultNewSessionTmuxConf
+        // The agent browser dials its own connection; the probe never cares.
+        configuration.agentBrowser = false
         configuration.updatedAt = .distantPast
         return configuration
     }

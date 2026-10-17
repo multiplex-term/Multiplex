@@ -454,6 +454,8 @@ final class HostStore {
         // the assertion path can be driven headlessly (nothing can tap the
         // Host Settings switch). Absent leaves it off, as a real record is.
         if let keepAlive = seed.backgroundKeepAlive { host.backgroundKeepAlive = keepAlive }
+        // Same for the agent browser: `agentBrowser: true` starts the bridge.
+        if let agentBrowser = seed.agentBrowser { host.agentBrowser = agentBrowser }
         if let key = seed.privateKey { KeychainStore.set(key, for: host.id, kind: .privateKey) }
         // For headless proofs of the encrypted-key connect path: a seed can
         // carry the key's passphrase so the probe connects without the
@@ -543,6 +545,7 @@ final class HostStore {
         var passphrase: String?
         var enabled: Bool?
         var backgroundKeepAlive: Bool?
+        var agentBrowser: Bool?
         var useMosh: Bool?
         var sessionBackend: String?
         var secondaryBackends: [String]?
