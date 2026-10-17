@@ -272,6 +272,19 @@ app.multiplexterm.multiplex.<name>`:
   `#{pane_in_mode}` stays 0 under a pan).
 - `debug.herdrmenu` — one right-click report at screen center (the block's
   MENU chip path); proof is herdr's own pane menu rendering in the pane.
+- `debug.herdrselectdrag` — the traveling long press on herdr: finds the
+  first visible row containing `mpx-select`, long-presses its first letter
+  (the block rises), drags to that row's next two lines and lifts, through
+  the real `longPressBegan/Moved/Ended` phases. Print the marker so the
+  command line itself doesn't match (`printf 'mpx-%s\n' select-alpha
+  select-bravo select-charlie`). Proof: `printf x | xcrun simctl pbcopy
+  <udid>` first, then `xcrun simctl pbpaste <udid>` reads herdr's OSC 52
+  copy (`mpx-select-alpha⏎mpx-select-bravo⏎mpx-select`, verified
+  2026-10-17 on visionOS against herdr 0.9.3, over SSH and over mosh 1.4.0
+  with `useMosh: true` added to `seed-herdr.json`), and herdr's own
+  "copied to clipboard" toast shows in the pane. A herdr/mosh seed flips
+  devbox in place: re-seed `useMosh: false` / `sessionBackend: "tmux"`
+  afterwards, or the next `verify` attaches `main` through herdr over mosh.
 - `debug.tmuxclosepane` / `debug.tmuxclosewindow` — the already-confirmed
   destructive close actions (disposable sessions only).
 - `debug.keybar` — iPad key-bar proof: a shell prompt capture shows `~|/-^C`.

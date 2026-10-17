@@ -838,25 +838,59 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     
     @objc func longPress (_ gestureRecognizer: UILongPressGestureRecognizer)
     {
+         let location = gestureRecognizer.location(in: self)
          switch gestureRecognizer.state {
          case .began:
-             // Multiplex patch: the app can claim a long press as the start of
-             // a remote mouse drag (press + motion + release) for cells it
-             // recognizes — a TUI multiplexer's pane-resize bar. Checked before
-             // link activation and the selection menu; everything the filter
-             // declines keeps the existing behavior.
-             if !shiftBypassesMouseReporting(for: gestureRecognizer),
-                beginRemoteMouseDrag(at: gestureRecognizer.location(in: self)) {
-                 return
-             }
-             presentLocalPressActions(at: gestureRecognizer.location(in: self))
+             longPressBegan(at: location,
+                            shiftBypass: shiftBypassesMouseReporting(for: gestureRecognizer))
          case .changed:
-             continueRemoteMouseDrag(at: gestureRecognizer.location(in: self))
+             longPressMoved(to: location)
          case .ended, .cancelled, .failed:
-             endRemoteMouseDrag(at: gestureRecognizer.location(in: self))
+             longPressEnded(at: location)
          default:
              break
          }
+    }
+
+    /// Multiplex patch: the long press's three phases, split from the
+    /// recognizer so the app's DEBUG hooks and tests drive the exact path a
+    /// finger takes. `shiftBypass` is a held hardware Shift, which keeps the
+    /// press local the way it keeps a tap local.
+    public func longPressBegan (at location: CGPoint, shiftBypass: Bool = false) {
+        // The app can claim a long press as the start of a remote mouse
+        // drag (press + motion + release) for cells it recognizes — a TUI
+        // multiplexer's pane-resize bar. Checked before link activation and
+        // the selection menu; everything the filter declines keeps the
+        // existing behavior.
+        if !shiftBypass, beginRemoteMouseDrag(at: location) {
+            return
+        }
+        // A press that raised the selection block can still become the
+        // remote's own selection drag if the finger travels before lifting.
+        if presentLocalPressActions(at: location),
+           longPressDragSelectsRemotely, !shiftBypass {
+            remoteSelectionDragOrigin = location
+        }
+    }
+
+    /// Multiplex patch: see `longPressBegan`. Travel past the slop hands an
+    /// armed press to the remote — the block gives way, and the press is
+    /// reported where the finger went down so the selection starts there.
+    public func longPressMoved (to location: CGPoint) {
+        if let origin = remoteSelectionDragOrigin,
+           hypot(location.x - origin.x, location.y - origin.y) >= Self.remoteSelectionDragSlop {
+            remoteSelectionDragOrigin = nil
+            if beginRemoteSelectionDrag(at: origin) {
+                _ = dismissAppMenu()
+            }
+        }
+        continueRemoteMouseDrag(at: location)
+    }
+
+    /// Multiplex patch: see `longPressBegan`.
+    public func longPressEnded (at location: CGPoint) {
+        remoteSelectionDragOrigin = nil
+        endRemoteMouseDrag(at: location)
     }
 
     /// Multiplex patch: the local action chain a long press runs, shared with
@@ -866,8 +900,10 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// (a long press/right click is local at any mouse-tracking mode, so it
     /// is the one activation route that always reaches the user's intent);
     /// anywhere else raises the app's selection block, or legacy
-    /// UIMenuController when no handler is installed.
-    func presentLocalPressActions (at tapLocation: CGPoint) {
+    /// UIMenuController when no handler is installed. Returns true when the
+    /// chain ended at the app's block.
+    @discardableResult
+    func presentLocalPressActions (at tapLocation: CGPoint) -> Bool {
         let _ = self.becomeFirstResponder()
         let tapRegion = makeContextMenuRegionForTap (point: tapLocation)
         let hit = calculateTapHit (point: tapLocation).grid
@@ -878,22 +914,23 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         if selectionUIHandler != nil {
             _ = dismissAppMenu()
             seedAppSelection(at: hit)
-            return
+            return false
         }
 
         if let result = linkForClick(at: hit, hasCommandModifier: commandActive),
            activateLink(result, at: hit) {
             _ = dismissAppMenu()
-            return
+            return false
         }
 
         // Outside select-text mode the app's block replaces the
         // UIMenuController flow — another gesture elsewhere simply moves it.
         if presentSelectionMenu(at: tapLocation) {
-            return
+            return true
         }
 
         showContextMenu (forRegion: tapRegion, pos: hit)
+        return false
     }
 
     /// Multiplex patch: raise the app-owned SELECT / SELECT ALL / PASTE
@@ -955,8 +992,24 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// gesture path headlessly. Returns true when the press was sent.
     @discardableResult
     public func beginRemoteMouseDrag (at point: CGPoint) -> Bool {
-        guard let filter = longPressMouseDragFilter,
-              allowMouseReporting,
+        guard let filter = longPressMouseDragFilter else { return false }
+        return startRemoteMouseDrag(at: point, claimedBy: filter)
+    }
+
+    /// Multiplex patch: begins a remote left-button drag at `point` with no
+    /// cell filter — the hand-off `longPressDragSelectsRemotely` arms. Same
+    /// eligibility as the claimed drag: the client tracks buttons, no local
+    /// selection or menu owns the touch. Returns true when the press was sent.
+    @discardableResult
+    public func beginRemoteSelectionDrag (at point: CGPoint) -> Bool {
+        startRemoteMouseDrag(at: point, claimedBy: nil)
+    }
+
+    private func startRemoteMouseDrag (
+        at point: CGPoint,
+        claimedBy filter: ((_ cell: (col: Int, row: Int), _ content: Character?) -> Bool)?
+    ) -> Bool {
+        guard allowMouseReporting,
               terminal != nil,
               !contextMenuPresented,
               mouseDragPressFlags == nil,
@@ -970,7 +1023,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
         // The filter is app code: it runs with the terminal lock released.
         guard candidate.eligible,
-              filter((hit.grid.col, hit.grid.row), candidate.content)
+              filter?((hit.grid.col, hit.grid.row), candidate.content) ?? true
         else { return false }
         // Encode both flag values once at press time: encodeFlags clears the
         // app's CTRL latch as a side effect, and a drag's many motion samples
@@ -5068,6 +5121,21 @@ public var keyboardAppearance: UIKeyboardAppearance = .`default`
     /// time. Only consulted while the client requested button tracking
     /// (1002/1003), so a plain shell never loses its long press.
     public var longPressMouseDragFilter: ((_ cell: (col: Int, row: Int), _ content: Character?) -> Bool)?
+
+    /// Multiplex patch: when true, a long press whose local chain raised the
+    /// app's selection block, and whose finger then travels, becomes a
+    /// remote left-button drag from the pressed cell — the TUI's own
+    /// selection, the one a desktop terminal hands a mouse drag to. A press
+    /// that lifts where it landed keeps the block. Like the filter, it only
+    /// takes effect while the client requested button tracking.
+    public var longPressDragSelectsRemotely = false
+    /// The pressed point of a long press armed for that hand-off.
+    private var remoteSelectionDragOrigin: CGPoint?
+    /// How far an armed press travels before it is a drag: the long press
+    /// recognizer's own default movement allowance. A cell is narrower
+    /// (~6 pt on iPhone), so a cell change alone would let a lift's wobble
+    /// take the block away.
+    private static let remoteSelectionDragSlop: CGFloat = 10
 
     private var mouseDragPressFlags: Int?
     private var mouseDragReleaseFlags = 0

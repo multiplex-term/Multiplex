@@ -491,7 +491,30 @@ routing, tab moves, keyboard avoidance, or secret fields.
   does since SwiftTerm 1.99; pinned by `TerminalRemoteMouseTests`)
   so herdr's own pane menu, unreachable by touch, opens where the finger
   was. herdr-only on purpose: tmux's right-click menu would fight the
-  shortcut panel and the block itself. Selection covers the
+  shortcut panel and the block itself. **On herdr tabs a long press that
+  raised the block and then travels hands the drag to herdr**
+  (`longPressDragSelectsRemotely`, a fork patch; the press's phases are
+  public `longPressBegan/Moved/Ended` so the DEBUG hook drives the real
+  path): past a 10 pt slop — the long press recognizer's own movement
+  allowance; a ~6 pt iPhone cell would let a lift's wobble take the block —
+  the block gives way and one left-button press is reported at the cell the
+  finger went down on, then cell-quantized motion and a release on lift.
+  herdr selects inside the pane (its own sidebar never joins; its
+  scrollback can) and on release copies over OSC 52 into the device
+  pasteboard (`clipboardCopy`) — herdr's defaults `mouse_capture` +
+  `copy_on_select`, and its client writes OSC 52 only when it sees
+  `SSH_CONNECTION` or `SSH_TTY` (else it copies to the HOST's clipboard;
+  verified 0.9.3 and 0.9.5, sshd sets both). A pane app that tracks the
+  mouse itself owns the drag instead, and herdr forwards its OSC 52. This is
+  the selection iTerm/Ghostty users get: local selection sees only the
+  composited screen, so it sweeps whatever a TUI draws beside its text
+  (reported 2026-10-12 against Hermes's side panel). A press that lifts in
+  place keeps the block; select-text mode and tmux tabs are untouched (tmux
+  `mouse on` would start copy mode). mosh tabs work too (verified
+  2026-10-17, mosh 1.4.0): the herdr client under mosh-server inherits
+  `SSH_CONNECTION` from the SSH exec that launched it (no `SSH_TTY`; one
+  suffices), and the OSC 52 rides mosh's state sync into the clean-room
+  client. Local selection covers the
   visible screen only (herdr's scrollback lives host-side) and nothing
   freezes — a busy pane keeps drawing under the selection.
 - **"Back to deck" reuses the one deck scene**: `UIKitSceneRouting`

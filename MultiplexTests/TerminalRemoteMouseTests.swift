@@ -5,7 +5,9 @@ import XCTest
 
 /// The fork's remote mouse seams, byte for byte on the wire: a claimed long
 /// press becomes press / cell-quantized motion / release (herdr's pane-resize
-/// drag), and the selection block's MENU chip sends a right click whose SGR
+/// drag), a long press that raised the block and then travels hands the same
+/// drag to the remote's own selection, and the selection block's MENU chip
+/// sends a right click whose SGR
 /// release names button 2 — a left-button release would dismiss the very
 /// menu the press opened.
 @MainActor
@@ -68,6 +70,82 @@ final class TerminalRemoteMouseTests: XCTestCase {
         XCTAssertFalse(terminal.beginRemoteMouseDrag(at: terminal.pointForCell(col: 1, row: 1)))
         settle()
         XCTAssertTrue(delegate.sent.isEmpty)
+    }
+
+    /// Installs a stand-in selection block; the counters see it raised and
+    /// dismissed through the same handler/dismiss pair the app's overlay uses.
+    private func trackBlock(on terminal: TerminalView) -> (raised: () -> Int, dismissed: () -> Int) {
+        var raised = 0
+        var dismissed = 0
+        terminal.selectionMenuHandler = { [weak terminal] _, _ in
+            raised += 1
+            terminal?.appMenuDismiss = { dismissed += 1 }
+        }
+        return ({ raised }, { dismissed })
+    }
+
+    /// herdr's selection by touch: a long press raises the block, travel
+    /// past the slop hands the drag to the remote — press where the finger
+    /// went down, motion where it is, release on lift — and the block gives way.
+    func testTravelingLongPressHandsTheSelectionToTheRemote() {
+        let (terminal, delegate) = sgrTracking()
+        let block = trackBlock(on: terminal)
+        terminal.longPressDragSelectsRemotely = true
+
+        terminal.longPressBegan(at: terminal.pointForCell(col: 5, row: 2))
+        XCTAssertEqual(block.raised(), 1)
+        terminal.longPressMoved(to: terminal.pointForCell(col: 9, row: 4))
+        terminal.longPressEnded(at: terminal.pointForCell(col: 9, row: 4))
+        waitForSends(delegate, count: 3)
+
+        XCTAssertEqual(block.dismissed(), 1)
+        XCTAssertFalse(terminal.remoteMouseDragActive)
+        XCTAssertEqual(text(delegate), [
+            "\u{1B}[<0;6;3M",
+            "\u{1B}[<32;10;5M",
+            "\u{1B}[<0;10;5m",
+        ])
+    }
+
+    /// A lift's wobble inside the slop is still a press: the block stays and
+    /// the remote hears nothing, though the wobble crossed a cell.
+    func testLongPressWobbleKeepsTheBlock() {
+        let (terminal, delegate) = sgrTracking()
+        let block = trackBlock(on: terminal)
+        terminal.longPressDragSelectsRemotely = true
+        let origin = terminal.pointForCell(col: 5, row: 2)
+        let wobble = CGPoint(x: origin.x + 8, y: origin.y)
+
+        terminal.longPressBegan(at: origin)
+        terminal.longPressMoved(to: wobble)
+        terminal.longPressEnded(at: wobble)
+        settle()
+
+        XCTAssertEqual(block.raised(), 1)
+        XCTAssertEqual(block.dismissed(), 0)
+        XCTAssertTrue(delegate.sent.isEmpty)
+    }
+
+    /// Without the opt-in (tmux tabs, plain shells), or while the client
+    /// tracks no buttons, a traveling long press stays local.
+    func testTravelingLongPressStaysLocalWithoutOptInOrTracking() {
+        let (optedOut, optedOutDelegate) = sgrTracking()
+        let optedOutBlock = trackBlock(on: optedOut)
+        let (untracked, untrackedDelegate) = CapturingTerminalDelegate.makeTerminal()
+        let untrackedBlock = trackBlock(on: untracked)
+        untracked.longPressDragSelectsRemotely = true
+
+        for terminal in [optedOut, untracked] {
+            terminal.longPressBegan(at: terminal.pointForCell(col: 5, row: 2))
+            terminal.longPressMoved(to: terminal.pointForCell(col: 9, row: 4))
+            terminal.longPressEnded(at: terminal.pointForCell(col: 9, row: 4))
+        }
+        settle()
+
+        XCTAssertEqual(optedOutBlock.dismissed(), 0)
+        XCTAssertEqual(untrackedBlock.dismissed(), 0)
+        XCTAssertTrue(optedOutDelegate.sent.isEmpty)
+        XCTAssertTrue(untrackedDelegate.sent.isEmpty)
     }
 
     func testRightClickReleaseNamesTheButton() {

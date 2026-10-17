@@ -39,8 +39,10 @@ input encoding, or terminal rendering.
       retrying while a Metal surface reports GPU work in flight. Backstop
       patch: a display-link tick whose driver is gone invalidates its link,
       so a view released mid-burst cannot keep a link firing at display rate.
-      The re-locked gesture seams — claimed long-press drags, the remote
-      right click, wheel/cursor-key pans — are pinned on the wire by
+      The re-locked gesture seams — claimed long-press drags, the
+      traveling long press's hand-off to the remote's own selection
+      (`longPressDragSelectsRemotely`), the remote right click,
+      wheel/cursor-key pans — are pinned on the wire by
       `TerminalRemoteMouseTests`; the input stamp and echo sampler by
       `TerminalTypingQuietTests`.
     - **Retired at 1.99.0** (upstream now carries the fix): the OSC/APC

@@ -303,6 +303,13 @@ final class TerminalSessionController {
             view.longPressMouseDragFilter = { _, content in
                 HerdrPaneBorder.isBorderCell(content)
             }
+            // herdr selects by mouse drag inside the pane and, for a client
+            // under SSH, copies over OSC 52 (`clipboardCopy`) — the selection
+            // iTerm and Ghostty users get. Local selection sees only the
+            // composited screen, so it sweeps whatever a TUI draws beside
+            // the text; a long press that raised the block and then travels
+            // hands the drag to herdr instead.
+            view.longPressDragSelectsRemotely = true
         }
         if !pendingOutput.isEmpty {
             view.feed(byteArray: pendingOutput[...])

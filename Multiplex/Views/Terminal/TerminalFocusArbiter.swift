@@ -401,6 +401,7 @@ enum TerminalFocusArbiter {
         installDebugScrollHooks()
         installDebugKeyboardLockHook()
         installDebugResizeDragHook()
+        installDebugSelectionDragHook()
     }
 
     /// Headless stand-in for the long-press-on-border resize drag (no
@@ -463,6 +464,68 @@ enum TerminalFocusArbiter {
             }
             try? await Task.sleep(nanoseconds: 40_000_000)
             view.endRemoteMouseDrag(at: view.pointForCell(col: cell.col + 6, row: cell.row))
+        }
+    }
+
+    /// Headless stand-in for a long press that travels into the remote's own
+    /// selection (no headless route can synthesize a touch): `… -p
+    /// app.multiplexterm.multiplex.debug.herdrselectdrag` finds the first
+    /// visible row containing `mpx-select`, long-presses its first letter
+    /// (raising the block), then drags across to that row's next two lines
+    /// and lifts — the exact phases the gesture drives. Proof: the block
+    /// gives way to herdr's own highlight, and `xcrun simctl pbpaste` reads
+    /// the OSC 52 copy herdr sends back.
+    private static func installDebugSelectionDragHook() {
+        var token: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.herdrselectdrag", &token, .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                performDebugSelectionDrag()
+            }
+        }
+    }
+
+    private static func performDebugSelectionDrag() {
+        guard let view = current, view.longPressDragSelectsRemotely else { return }
+        let snapshot = view.terminalStateSnapshot()
+        let rows = snapshot.dimensions.rows
+        // The marker's screen column: walk the cell widths, as the resize
+        // hook does — the copied text skips a wide glyph's trailing cell.
+        var start: (col: Int, row: Int)?
+        for line in snapshot.visibleRows {
+            guard let range = line.text.range(of: "mpx-select") else { continue }
+            let offset = line.text.distance(from: line.text.startIndex, to: range.lowerBound)
+            var seen = 0
+            for (col, width) in line.cellWidths.enumerated() where width != 0 {
+                if seen == offset {
+                    start = (col: col, row: line.row)
+                    break
+                }
+                seen += 1
+            }
+            break
+        }
+        guard let start else {
+            keyboardLogger.debug("herdrselectdrag no mpx-select row on screen")
+            return
+        }
+        let end = (col: start.col + 9, row: min(start.row + 2, rows - 1))
+        keyboardLogger.debug(
+            "herdrselectdrag from=\(start.col),\(start.row) to=\(end.col),\(end.row)")
+        let path = [
+            (col: start.col + 4, row: start.row),
+            (col: start.col, row: start.row + 1),
+            end,
+        ]
+        Task { @MainActor in
+            view.longPressBegan(at: view.pointForCell(col: start.col, row: start.row))
+            for cell in path {
+                try? await Task.sleep(nanoseconds: 60_000_000)
+                view.longPressMoved(to: view.pointForCell(col: cell.col, row: cell.row))
+            }
+            try? await Task.sleep(nanoseconds: 60_000_000)
+            view.longPressEnded(at: view.pointForCell(col: end.col, row: end.row))
         }
     }
 

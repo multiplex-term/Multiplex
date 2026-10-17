@@ -261,7 +261,9 @@ Current product split:
   touch double-tap (a SELECT / SELECT ALL / PASTE block on any live pane; the
   selection clamps to that pane with a floating COPY / SELECT ALL / DONE
   block beside it, a pointer's secondary click raises the same block, and herdr
-  tabs add a MENU chip that opens herdr's own pane menu in place), Home Screen
+  tabs add a MENU chip that opens herdr's own pane menu in place; on herdr a
+  long press that keeps going into a drag hands it to herdr's own selection,
+  which stays in the pane and copies to the device clipboard on lift), Home Screen
   widgets (per-host monitor +
   fleet wall; iPadOS 17+, visionOS 26+) and App Shortcuts ("Open Shell" /
   "Open File" with remote path and optional line or `path:10-15` range /
