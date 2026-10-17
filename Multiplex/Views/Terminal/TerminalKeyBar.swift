@@ -1853,7 +1853,7 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback, KeyBarDropSurface 
     }
 
     private func arrow(_ app: [UInt8], _ normal: [UInt8]) -> [UInt8] {
-        terminal?.getTerminal().applicationCursor == true ? app : normal
+        terminal?.applicationCursorKeys == true ? app : normal
     }
 
     private func click() {
@@ -2437,7 +2437,7 @@ final class TerminalKeyClusterContext: KeyBarDropSurface {
 
     func sendArrow(app: [UInt8], normal: [UInt8]) {
         guard let terminal = observedTerminal else { return }
-        terminal.send(terminal.getTerminal().applicationCursor ? app : normal)
+        terminal.send(terminal.applicationCursorKeys ? app : normal)
     }
 
     func toggleKeyboard() {

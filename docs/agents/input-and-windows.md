@@ -477,8 +477,9 @@ routing, tab moves, keyboard avoidance, or secret fields.
   clicks exercise the UIKit road; no headless route can drive the GCMouse
   hardware callback or an iPad pointer. On herdr tabs the block adds
   MENU — one right-button press+release reported at the pressed cell
-  (`sendRemoteRightClick`; `Terminal.sendButtonReleaseEvent` names the
-  true button in SGR release, which the stock path masks to a *left* up)
+  (`sendRemoteRightClick`; the SGR release must name the true button —
+  a *left* up would dismiss the menu — which upstream's release encoding
+  does since SwiftTerm 1.99; pinned by `TerminalRemoteMouseTests`)
   so herdr's own pane menu, unreachable by touch, opens where the finger
   was. herdr-only on purpose: tmux's right-click menu would fight the
   shortcut panel and the block itself. Selection covers the
@@ -505,7 +506,9 @@ routing, tab moves, keyboard avoidance, or secret fields.
   survive). An emptied window dismisses via plain `dismiss()` — not
   `dismissWindow(id:value:)`, whose lagging committed-value matching
   leaves ghost windows. `onDisappear` closes remaining tabs, so a merge
-  empties the source first and never detaches moved tabs.
+  empties the source first and never detaches moved tabs. Closing (and
+  only closing) also releases the view's SwiftTerm frame driver
+  (`updateUiClosed()` in `detach()`) — a moved view keeps its own.
 - **Input is one ordered AsyncStream pump per shell**, not a Task per
   keystroke (which could reorder bytes). Citadel already sets
   `TCP_NODELAY`.

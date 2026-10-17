@@ -3,7 +3,9 @@
 //  SwiftTerm
 //
 
+#if !SWIFTTERM_EMBEDDED
 import Foundation
+#endif
 #if canImport(CoreGraphics)
 import CoreGraphics
 #endif
@@ -25,22 +27,45 @@ enum KittyPlaceholderDecoder {
                        col: Int,
                        previous: KittyPlaceholderCell?,
                        previousAttribute: Attribute?) -> KittyPlaceholderCell? {
-        var scalars = character.unicodeScalars
-        guard let first = scalars.first, first.value == KittyPlaceholder.baseScalar else {
-            return nil
-        }
+        decode(scalars: character.unicodeScalars.lazy.map(\.value), attribute: attribute,
+               row: row, col: col, previous: previous, previousAttribute: previousAttribute)
+    }
 
-        var diacritics: [Int] = []
-        scalars.removeFirst()
-        for scalar in scalars {
-            if let idx = KittyPlaceholder.diacriticIndex[scalar.value] {
-                diacritics.append(idx)
+    static func decode(cell: PackedCellView,
+                       attribute: Attribute,
+                       row: Int,
+                       col: Int,
+                       previous: KittyPlaceholderCell?,
+                       previousAttribute: Attribute?) -> KittyPlaceholderCell? {
+        if cell.isSimpleRune {
+            return decode(scalars: CollectionOfOne(UInt32(cell.code)), attribute: attribute,
+                          row: row, col: col, previous: previous, previousAttribute: previousAttribute)
+        }
+        return decode(scalars: cell.getScalarValues(), attribute: attribute,
+                      row: row, col: col, previous: previous, previousAttribute: previousAttribute)
+    }
+
+    static func decode<Scalars: Sequence>(scalars: Scalars,
+                       attribute: Attribute,
+                       row: Int,
+                       col: Int,
+                       previous: KittyPlaceholderCell?,
+                       previousAttribute: Attribute?) -> KittyPlaceholderCell? where Scalars.Element == UInt32 {
+        var scalars = scalars.makeIterator()
+        guard scalars.next() == KittyPlaceholder.baseScalar else { return nil }
+        var count = 0
+        var explicitRow: Int?
+        var explicitCol: Int?
+        var explicitMsb: Int?
+        while count < 3, let scalar = scalars.next() {
+            guard let index = KittyPlaceholder.diacriticIndex[scalar] else { continue }
+            switch count {
+            case 0: explicitRow = index
+            case 1: explicitCol = index
+            default: explicitMsb = index
             }
+            count += 1
         }
-
-        let explicitRow = diacritics.count > 0 ? diacritics[0] : nil
-        let explicitCol = diacritics.count > 1 ? diacritics[1] : nil
-        let explicitMsb = diacritics.count > 2 ? diacritics[2] : nil
 
         let sameFg = previousAttribute?.fg == attribute.fg
         let sameUnderline = previousAttribute?.underlineColor == attribute.underlineColor
@@ -50,7 +75,7 @@ enum KittyPlaceholderDecoder {
         var placeholderCol: Int?
         var msb = explicitMsb ?? 0
 
-        switch diacritics.count {
+        switch count {
         case 0:
             if let prev = previous, sameFg, sameUnderline, isAdjacent {
                 placeholderRow = prev.placeholderRow
@@ -114,7 +139,16 @@ enum KittyPlaceholderDecoder {
     }
 }
 
-#if canImport(CoreGraphics)
+struct KittyPlaceholderSize: Equatable, Sendable {
+    let width: Double
+    let height: Double
+
+    init(width: Double, height: Double) {
+        self.width = width
+        self.height = height
+    }
+}
+
 struct KittyPlaceholderRenderPlacement: Equatable {
     let offsetX: Int
     let offsetY: Int
@@ -125,10 +159,10 @@ struct KittyPlaceholderRenderPlacement: Equatable {
     let destWidth: Int
     let destHeight: Int
 
-    static func compute(imageSize: CGSize,
+    static func compute(imageSize: KittyPlaceholderSize,
                         placementCols: Int,
                         placementRows: Int,
-                        cellSize: CGSize,
+                        cellSize: KittyPlaceholderSize,
                         col: Int,
                         row: Int,
                         width: Int,
@@ -142,18 +176,18 @@ struct KittyPlaceholderRenderPlacement: Equatable {
             return nil
         }
 
-        let placementWidth = CGFloat(placementCols) * cellSize.width
-        let placementHeight = CGFloat(placementRows) * cellSize.height
+        let placementWidth = Double(placementCols) * cellSize.width
+        let placementHeight = Double(placementRows) * cellSize.height
         let scale = min(placementWidth / imageSize.width, placementHeight / imageSize.height)
         let scaledWidth = imageSize.width * scale
         let scaledHeight = imageSize.height * scale
         let imageOffsetX = (placementWidth - scaledWidth) / 2
         let imageOffsetY = (placementHeight - scaledHeight) / 2
 
-        let runX = CGFloat(col) * cellSize.width
-        let runY = CGFloat(row) * cellSize.height
-        let runWidth = CGFloat(width) * cellSize.width
-        let runHeight = CGFloat(height) * cellSize.height
+        let runX = Double(col) * cellSize.width
+        let runY = Double(row) * cellSize.height
+        let runWidth = Double(width) * cellSize.width
+        let runHeight = Double(height) * cellSize.height
 
         let destLeft = max(runX, imageOffsetX)
         let destTop = max(runY, imageOffsetY)
@@ -173,7 +207,7 @@ struct KittyPlaceholderRenderPlacement: Equatable {
         let sourceWidth = destWidth / scale
         let sourceHeight = destHeight / scale
 
-        func roundInt(_ value: CGFloat) -> Int {
+        func roundInt(_ value: Double) -> Int {
             Int(value.rounded())
         }
 
@@ -187,7 +221,6 @@ struct KittyPlaceholderRenderPlacement: Equatable {
                                                destHeight: roundInt(destHeight))
     }
 }
-#endif
 
 enum KittyPlaceholder {
     static let baseScalar: UInt32 = 0x10EEEE

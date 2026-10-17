@@ -3682,13 +3682,13 @@ extension TerminalWindowViewController {
 
     private func debugActivateFirstLink() {
         guard ownsFocusedTerminal, let view = activeController?.terminalView else { return }
-        let terminal = view.getTerminal()
-        for row in 0..<terminal.rows {
+        let grid = view.terminalDimensions
+        for row in 0..<grid.rows {
             var col = 0
-            while col < terminal.cols {
+            while col < grid.cols {
                 // Same seam-carrying lookup the long-press route uses, so
                 // this hook proves the wrapped-glue cut headlessly too.
-                guard let result = terminal.linkWithRowTexts(
+                guard let result = view.linkWithRowTexts(
                     at: .screen(Position(col: col, row: row)),
                     mode: .explicitAndImplicit
                 ) else {

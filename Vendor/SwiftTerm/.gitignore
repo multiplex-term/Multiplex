@@ -7,7 +7,12 @@ xcuserdata
 crash-*
 DerivedData
 .deriveddata
+*.xcresult
 .build
 .DS_Store
 *~
 esctest/
+
+Web/node_modules/
+Web/dist/
+Web/test-results/

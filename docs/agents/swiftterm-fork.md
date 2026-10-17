@@ -11,18 +11,71 @@ input encoding, or terminal rendering.
   - `swift-nio-ssh` — Citadel 0.12.0's resolved fork (`Joannis` 0.3.5),
     patched to declare the `NIO` product it imports (Xcode 27 rejects the
     undeclared import); also freezes the SSH transport supply chain.
-  - `SwiftTerm` — 1.18.0 (rev `7691f85`; bumped from 1.15.0 on 2026-08-16 by
-    reconstructing the patch set as a commit on the old rev and 3-way merging
-    it onto the new tag — do the same next time), patched in fourteen behavior
-    groups plus a remote-input hardening set (all marked `Multiplex patch`).
-    Three hardening patches were retired at 1.18.0 because upstream now
-    carries the fix (CSI parameter cap + guard-before-arithmetic digit
-    accumulation, `CSI 1 J` bottom-row trap); `appendingDecimalDigit`
-    survives only for the Sixel field parser. Upstream 1.18.0 also added
-    `implicitLinkCouldBeVisible`, an early-out that skips implicit link
-    detection when the highlight mode would discard the match — it must
-    honour `linkActivationIgnoresHighlight` or every touch-activated path
-    link disappears (patched at the merge). Behavior groups:
+  - `SwiftTerm` — 1.99.0 (rev `2dad6a1`, the SwiftTerm 2.0 API preview;
+    bumped from 1.18.0 on 2026-10-11 by reconstructing the patch set as a
+    commit on the old rev and 3-way merging it onto the new tag — do the same
+    next time, but expect the view files to need a hand port: 1.99 rewrote
+    the view layer, so AppleTerminalView / iOSTerminalView were rebuilt from
+    upstream's files with each group re-applied). Patched in the behavior
+    groups below plus a remote-input hardening set (all marked
+    `Multiplex patch`). Upstream 1.18.0 added `implicitLinkCouldBeVisible`,
+    an early-out that skips implicit link detection when the highlight mode
+    would discard the match — it must honour `linkActivationIgnoresHighlight`
+    or every touch-activated path link disappears.
+    - **SwiftTerm 2 seams.** `TerminalView.getTerminal()` is gone: the
+      terminal lives behind `terminalLock`, the parse runs synchronously on
+      whatever thread calls `feed`, and frames come from a `CADisplayLink`
+      `FrameDriver` drawing a snapshot. View code reaches the terminal only
+      inside `withTerminal { }` (never re-entrantly — the lock is not
+      recursive; app callbacks such as `longPressMouseDragFilter` run
+      outside it). The app uses copied reads — `terminalDimensions`,
+      `visibleRowsText`, `terminalStateSnapshot()` (`viewportRow` is
+      `yDisp`), `keyboardEnhancementFlags` — plus three patched accessors
+      2.0 lacks: `applicationCursorKeys` (DECCKM for app-sent arrows),
+      `isAlternateBufferActive` (agent detection), and a view-level
+      `linkWithRowTexts` (DEBUG first-link hook). Owners must call
+      `updateUiClosed()` when a view is released for good —
+      `TerminalSessionController.detach()` does (a tab move never runs it),
+      retrying while a Metal surface reports GPU work in flight. Backstop
+      patch: a display-link tick whose driver is gone invalidates its link,
+      so a view released mid-burst cannot keep a link firing at display rate.
+      The re-locked gesture seams — claimed long-press drags, the remote
+      right click, wheel/cursor-key pans — are pinned on the wire by
+      `TerminalRemoteMouseTests`; the input stamp and echo sampler by
+      `TerminalTypingQuietTests`.
+    - **Retired at 1.99.0** (upstream now carries the fix): the OSC/APC
+      payload caps (upstream bounds both at 65 MiB and drops oversized
+      retained capacity), the whole Sixel set (input cap, overflow-checked
+      fields, pixel/write budgets, the `maxX` sizing fix — so
+      `appendingDecimalDigit` is gone), the negative OSC 104 index, Kitty's
+      pending-chunk cap / control-value clamping / placement-scroll bound /
+      inflate limit / cache budget (upstream: UInt32-parsed fields, a
+      10 MB-per-screen store, inflate bounded by it), the
+      `sendButtonReleaseEvent` SGR release (upstream's release encoding now
+      names the button), the Metal GLASS-clear resolve (upstream's
+      `FrameColor` resolves against the view's traits), and the 90 Hz
+      redraw coalescing (the display link ticks at the display's native
+      rate). Kept: Kitty's per-image ceiling (64 MiB vs upstream 400 MiB —
+      it bounds the PNG decode's RGBA allocation; the vendored
+      `KittyPNGHeaderBoundsTests` is resized to match), the title-stack
+      depth cap, and the bounded OSC 1337 inline-image decode.
+    - **Manifest**: upstream's `swift-png` dependency (and its transitive
+      `rarestype/h`) is dropped — it is linked only for non-Apple platforms,
+      but SwiftPM resolves every declared dependency, so the app fetched two
+      unaudited repositories for code it never compiles. The build-info
+      plugin (`SwiftTermBuildInfoPlugin`, generates the XTGETTCAP table)
+      runs under plain `xcodebuild` without a trust prompt for this local
+      package.
+    - **Deliberate divergences from 1.99 behavior**, kept from the shipped
+      fork: an unfocused terminal's tap only focuses (upstream forwards it
+      as a click to a mouse-tracking app — the focus arbiter owns which pane
+      takes keys); a double tap under mouse reporting never selects locally
+      (the single recognizer already sent both clicks); and pans keep the
+      remote-scroll routing below rather than upstream's one-finger
+      wheel / two-finger scrollback split (`forwardWheelDrag` is left in
+      place, unwired). `hasText` stays patched to true although upstream
+      made it `open`.
+    Behavior groups:
     - `keyboardType` settable; kept `.default` so the user's language and
       multistage IME survive.
     - On-device intelligence is pinned OFF and `replace()` is tail-guarded:
@@ -71,12 +124,18 @@ input encoding, or terminal rendering.
     - Marked text stays local in a caret-anchored overlay until commit, with
       honest candidate-window geometry and cleanup — merged with upstream's
       Korean resyllabification transaction, not replacing it.
-    - Fully obscured tabs keep parsing bytes but suppress UIKit,
-      accessibility, and Metal invalidations until visible (one full
-      refresh then).
+    - Fully obscured tabs keep parsing bytes but get no frames until
+      visible (one full-screen frame then): `renderUpdatesEnabled` drives a
+      host-visibility input on the `FrameDriver`, separate from its
+      background/window-attach inputs so a foreground transition cannot
+      un-hide an obscured tab. It also reports DEC 2033 not-visible to the
+      remote.
     - iOS/visionOS output damage invalidates a padded row STRIP, not the
-      whole viewport (`damagedRowStrip`; the CG renderer is the live path
-      — nothing calls `setUseMetal`). `drawTerminalContents` narrows its
+      whole viewport (`damagedRowStrip`, computed in the iOS branch of
+      `TerminalRenderOwner.prepareFrame`, widened to the rows a bidi
+      paragraph depends on; a viewport scrolled into history keeps the full
+      redraw. The CG renderer is the live path — Metal is opt-in, see
+      below). `drawTerminalContents` narrows its
       row loop only for a well-formed sub-viewport rect
       (`partialRedrawRows`, pure + app-tested); anomalous rects — UIKit's
       scroll-coalesced y=0 shapes, viewport-spanning unions, the
@@ -107,7 +166,10 @@ input encoding, or terminal rendering.
     - Hardware Shift+Enter is a first-class newline: `pressesBegan` claims
       Return (all three HID usages); kitty flags → `CSI 13;2u`, else LF
       0x0A (verified against Claude Code / Codex / Pi / tmux 3.6a
-      2026-07-24; unmodified Return keeps the UIKit path for IME). On Mac,
+      2026-07-24; unmodified Return keeps the UIKit path for IME). Return
+      is a kitty functional key for the flags-on branch only — 1.99 routes
+      flags-off functional keys through the legacy encoder, and Return must
+      stay out of that route or IME commits break. On Mac,
       Cocoa strips Shift first, so `commitTextInput` rewrites a bare "\n"
       by polling the physical Shift keys at the HID layer — real hardware
       only (synthetic keystrokes never reach HID, so neither Mac path can
@@ -149,26 +211,22 @@ input encoding, or terminal rendering.
       Accepted trade: a wrap landing inside a long extension (`.swi`⏎`ft`)
       splits into two presses. Locked in
       `GhosttyImplicitLinkDetectionTests`.
-    - visionOS coalesces pending redraws to one 90 Hz frame (~11.1 ms) in
-      `queuePendingDisplay`; the upstream 16.67 ms delay assumed a 60 Hz
-      display and beat against Vision Pro's 90 Hz compositor during
-      streaming output (typing already bypassed it via
-      `displayImmediately`). iOS keeps 60 Hz.
     - Metal renderer visionOS bring-up (still OFF by default; the app
       exposes it as Settings → Terminal renderer, with `MULTIPLEX_METAL=1`
       as the harness/scheme override and `MULTIPLEX_METAL_FPS=1` printing a
       per-second FPS/row-cache heartbeat in every configuration —
       `SWIFTTERM_PROFILE=1` adds signposts for Instruments): the
-      drawable/atlas scale no longer trusts `backingScaleFactor()` (1.0 on
-      visionOS — 1x blur) but takes the layer contentsScale / trait
-      displayScale max; the MTKView is non-opaque over the view's layer
-      ground so the GLASS clear composites; and the clear/margin background
-      resolves `nativeBackgroundColor` against the terminal view's traits —
-      `getRed()` resolves dynamic colors via `UITraitCollection.current`,
-      which inside an MTKView delegate callback misses the app's glass
-      trait and silently painted the opaque fallback. Sim-verified matching
-      CG pixel-for-pixel in DARK/LIGHT/GLASS; selection, marked text, and
-      kitty images under Metal are still unverified. Do NOT judge Metal
+      rasterization scale (`FrameViewState.renderingScale`, read only by
+      Metal) no longer trusts `backingScaleFactor()` (1.0 on visionOS — 1x
+      blur) but takes `metalRenderingScaleFactor()`, the layer contentsScale
+      / trait displayScale max; and the MTKView and its layer are always
+      non-opaque over the view's layer ground so the GLASS clear composites
+      (upstream's one-time `backgroundOpacity` read would freeze the
+      appearance). The background colour itself needs no patch since 1.99:
+      `FrameColor` resolves it against the view's traits. Sim-verified
+      matching CG pixel-for-pixel in DARK/LIGHT/GLASS at 1.18; not re-run
+      at 1.99, and selection, marked text, and kitty images under Metal are
+      still unverified. Do NOT judge Metal
       performance in the simulator: `com.apple.metal.simulator` presents at
       ~2–4 fps under streaming load with the row cache warm (rows rebuilt
       0/58) — the stall is the sim's present path, not the renderer; only a
@@ -176,18 +234,23 @@ input encoding, or terminal rendering.
     - The visible screen's links are enumerable (`Terminal
       .visibleLinkMatches` + `TerminalView.visibleLinkRegions`, the inverse
       of `calculateTapHit`) — what visionOS gaze hover stands on.
-    - Echo-latency sampling (`echoLatencySampleHandler`): the first feed
-      chunk after each user-input stamp yields one keystroke→paint sample
-      (ms) — the delta the immediate-display gate already computes and
-      discards. Handler runs on the feed thread; the sampled stamp shares
-      `userInputLock` with the stamp itself. Window is 2 s (its own
-      constant, NOT `interactiveInputDisplayWindowNs` — a slow link's echo
-      is still an echo at 300+ ms); a first chunk outside it consumes the
-      stamp without sampling, so stream output never counts. Feeds the
-      Connection Stats center.
+    - Echo-latency sampling (`echoLatencySampleHandler`, `@Sendable`): the
+      first feed chunk after each user-input stamp yields one
+      keystroke→paint sample (ms). Upstream 1.99 retired its own input stamp
+      with the 150 ms immediate-display window, so the stamp is patched back
+      in: `TerminalViewCrossThreadState` holds it, the input sender's
+      `registerInput` writes it (every input road funnels through there),
+      and the feed sender samples after each batch, calling the handler on
+      the feed thread outside the lock. `lastUserInputUptimeNanoseconds`
+      reads the same stamp. Window is 2 s (a slow link's echo is still an
+      echo at 300+ ms); a first chunk outside it consumes the stamp without
+      sampling, so stream output never counts. Feeds the Connection Stats
+      center.
 
-    Sample apps trimmed. When bumping either package, re-apply the patches
-    and diff before trusting it.
+    Trimmed from the vendored tree: the sample apps (`TerminalApp/`),
+    `Tools/`, the browser demo (`Web/`) and its JS tests
+    (`Tests/WebWasmTests`), and `.github/`. When bumping either package,
+    re-apply the patches and diff before trusting it.
 - **Citadel pinned to exactly 0.12.0**: 0.12.1 moved its swift-nio-ssh dep
   to an unaudited personal fork. Don't bump without review — this is the
   transport.

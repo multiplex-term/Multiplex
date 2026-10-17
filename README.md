@@ -95,7 +95,7 @@ Install and usage: [multiplex-term/mpx-cli](https://github.com/multiplex-term/mp
 
 | Library | Version | Role |
 | --- | --- | --- |
-| [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) | 1.18.0, vendored | Terminal emulator |
+| [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) | 1.99.0, vendored | Terminal emulator |
 | [Citadel](https://github.com/orlandos-nl/Citadel) | 0.12.0, exact | SSH, exec, SFTP, and key parsing |
 | [swift-nio-ssh](https://github.com/apple/swift-nio-ssh) | 0.3.5, vendored | SSH transport dependency |
 | [RNNoise](https://github.com/xiph/rnnoise) | 0.2 (rev 70f1d25), vendored | Dictation noise suppression |

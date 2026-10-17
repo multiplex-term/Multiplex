@@ -58,13 +58,13 @@ final class TerminalMoshScreenTests: XCTestCase {
         let view = TerminalView(frame: CGRect(x: 0, y: 0, width: 400, height: 240))
         view.changeScrollback(500)
         for row in 1...80 {
-            view.getTerminal().feed(text: "line \(row) word\r\n")
+            view.feed(text: "line \(row) word\r\n")
         }
-        let buffer = view.getTerminal().buffer
-        XCTAssertGreaterThan(buffer.yDisp, 0, "the screen scrolled into scrollback")
+        let yDisp = view.terminalStateSnapshot().viewportRow
+        XCTAssertGreaterThan(yDisp, 0, "the screen scrolled into scrollback")
 
-        let lowRow = buffer.yDisp + 2
-        let highRow = buffer.yDisp + 5
+        let lowRow = yDisp + 2
+        let highRow = yDisp + 5
         view.seedWordSelection(atBufferPosition: Position(col: 1, row: lowRow))
         let low = view.selectionUIRect()
         view.seedWordSelection(atBufferPosition: Position(col: 1, row: highRow))
