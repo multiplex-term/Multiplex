@@ -35,6 +35,9 @@ struct TerminalWindowShellConfiguration {
     /// is what ‹ DECK runs to move the panel into a tab and free the column.
     var presentColumnPanel: (UIViewController, @escaping () -> Void) -> Void = { _, _ in }
     var dismissColumnPanel: () -> Void = {}
+    /// The terminal entered or left full screen: the shell hands it (or
+    /// takes back) the whole display.
+    var setFullScreen: (Bool) -> Void = { _ in }
     var showDeck: () -> Void
     var openTerminalRoute: (TerminalWindowRoute) -> Void
     var revealTab: (UUID) -> Void
@@ -304,6 +307,18 @@ final class TerminalWindowViewController: UIViewController,
     /// count moves, not on every keyboard-driven height tick.
     private var renderedColumnCapacity: Int?
     private var renderedRailEdge = ShellRailEdge.top
+    /// `⋯` → Full Screen: every piece of this window's chrome steps aside
+    /// and the active terminal takes the window (the shell's whole display),
+    /// with one EXIT chip to leave. Per window, never persisted.
+    private(set) var isFullScreen = false
+    private lazy var fullScreenExitButton: TerminalFullScreenExitButton = {
+        let button = TerminalFullScreenExitButton()
+        button.addAction(
+            UIAction { [weak self] _ in self?.setFullScreen(false) },
+            for: .touchUpInside
+        )
+        return button
+    }()
     private var shownAgent: AgentKind?
     private var lastDetectedAgent: AgentKind?
     private var lastObservedActiveTabID: UUID?
@@ -316,6 +331,9 @@ final class TerminalWindowViewController: UIViewController,
     /// `layoutNativeChrome`. Both halves matter: the width picks the compact
     /// row, and the insets decide the strip the rail spends.
     private var renderedClassicRailGeometry: ClassicRailGeometry?
+    /// The pane insets full screen last laid out with; the position watch
+    /// relayouts only when a fresh reading differs.
+    private var renderedFullScreenInsets: UIEdgeInsets?
     private let windowPositionWatch = WindowPositionWatch()
 
     private struct ClassicRailGeometry: Equatable {
@@ -355,9 +373,11 @@ final class TerminalWindowViewController: UIViewController,
     /// The active tab's ARRANGE KEYS bar as its own ornament slab.
     private var arrangeBarController: ArrangeKeysBarViewController?
     #endif
-    /// Whether opening the box folded the helper strip to its dot (so
-    /// closing can unfold it) — the strip stays as the user left it otherwise.
-    private var talkbackFoldedHelper = false
+    /// What folded the helper strip to its dot — the open box or full screen
+    /// — so closing it can unfold it; the strip stays as the user left it
+    /// otherwise.
+    private enum HelperFolder { case talkback, fullScreen }
+    private var helperFoldedBy: HelperFolder?
     /// The open box's height at this render's width, measured once per
     /// render (before the panes are configured) — never per tab.
     private var renderedTalkbackHeight: CGFloat = 0
@@ -497,9 +517,15 @@ final class TerminalWindowViewController: UIViewController,
     /// a pure drag reports nothing (user report: "doesn't always expand or
     /// collapse when the window is moved") — see `WindowPositionWatch`.
     private func startWindowPositionWatchIfNeeded() {
-        // Only where window position feeds the rail at all.
-        guard shell == nil else { return }
+        guard watchesWindowPosition else { return }
         windowPositionWatch.start { [weak self] in self?.checkWindowPosition() }
+    }
+
+    /// Where window position feeds the layout at all: the classic rail, or
+    /// a full-screen pane's top inset on iPad (the shell's terminal too) —
+    /// an iPhone window never moves.
+    private var watchesWindowPosition: Bool {
+        shell == nil || (isFullScreen && ShellModeDecision.Idiom.device == .pad)
     }
 
     private func stopWindowPositionWatch() {
@@ -514,7 +540,11 @@ final class TerminalWindowViewController: UIViewController,
         // Compare what the rail actually lays out against, not the raw
         // frame: dragging sideways, or anywhere clear of the status bar,
         // moves the window without moving a single inset.
-        guard umdSafeArea != renderedClassicRailGeometry?.safeArea else { return }
+        if isFullScreen {
+            guard fullScreenPaneInsets != renderedFullScreenInsets else { return }
+        } else {
+            guard umdSafeArea != renderedClassicRailGeometry?.safeArea else { return }
+        }
         rootView.setNeedsLayout()
     }
     #endif
@@ -536,6 +566,9 @@ final class TerminalWindowViewController: UIViewController,
 
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
         super.traitCollectionDidChange(previousTraitCollection)
+        // Closing or opening an iPhone Duo moves between a display that keeps
+        // its system bar in full screen and one that hides it.
+        if isFullScreen { updateSystemOverlays() }
         applyTraitFontDefaultIfNeeded()
         guard traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection)
             || traitCollection.horizontalSizeClass
@@ -781,6 +814,54 @@ final class TerminalWindowViewController: UIViewController,
         )
         #endif
     }
+    /// Full screen's pane rectangle inside the root view's bounds — the
+    /// window's own safe area (the shell lends its terminal the whole
+    /// display), read through `TerminalFullScreenInsets`. visionOS windows
+    /// have none.
+    private var fullScreenPaneInsets: UIEdgeInsets {
+        #if os(visionOS)
+        return .zero
+        #else
+        guard isViewLoaded else { return .zero }
+        guard let window = rootView.window else { return rootView.safeAreaInsets }
+        let reading = TerminalClassicRailInsets.reading(for: window)
+        let safeArea = rootView.safeAreaInsets
+        return TerminalFullScreenInsets.resolve(
+            sceneSafeArea: safeArea,
+            isPad: ShellModeDecision.Idiom.device == .pad,
+            bareCorners: SingleWindowShellLayout.cornerLeadingInset(
+                topSafeArea: safeArea.top,
+                leadingSafeArea: min(safeArea.left, safeArea.right),
+                idiom: .device,
+                horizontalSizeClass: ShellSizeClass(traitCollection.horizontalSizeClass)
+            ) > 0,
+            spentBottomStrip: railOwnsBottomSafeArea
+                ? TerminalKeyBar.keyBottomInset(
+                    isIOSAppOnMac: ProcessInfo.processInfo.isiOSAppOnMac,
+                    spendsBottomStrip: true
+                )
+                : nil,
+            hostsWindowControls: TerminalClassicRailInsets.deviceHostsWindowControls,
+            systemTopChromeOverlap: reading.systemTopChromeOverlap,
+            spansDisplay: reading.spansDisplay
+        )
+        #endif
+    }
+    /// `TerminalFullScreenInsets.keepsSideColumn` for this window: the
+    /// system bar's edge from the trait, not the shell's hinge reading — a
+    /// launch straight into closed landscape never sees a hinge.
+    private var fullScreenKeepsSideColumn: Bool {
+        TerminalFullScreenInsets.keepsSideColumn(
+            isPhone: ShellModeDecision.Idiom.device == .phone,
+            compactWidth: traitCollection.horizontalSizeClass == .compact,
+            systemBarEdge: ShellRailEdge.systemVerticalBar(in: traitCollection)
+        )
+    }
+    /// What the pane insets its own content by: nothing in full screen,
+    /// whose pane container already sits inside the safe area.
+    private var paneContentSafeArea: UIEdgeInsets {
+        isFullScreen ? .zero : contentSafeArea
+    }
     private var railOwnsBottomSafeArea: Bool {
         if let shell { return shell.railOwnsBottomSafeArea }
         #if os(visionOS)
@@ -796,9 +877,12 @@ final class TerminalWindowViewController: UIViewController,
         shownAgent != nil && activeController?.status == .live
     }
     /// The active tab's Talkback box is open (auxiliary panes have no pane
-    /// to talk to).
+    /// to talk to). Full screen only hides it: the draft keeps the box open,
+    /// and leaving brings it back.
     private var talkbackOpen: Bool {
-        activeTab?.isAuxiliaryPane != true && activeController?.talkbackOpen == true
+        !isFullScreen
+            && activeTab?.isAuxiliaryPane != true
+            && activeController?.talkbackOpen == true
     }
     /// The width the composer lays out for: the window's on iPad / iPhone
     /// (the shell's available width where the shell insets), the console
@@ -1004,6 +1088,10 @@ final class TerminalWindowViewController: UIViewController,
 
     private func renderNow() {
         guard isViewLoaded, !preparedForRemoval else { return }
+        // Full screen is a terminal tab's: any road onto a ▤ / ⌗ tab ends it.
+        if isFullScreen, activeTab?.isAuxiliaryPane != false {
+            applyFullScreen(false)
+        }
         // Before the panes: their bottom inset reads the composer's height.
         renderTalkback()
         reconcilePaneControllers()
@@ -1017,14 +1105,140 @@ final class TerminalWindowViewController: UIViewController,
         #endif
         updatePassphrasePrompt()
         #if os(visionOS)
-        rootView.setTabsVisible(shell != nil && route.tabs.count > 1)
+        rootView.setTabsVisible(shell != nil && route.tabs.count > 1 && !isFullScreen)
         #else
-        rootView.setTabsVisible(route.tabs.count > 1)
+        rootView.setTabsVisible(route.tabs.count > 1 && !isFullScreen)
+        // The bands around a full-screen pane wear the terminal's ground.
+        rootView.fullScreenGround = isFullScreen
+            ? UIColor(resolvedTerminalTheme.background) : nil
         #endif
+        rootView.umdContainer.isHidden = isFullScreen && !fullScreenShowsColumn
+        mountFullScreenExitButton()
         rootView.setShellMode(shell != nil)
         layoutNativeChrome()
         presentPendingFeatureIfPossible()
         applyAppearanceToPresentedFeature()
+    }
+
+    // MARK: Full screen
+
+    func setFullScreen(_ fullScreen: Bool) {
+        guard applyFullScreen(fullScreen) else { return }
+        renderNow()
+    }
+
+    /// The flip and everything it moves outside this controller's own
+    /// render — ornaments, the shell's layout, the system bars. Entering
+    /// needs a terminal tab and ends Arrange Keys (its keys are leaving).
+    /// False when nothing changed.
+    @discardableResult
+    private func applyFullScreen(_ fullScreen: Bool) -> Bool {
+        guard isFullScreen != fullScreen else { return false }
+        if fullScreen {
+            guard let activeTab, !activeTab.isAuxiliaryPane else { return false }
+            activeController?.setKeyBarArranging(false)
+        }
+        isFullScreen = fullScreen
+        #if !os(visionOS)
+        if watchesWindowPosition {
+            startWindowPositionWatchIfNeeded()
+        } else {
+            stopWindowPositionWatch()
+        }
+        #endif
+        shell?.setFullScreen(fullScreen)
+        updateSystemOverlays()
+        if fullScreen {
+            foldHelperForFullScreen()
+            fullScreenExitButton.wake()
+        } else {
+            unfoldHelperAfterFullScreen()
+        }
+        return true
+    }
+
+    /// Full screen opens with the agent strip folded to its dot, one tap
+    /// from its chips. A strip the message box folded stays folded — the box
+    /// hides with full screen, so the fold becomes full screen's to undo.
+    private func foldHelperForFullScreen() {
+        if helperFoldedBy == .talkback {
+            helperFoldedBy = .fullScreen
+            return
+        }
+        guard showsAgentHelper, !AgentHelperStripCollapse.shared.isCollapsed else { return }
+        helperFoldedBy = .fullScreen
+        setHelperCollapsedNextTurn(true)
+    }
+
+    /// The message box coming back with the chrome keeps full screen's fold
+    /// (and undoes it when it closes).
+    private func unfoldHelperAfterFullScreen() {
+        guard helperFoldedBy == .fullScreen else { return }
+        if activeController?.talkbackOpen == true {
+            helperFoldedBy = .talkback
+            return
+        }
+        releaseHelperFold()
+    }
+
+    /// The iPhone Duo's outer display keeps its side column in full screen:
+    /// the strip around the camera holds no terminal cells either way, so the
+    /// UMD column (and the system's glyphs) stay in it.
+    private var fullScreenShowsColumn: Bool {
+        fullScreenKeepsSideColumn
+            && usesVerticalRail(edge: resolvedRailEdge)
+            && umdController is UMDBarViewController
+    }
+
+    private func mountFullScreenExitButton() {
+        guard isFullScreen else {
+            fullScreenExitButton.removeFromSuperview()
+            return
+        }
+        if fullScreenExitButton.superview !== rootView {
+            rootView.addSubview(fullScreenExitButton)
+        }
+    }
+
+    /// Clear of the display's (or the visionOS window's) rounded corner: the
+    /// pane's top-trailing corner on iPad/iPhone, its bottom-trailing one on
+    /// visionOS, where the agent strip hangs below the glass instead.
+    private func layoutFullScreenExitButton() {
+        guard isFullScreen, fullScreenExitButton.superview === rootView else { return }
+        let size = fullScreenExitButton.intrinsicContentSize
+        let margin = TerminalFullScreenExitButton.margin
+        let area = rootView.paneContainer.frame
+        let y: CGFloat = TerminalFullScreenExitButton.isVisionFace
+            ? area.maxY - margin - size.height
+            : area.minY + margin
+        fullScreenExitButton.frame = CGRect(
+            x: area.maxX - margin - size.width,
+            y: y,
+            width: size.width,
+            height: size.height
+        )
+        rootView.bringSubviewToFront(fullScreenExitButton)
+    }
+
+    #if os(iOS)
+    // The scene root asks its content, and the shell its terminal; the
+    // compact-height default (no status bar) stays the default otherwise.
+    override var prefersStatusBarHidden: Bool {
+        (isFullScreen && !fullScreenKeepsSideColumn) || super.prefersStatusBarHidden
+    }
+
+    override var prefersHomeIndicatorAutoHidden: Bool {
+        isFullScreen
+    }
+    #endif
+
+    /// The window's root asks down its `childFor…` chain to this controller.
+    private func updateSystemOverlays() {
+        (view.window?.rootViewController ?? self).refreshSystemOverlays()
+    }
+
+    var fullScreenExitButtonForTesting: UIButton? {
+        fullScreenExitButton.superview == nil ? nil : fullScreenExitButton
     }
 
     // MARK: Route reconciliation
@@ -1340,6 +1554,8 @@ final class TerminalWindowViewController: UIViewController,
                 .paneWorkingDirectory(pressedAt: cell)
             guard let anchor = route.tabs.first(where: { $0.id == anchorID }) else { return }
             if allowsPanel, admitsSidePanel(anchor: anchor) {
+                // A panel is chrome: summoning one ends full screen.
+                applyFullScreen(false)
                 workspace.openSidePanel(
                     hostTabID: anchorID,
                     controller: FileViewerController(
@@ -1441,6 +1657,7 @@ final class TerminalWindowViewController: UIViewController,
               let host = store.host(id: anchor.hostID)
         else { return }
         if allowsPanel, admitsSidePanel(anchor: anchor) {
+            applyFullScreen(false)
             workspace.openSidePanel(
                 hostTabID: anchorID,
                 controller: ViewportController(tabID: UUID(), offer: offer, host: host)
@@ -1515,6 +1732,8 @@ final class TerminalWindowViewController: UIViewController,
         TerminalLinkDebugHook.install()
         FileViewerDebugHook.install()
         SidePanelDebugHook.install()
+        FullScreenDebugHook.install()
+        HelperCollapseDebugHook.install()
         #endif
         guard let hostID = activeTab?.hostID,
               let host = store.host(id: hostID)
@@ -1845,7 +2064,7 @@ final class TerminalWindowViewController: UIViewController,
     private var paneChromeBottom: CGFloat {
         rootView.paneContainer.frame.maxY
             - paneKeyboardObstruction
-            - TerminalKeyBar.barHeight(spendsBottomStrip: railOwnsBottomSafeArea)
+            - TerminalKeyBar.barHeight(spendsBottomStrip: railOwnsBottomSafeArea, hidden: isFullScreen)
     }
     #endif
 
@@ -1936,7 +2155,9 @@ extension TerminalWindowViewController {
     }
 
     private func renderSidePanel() {
-        let desiredHost = activeTab.flatMap { tab in
+        // Full screen keeps an open panel alive but out of sight (a new
+        // summon ends full screen instead — see `openFileViewer`).
+        let desiredHost = isFullScreen ? nil : activeTab.flatMap { tab in
             tab.isAuxiliaryPane ? nil : tab.id
         }
         // Inactive wrappers stay cached while their workspace controller is
@@ -2323,9 +2544,12 @@ extension TerminalWindowViewController {
             fontSize: fontSize,
             theme: resolvedTerminalTheme,
             bottomChromeHeight: terminalBottomChromeHeight,
-            contentSafeArea: contentSafeArea,
+            contentSafeArea: paneContentSafeArea,
+            // A full-screen pane spends the home strip exactly where the
+            // key rail would (`TerminalFullScreenInsets.spentBottomStrip`).
             railOwnsBottomSafeArea: railOwnsBottomSafeArea,
             bareChrome: shell?.bareChrome ?? false,
+            keyRailHidden: isFullScreen,
             isActive: isActive,
             focusAllowed: terminalFocusAllowed,
             keyCommandPlan: keyCommandPlan,
@@ -2618,6 +2842,10 @@ extension TerminalWindowViewController {
         let chrome = shell?.railChrome ?? .none
         let column = verticalColumnFrame(edge: edge)
         let columnCapacity = RailFit.capacity(availableHeight: column.height)
+        // Full screen leaves the bar standing only as the Duo's outer
+        // column: it reads Exit Full Screen there and owns TMUX/HRDR (the key
+        // rail is gone). A hidden bar keeps its windowed row, unrebuilt.
+        let fullScreenColumn = isFullScreen && fullScreenKeepsSideColumn && vertical
         let configuration = UMDBarConfiguration(
             controller: activeController,
             title: umdTitle,
@@ -2638,6 +2866,16 @@ extension TerminalWindowViewController {
                 ? { [weak self] in self?.presentKeychainTip() } : nil,
             showConnectionStats: ConnectionStatsCenter.shared.isCollecting
                 ? { [weak self] in self?.presentConnectionStats() } : nil,
+            // A turn later, so the menu finishes dismissing before the
+            // chrome it hangs from goes (on visionOS, its whole ornament).
+            toggleFullScreen: activeController != nil
+                ? {
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self else { return }
+                        setFullScreen(!isFullScreen)
+                    }
+                } : nil,
+            fullScreenActive: fullScreenColumn,
             extraNewTabTarget: extraNewTabTarget,
             shortcutBackend: activeTab?.sessionBackend,
             style: vertical ? .verticalColumn : profile.style,
@@ -2645,7 +2883,7 @@ extension TerminalWindowViewController {
             availableWidth: vertical ? column.width : umdAvailableWidth,
             contentSafeArea: vertical ? .zero : umdSafeArea,
             contentVerticalPadding: profile.verticalPadding,
-            keyRailContentWidth: keyRailContentWidth(profile: profile),
+            keyRailContentWidth: fullScreenColumn ? nil : keyRailContentWidth(profile: profile),
             minimumContentHeight: chrome.bandHeight > 0 ? chrome.bandHeight : profile.minimumHeight,
             columnCapacity: columnCapacity,
             bandRowCenterY: chrome.bandRowCenterY,
@@ -2662,7 +2900,7 @@ extension TerminalWindowViewController {
             bar = UMDBarViewController(configuration: configuration)
             replaceUMD(with: bar)
         }
-        mountSourceStrip(bar.sourceStripView, visible: vertical)
+        mountSourceStrip(bar.sourceStripView, visible: vertical && !isFullScreen)
     }
 
     /// The source strip rides the column: mounted while the rail stands
@@ -2738,7 +2976,7 @@ extension TerminalWindowViewController {
                 #if os(visionOS)
                 .zero
                 #else
-                contentSafeArea
+                paneContentSafeArea
                 #endif
             }(),
             send: { [weak self, weak controller] command in
@@ -2915,20 +3153,27 @@ extension TerminalWindowViewController {
     /// runs inside a render.
     private func foldHelperForTalkback() {
         guard !AgentHelperStripCollapse.shared.isCollapsed else { return }
-        talkbackFoldedHelper = true
-        DispatchQueue.main.async {
-            AgentHelperStripCollapse.shared.setCollapsed(true)
-        }
+        helperFoldedBy = .talkback
+        setHelperCollapsedNextTurn(true)
     }
 
     private func unfoldHelperAfterTalkback() {
-        guard talkbackFoldedHelper else { return }
-        talkbackFoldedHelper = false
-        // Only if the user left it folded meanwhile — an expanded strip is
-        // their choice, not this window's to undo.
+        guard helperFoldedBy == .talkback else { return }
+        releaseHelperFold()
+    }
+
+    /// Unfolds the strip this window folded — only if the user left it
+    /// folded meanwhile: an expanded strip is their choice, not this
+    /// window's to undo.
+    private func releaseHelperFold() {
+        helperFoldedBy = nil
         guard AgentHelperStripCollapse.shared.isCollapsed else { return }
+        setHelperCollapsedNextTurn(false)
+    }
+
+    private func setHelperCollapsedNextTurn(_ collapsed: Bool) {
         DispatchQueue.main.async {
-            AgentHelperStripCollapse.shared.setCollapsed(false)
+            AgentHelperStripCollapse.shared.setCollapsed(collapsed)
         }
     }
 
@@ -2975,6 +3220,7 @@ extension TerminalWindowViewController {
             talkbackController: talkbackController,
             arrangeBarController: arrangeBarController,
             sidePanelController: sidePanel,
+            fullScreen: isFullScreen,
             windowWidth: rootView.bounds.width,
             windowHeight: rootView.bounds.height,
             interfaceStyle: themes.appearance.interfaceStyle,
@@ -3031,6 +3277,7 @@ extension TerminalWindowViewController {
     private func updateVisionShellKeyCluster() {
         let visible = shell != nil
             && !appLocked
+            && !isFullScreen
             && activeTab?.isAuxiliaryPane != true
         guard visible else {
             visionShellKeyCluster.update(controller: nil)
@@ -3087,6 +3334,7 @@ extension TerminalWindowViewController {
     var visionShellKeyClusterForTesting: TerminalKeyClusterGroupView {
         visionShellKeyCluster
     }
+
     #endif
 
     private func layoutNativeChrome() {
@@ -3108,10 +3356,15 @@ extension TerminalWindowViewController {
             for pane in paneControllers.values {
                 pane.view.frame = rootView.paneContainer.bounds
             }
+            layoutFullScreenExitButton()
             updateVisionOrnaments()
             return
         }
         #endif
+        if isFullScreen {
+            layoutFullScreenChrome(in: bounds)
+            return
+        }
         // Every stage now spends the bottom strip itself: the key rail is the
         // window's bottom edge and keeps its faces clear of the home/Stage
         // Manager region through its own chassis, so reserving the strip here
@@ -3168,19 +3421,14 @@ extension TerminalWindowViewController {
             if usesVerticalRail(edge: railEdge), umdController is UMDBarViewController {
                 // The rail stands in the side strip; the source strip takes
                 // the top.
-                let column = verticalColumnFrame(edge: railEdge)
-                if renderedColumnCapacity != RailFit.capacity(availableHeight: column.height) {
-                    renderUMD()
-                }
+                layoutUMDColumn(edge: railEdge)
                 chromeBottom = UMDSourceStripView.height
-                rootView.umdContainer.frame = column
                 rootView.sourceStripContainer.frame = CGRect(
                     x: 0, y: 0, width: bounds.width, height: chromeBottom
                 )
                 // Bare chrome: the strip's band wears the pane's ground.
                 rootView.sourceStripContainer.backgroundColor =
                     shell.bareChrome ? rootView.paneContainer.backgroundColor : .clear
-                rootView.bringSubviewToFront(rootView.umdContainer)
             } else {
                 // The rail spans the top, or the whole status band on the
                 // inner portrait display (its row centres on the glyph line).
@@ -3281,28 +3529,11 @@ extension TerminalWindowViewController {
 
         if let helperController {
             #if !os(visionOS)
-            if AgentHelperStripCollapse.shared.isCollapsed {
-                let dotSize = helperController.fittingContentSize()
-                rootView.helperContainer.frame = CGRect(
-                    x: rootView.paneContainer.frame.minX + 10 + contentSafeArea.left,
-                    y: max(
-                        rootView.paneContainer.frame.minY,
-                        chromeBottom - dotSize.height - 8
-                    ),
-                    width: dotSize.width,
-                    height: dotSize.height
-                )
-            } else {
-                rootView.helperContainer.frame = CGRect(
-                    x: 0,
-                    y: max(
-                        rootView.paneContainer.frame.minY,
-                        chromeBottom - AgentHelperStripViewController.dockedHeight
-                    ),
-                    width: bounds.width,
-                    height: AgentHelperStripViewController.dockedHeight
-                )
-            }
+            rootView.helperContainer.frame = helperFrame(
+                helperController,
+                bottom: chromeBottom,
+                across: bounds
+            )
             #else
             if shell != nil,
                !appLocked,
@@ -3378,6 +3609,11 @@ extension TerminalWindowViewController {
             visionShellKeyCluster.frame = .zero
         }
         #endif
+        layoutPanes()
+        layoutInWindowSidePanel()
+    }
+
+    private func layoutPanes() {
         for pane in paneControllers.values where pane.view.frame != rootView.paneContainer.bounds {
             pane.view.frame = rootView.paneContainer.bounds
             // The pane's constraint tree must resolve against the new bounds
@@ -3386,7 +3622,93 @@ extension TerminalWindowViewController {
             for surface in pane.view.subviews { surface.setNeedsLayout() }
             pane.view.layoutIfNeeded()
         }
-        layoutInWindowSidePanel()
+    }
+
+    /// Full screen: the pane alone inside the window's safe area, every
+    /// chrome container folded away, and the EXIT chip on the pane's corner.
+    private func layoutFullScreenChrome(in bounds: CGRect) {
+        let insets = fullScreenPaneInsets
+        #if !os(visionOS)
+        renderedFullScreenInsets = insets
+        #endif
+        if fullScreenShowsColumn {
+            layoutUMDColumn(edge: resolvedRailEdge)
+            umdController?.view.frame = rootView.umdContainer.bounds
+        } else {
+            rootView.umdContainer.frame = .zero
+        }
+        rootView.sourceStripContainer.frame = .zero
+        rootView.tabScrollView.frame = .zero
+        rootView.talkbackContainer.frame = .zero
+        rootView.talkbackContainer.isHidden = true
+        rootView.sidePanelContainer.frame = .zero
+        rootView.sidePanelContainer.isHidden = true
+        rootView.setBottomSafeAreaBackfill(frame: .zero, fill: .chassis)
+        rootView.paneContainer.frame = bounds.inset(by: insets)
+        layoutPanes()
+        layoutFullScreenHelper()
+        layoutFullScreenExitButton()
+    }
+
+    /// The agent strip stays across the pane's foot, docked or folded to its
+    /// dot, above a docked keyboard either way. The visionOS shell (a
+    /// test-only configuration) floats it over keys full screen took away,
+    /// so it goes there.
+    private func layoutFullScreenHelper() {
+        #if !os(visionOS)
+        if let helperController {
+            rootView.helperContainer.frame = helperFrame(
+                helperController,
+                bottom: paneChromeBottom,
+                across: rootView.paneContainer.frame
+            )
+            helperController.view.frame = rootView.helperContainer.bounds
+            rootView.helperContainer.isHidden = false
+            return
+        }
+        #endif
+        rootView.helperContainer.frame = .zero
+        rootView.helperContainer.isHidden = true
+    }
+
+    #if !os(visionOS)
+    /// The iPad/iPhone agent strip stacked on `bottom`: docked across
+    /// `span`'s width, or folded to its dot at the pane's leading edge —
+    /// never above the pane's top.
+    private func helperFrame(
+        _ helper: AgentHelperStripViewController,
+        bottom: CGFloat,
+        across span: CGRect
+    ) -> CGRect {
+        let pane = rootView.paneContainer.frame
+        if AgentHelperStripCollapse.shared.isCollapsed {
+            let dot = helper.fittingContentSize()
+            return CGRect(
+                x: pane.minX + 10 + paneContentSafeArea.left,
+                y: max(pane.minY, bottom - dot.height - 8),
+                width: dot.width,
+                height: dot.height
+            )
+        }
+        let height = AgentHelperStripViewController.dockedHeight
+        return CGRect(
+            x: span.minX,
+            y: max(pane.minY, bottom - height),
+            width: span.width,
+            height: height
+        )
+    }
+    #endif
+
+    /// The UMD rail standing in the side strip, re-rendered when the strip's
+    /// chip capacity moves.
+    private func layoutUMDColumn(edge: ShellRailEdge) {
+        let column = verticalColumnFrame(edge: edge)
+        if renderedColumnCapacity != RailFit.capacity(availableHeight: column.height) {
+            renderUMD()
+        }
+        rootView.umdContainer.frame = column
+        rootView.bringSubviewToFront(rootView.umdContainer)
     }
 
     private func layoutInWindowSidePanel() {
@@ -3641,6 +3963,10 @@ extension TerminalWindowViewController {
         }
         observe(.multiplexDebugSidePanelWidth) { [weak self] in
             self?.debugCycleSidePanelWidth()
+        }
+        observe(.multiplexDebugFullScreen) { [weak self] in
+            guard let self, ownsFocusedTerminal else { return }
+            setFullScreen(!isFullScreen)
         }
         observe(.multiplexDebugFileViewerRepoDiff) { [weak self] in
             guard let self,
@@ -3937,13 +4263,26 @@ final class TerminalWindowUIKitRootView: UIView {
     var bareChrome = false {
         didSet {
             guard bareChrome != oldValue else { return }
-            let ground = bareChrome
-                ? paneContainer.backgroundColor
-                : (GlassPrototype.enabled ? GlassPrototype.clearedChassis : UIKitChassis.chassis)
-            backgroundColor = ground
-            tabScrollView.backgroundColor = ground
+            backgroundColor = fullScreenGround ?? chromeGround
+            tabScrollView.backgroundColor = chromeGround
             tabDivider.isHidden = tabScrollView.isHidden || bareChrome
         }
+    }
+
+    /// Full screen (iPad/iPhone): the safe-area bands around the pane wear
+    /// the terminal theme's ground, so the window reads as one screen. nil
+    /// hands the window back its chrome ground.
+    var fullScreenGround: UIColor? {
+        didSet {
+            guard fullScreenGround != oldValue else { return }
+            backgroundColor = fullScreenGround ?? chromeGround
+        }
+    }
+
+    private var chromeGround: UIColor? {
+        bareChrome
+            ? paneContainer.backgroundColor
+            : (GlassPrototype.enabled ? GlassPrototype.clearedChassis : UIKitChassis.chassis)
     }
 
     static func contentBounds(
@@ -3964,7 +4303,7 @@ final class TerminalWindowUIKitRootView: UIView {
         bottomSafeAreaBackfill.frame = frame
         bottomSafeAreaBackfill.backgroundColor = fill.color
         bottomSafeAreaBackfill.isHidden = frame.height <= 0
-        bringSubviewToFront(bottomSafeAreaBackfill)
+        if !bottomSafeAreaBackfill.isHidden { bringSubviewToFront(bottomSafeAreaBackfill) }
     }
 
     func setShellMode(_ shell: Bool) {

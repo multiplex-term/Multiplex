@@ -158,7 +158,8 @@ enum SingleWindowShellNativeLayout {
         foldable: Bool = false,
         displayHorizontalSizeClass: ShellSizeClass? = nil,
         ownsLeadingDisplayCorner: Bool = true,
-        windowControlsInset: CGFloat = 0
+        windowControlsInset: CGFloat = 0,
+        terminalFullScreen: Bool = false
     ) -> SingleWindowShellLayoutMetrics {
         let fullWidth = max(0, size.width)
         let usableWidth = max(0, fullWidth - safeArea.left - safeArea.right)
@@ -267,7 +268,7 @@ enum SingleWindowShellNativeLayout {
             terminalWidth - terminalLeadingSafeArea - safeArea.right
         )
 
-        return SingleWindowShellLayoutMetrics(
+        var metrics = SingleWindowShellLayoutMetrics(
             expanded: expanded,
             deckFrame: (consoleShowsDeck ? consoleFrame : nil) ?? CGRect(
                 x: 0,
@@ -322,6 +323,16 @@ enum SingleWindowShellNativeLayout {
                 bandHeight: topBand
             )
         )
+        // A full-screen terminal takes the whole shell while it is on screen
+        // (it insets its own pane) and the deck steps out of sight and touch.
+        // Only frames and visibility move: what the panes are told stays put,
+        // so neither side re-renders for it.
+        guard terminalFullScreen, expanded || compactShowsTerminal else { return metrics }
+        metrics.terminalFrame = CGRect(origin: .zero, size: CGSize(width: fullWidth, height: max(0, size.height)))
+        metrics.dividerFrame = .zero
+        metrics.deckAlpha = 0
+        metrics.deckInteractive = false
+        return metrics
     }
 }
 
@@ -358,6 +369,10 @@ final class SingleWindowShellActions {
 
     func dismissColumnPanel() {
         controller?.dismissColumnPanel()
+    }
+
+    func setTerminalFullScreen(_ fullScreen: Bool) {
+        controller?.setTerminalFullScreen(fullScreen)
     }
 }
 
@@ -432,6 +447,10 @@ final class SingleWindowShellViewController: UIViewController {
     /// iPhone Duo: the ▤/⌗ panel the terminal lent to the shell's column,
     /// and what ‹ DECK runs to send it into a tab.
     private(set) var columnPanel: (controller: UIViewController, moveToTab: () -> Void)?
+    /// The terminal is full screen (`TerminalWindowViewController` owns the
+    /// state and reports it): it gets the whole shell, the deck and the back
+    /// swipe step aside, and the system bars defer to it.
+    private var terminalFullScreen = false
     #if DEBUG
     /// `MULTIPLEX_AUTO_HIDE_DECK=1`: ◧ HIDE once, for headless captures;
     /// `notifyutil -p app.multiplexterm.multiplex.debug.deck` presses ◧.
@@ -785,7 +804,27 @@ final class SingleWindowShellViewController: UIViewController {
         unembed(panel)
     }
 
+    func setTerminalFullScreen(_ fullScreen: Bool) {
+        guard terminalFullScreen != fullScreen else { return }
+        terminalFullScreen = fullScreen
+        resetBackSwipe()
+        applyLayout(animated: false)
+        refreshSystemOverlays()
+    }
+
+    #if os(iOS)
+    override var childForStatusBarHidden: UIViewController? {
+        terminalFullScreen ? terminalController : nil
+    }
+
+    override var childForHomeIndicatorAutoHidden: UIViewController? {
+        terminalFullScreen ? terminalController : nil
+    }
+    #endif
+
     func showDeck() {
+        // Going to the deck leaves full screen.
+        (terminalController as? TerminalWindowViewController)?.setFullScreen(false)
         if let columnPanel {
             // ‹ DECK over a column panel: the panel becomes a tab and the
             // deck takes its column back (the terminal's render dismisses it).
@@ -806,6 +845,10 @@ final class SingleWindowShellViewController: UIViewController {
 
     func terminalTabsEmptied() {
         terminalFocusReady = true
+        if terminalFullScreen {
+            terminalFullScreen = false
+            refreshSystemOverlays()
+        }
         releaseTerminalFocus()
         resetBackSwipe()
         compactShowsTerminal = false
@@ -1021,7 +1064,8 @@ final class SingleWindowShellViewController: UIViewController {
             foldable: hingePresent,
             displayHorizontalSizeClass: testLayoutInput == nil ? displayHorizontalSizeClass : nil,
             ownsLeadingDisplayCorner: testLayoutInput == nil ? (windowFrameOnScreen.map { $0.minX < 1 } ?? true) : true,
-            windowControlsInset: chrome?.controlsInset ?? 0
+            windowControlsInset: chrome?.controlsInset ?? 0,
+            terminalFullScreen: terminalFullScreen
         )
     }
 
@@ -1359,7 +1403,8 @@ final class SingleWindowShellViewController: UIViewController {
         backSwipeRecognizer.isEnabled = SingleWindowShellBackSwipe.isAvailable(
             idiom: .device,
             expanded: expanded,
-            compactShowsTerminal: compactShowsTerminal
+            compactShowsTerminal: compactShowsTerminal,
+            terminalFullScreen: terminalFullScreen
         )
         #endif
     }
@@ -1443,6 +1488,7 @@ final class SingleWindowShellViewController: UIViewController {
             sideColumn: presentation.sideColumn,
             presentColumnPanel: actions.presentColumnPanel,
             dismissColumnPanel: actions.dismissColumnPanel,
+            setFullScreen: actions.setTerminalFullScreen,
             showDeck: actions.showDeck,
             openTerminalRoute: actions.openTerminalRoute,
             revealTab: actions.revealTab,

@@ -458,6 +458,12 @@ final class SingleWindowShellPolicyTests: XCTestCase {
             expanded: false,
             compactShowsTerminal: true
         ))
+        XCTAssertFalse(SingleWindowShellBackSwipe.isAvailable(
+            idiom: .phone,
+            expanded: false,
+            compactShowsTerminal: true,
+            terminalFullScreen: true
+        ))
     }
 
     func testBackSwipeTranslationStaysWithinTheStage() {

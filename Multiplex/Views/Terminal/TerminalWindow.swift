@@ -38,6 +38,45 @@ extension Notification.Name {
     static let multiplexDebugSidePanelWidth = Notification.Name(
         "MultiplexDebugSidePanelWidth"
     )
+    static let multiplexDebugFullScreen = Notification.Name("MultiplexDebugFullScreen")
+}
+
+/// `….debug.helpercollapse` folds or unfolds the agent strip app-wide — the
+/// strip's own fold control, which no simulator route can tap.
+@MainActor
+enum HelperCollapseDebugHook {
+    private static var installed = false
+
+    static func install() {
+        guard !installed else { return }
+        installed = true
+        var token: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.helpercollapse", &token, .main
+        ) { _ in
+            let collapse = AgentHelperStripCollapse.shared
+            collapse.setCollapsed(!collapse.isCollapsed)
+        }
+    }
+}
+
+/// `….debug.fullscreen` toggles full screen in the focused terminal's window
+/// — the `⋯` row going in, the EXIT chip coming out (no simulator route can
+/// open the menu or tap the chip).
+@MainActor
+enum FullScreenDebugHook {
+    private static var installed = false
+
+    static func install() {
+        guard !installed else { return }
+        installed = true
+        var token: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.fullscreen", &token, .main
+        ) { _ in
+            NotificationCenter.default.post(name: .multiplexDebugFullScreen, object: nil)
+        }
+    }
 }
 
 /// SIDECAR's headless controls: ↗ TAB, ✕, and a persisted width cycle.

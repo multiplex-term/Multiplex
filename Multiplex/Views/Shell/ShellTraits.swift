@@ -27,6 +27,23 @@ extension ShellModeDecision.Idiom {
     }
 }
 
+extension ShellRailEdge {
+    /// The edge the system's vertical bar stands on (the iOS 27.1 trait),
+    /// nil where the system reports none.
+    static func systemVerticalBar(in traits: UITraitCollection) -> ShellRailEdge? {
+        #if os(iOS)
+        if #available(iOS 27.1, *) {
+            switch traits.verticalBarEdge {
+            case .leading: return .leading
+            case .trailing: return .trailing
+            default: return nil
+            }
+        }
+        #endif
+        return nil
+    }
+}
+
 extension ShellSideColumn {
     /// The side column from live traits, resolved once by the shell for
     /// both panes: the iOS 27.1 vertical-bar trait when the system reports
@@ -39,16 +56,8 @@ extension ShellSideColumn {
         trailingSafeArea: CGFloat
     ) -> ShellSideColumn {
         #if os(iOS)
-        var systemEdge: ShellRailEdge?
-        if #available(iOS 27.1, *) {
-            switch traits.verticalBarEdge {
-            case .leading: systemEdge = .leading
-            case .trailing: systemEdge = .trailing
-            default: systemEdge = nil
-            }
-        }
         let edge = ShellRailPlacement.edge(
-            systemVerticalBarEdge: systemEdge,
+            systemVerticalBarEdge: ShellRailEdge.systemVerticalBar(in: traits),
             idiom: .device,
             horizontalSizeClass: ShellSizeClass(traits.horizontalSizeClass),
             verticalSizeClass: ShellSizeClass(traits.verticalSizeClass),
@@ -86,6 +95,14 @@ extension UIViewController {
         child.willMove(toParent: nil)
         child.view.removeFromSuperview()
         child.removeFromParent()
+    }
+
+    /// Re-asks the status bar and home indicator preferences (iOS).
+    func refreshSystemOverlays() {
+        #if os(iOS)
+        setNeedsStatusBarAppearanceUpdate()
+        setNeedsUpdateOfHomeIndicatorAutoHidden()
+        #endif
     }
 }
 

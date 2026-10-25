@@ -36,6 +36,11 @@ struct UMDBarConfiguration {
     /// nil while the global stats setting is off — the row disappears with
     /// every other entry.
     var showConnectionStats: (() -> Void)?
+    /// Enters or leaves full screen (`⋯` → Full Screen). nil drops the row.
+    var toggleFullScreen: (() -> Void)?
+    /// Full screen is on: the row reads Exit Full Screen. Only the iPhone
+    /// Duo's outer display shows a rail then (its side column).
+    var fullScreenActive = false
     /// The herdr-only second `+ TAB` entry, if the active tab offers one —
     /// New Session leads the menu on every backend (see
     /// `TerminalRoute.NewTabTarget`).
@@ -101,6 +106,8 @@ private struct UMDBarPresentationKey: Equatable {
     var hasCloseSession: Bool
     var hasKeychainTip: Bool
     var hasConnectionStats: Bool
+    var hasToggleFullScreen: Bool
+    var fullScreenActive: Bool
     var extraNewTabTarget: TerminalRoute.NewTabTarget?
     var shortcutBackend: Host.SessionBackend?
     var style: UMDBarStyle
@@ -126,6 +133,8 @@ private struct UMDBarPresentationKey: Equatable {
         hasCloseSession = configuration.closeSession != nil
         hasKeychainTip = configuration.keychainTip != nil
         hasConnectionStats = configuration.showConnectionStats != nil
+        hasToggleFullScreen = configuration.toggleFullScreen != nil
+        fullScreenActive = configuration.fullScreenActive
         extraNewTabTarget = configuration.extraNewTabTarget
         shortcutBackend = configuration.shortcutBackend
         style = configuration.style
@@ -163,6 +172,7 @@ enum UMDBarAction: Equatable {
     case toggleKeyBarArranging
     case showGuide
     case showConnectionStats
+    case toggleFullScreen
     case attach(FileAttachPicker)
 }
 
@@ -298,6 +308,8 @@ final class UMDBarViewController: UIViewController,
             showGuide()
         case .showConnectionStats:
             configuration.showConnectionStats?()
+        case .toggleFullScreen:
+            configuration.toggleFullScreen?()
         case .attach(let picker):
             fileAttachController.request(
                 picker,
@@ -625,8 +637,9 @@ final class UMDBarViewController: UIViewController,
             offered.append(.guide)
             chips[.guide] = guideButton()
         }
-        // The standing entries (keyboard lock, arrange, stats) keep ⋯ on the
-        // row whether or not anything drops; it always sits before DETACH.
+        // The standing entries (full screen, keyboard lock, arrange, stats)
+        // keep ⋯ on the row whether or not anything drops; it always sits
+        // before DETACH.
         if !makeOverflowMenu().children.isEmpty {
             offered.append(.overflow)
         }
@@ -1021,11 +1034,25 @@ final class UMDBarViewController: UIViewController,
         ])
     }
 
-    /// The standing entries (keyboard lock, arrange, stats) plus the chips
-    /// the rail dropped (`overflowing`), so the menu carries exactly those.
+    /// The standing entries (full screen, keyboard lock, arrange, stats) plus
+    /// the chips the rail dropped (`overflowing`), so the menu carries exactly
+    /// those.
     private func makeOverflowMenu(overflowing: Set<RailItem> = []) -> UIMenu {
         var children: [UIMenuElement] = []
         let carries: (RailItem) -> Bool = { overflowing.contains($0) }
+        if configuration.toggleFullScreen != nil {
+            let active = configuration.fullScreenActive
+            children.append(menuAction(
+                title: active
+                    ? String(localized: "Exit Full Screen")
+                    : String(localized: "Full Screen"),
+                image: UIImage(systemName: active
+                    ? "arrow.down.right.and.arrow.up.left"
+                    : "arrow.up.left.and.arrow.down.right"),
+                identifier: "umd.fullScreen",
+                action: .toggleFullScreen
+            ))
+        }
         #if !os(visionOS)
         let offersKeyboardLock = currentObservedState.keyboardLocked
             || !currentObservedState.hardwareKeyboardConnected

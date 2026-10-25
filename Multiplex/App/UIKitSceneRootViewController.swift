@@ -182,6 +182,25 @@ final class UIKitSceneRootViewController: UIViewController {
         )
     }
 
+    #if os(iOS)
+    /// A full-screen terminal hides the status bar and home indicator from
+    /// inside the content (a terminal window, or the shell's terminal). The
+    /// classic terminal rides a bar-hidden navigation controller; ask its
+    /// top controller directly rather than lean on that container's routing.
+    private var systemOverlayChild: UIViewController {
+        (contentViewController as? UINavigationController)?.topViewController
+            ?? contentViewController
+    }
+
+    override var childForStatusBarHidden: UIViewController? {
+        systemOverlayChild
+    }
+
+    override var childForHomeIndicatorAutoHidden: UIViewController? {
+        systemOverlayChild
+    }
+    #endif
+
     #if os(visionOS)
     /// `.hidden` is what `.windowStyle(.plain)` compiled down to: the scene
     /// drops its glass container and only what the app draws is visible.

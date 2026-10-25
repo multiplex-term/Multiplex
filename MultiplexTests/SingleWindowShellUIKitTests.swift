@@ -163,6 +163,55 @@ final class SingleWindowShellUIKitTests: XCTestCase {
         XCTAssertTrue(view("singleWindowShell.divider", in: controller.view)?.isHidden == true)
     }
 
+    func testFullScreenTerminalTakesTheWholeShellOnlyWhileOnScreen() {
+        func resolve(
+            size: CGSize,
+            idiom: ShellModeDecision.Idiom,
+            compactShowsTerminal: Bool,
+            fullScreen: Bool
+        ) -> SingleWindowShellLayoutMetrics {
+            SingleWindowShellNativeLayout.resolve(
+                size: size,
+                safeArea: UIEdgeInsets(top: 24, left: 0, bottom: 20, right: 0),
+                verticalSizeClass: .regular,
+                idiom: idiom,
+                deckRailVisible: true,
+                compactShowsTerminal: compactShowsTerminal,
+                compactBackSwipeOffset: 0,
+                compactBackSwipeActive: false,
+                terminalFullScreen: fullScreen
+            )
+        }
+        let size = CGSize(width: 1_366, height: 1_024)
+        let windowed = resolve(size: size, idiom: .pad, compactShowsTerminal: true, fullScreen: false)
+        let full = resolve(size: size, idiom: .pad, compactShowsTerminal: true, fullScreen: true)
+        XCTAssertTrue(windowed.hasDeckColumn)
+        XCTAssertEqual(full.terminalFrame, CGRect(origin: .zero, size: size))
+        XCTAssertEqual(full.dividerFrame, .zero)
+        XCTAssertEqual(full.deckAlpha, 0)
+        XCTAssertFalse(full.deckInteractive)
+        XCTAssertTrue(full.terminalInteractive)
+        // What the panes are told stays put, so neither side re-renders: the
+        // terminal insets its own full-screen pane.
+        XCTAssertEqual(full.terminalSafeArea, windowed.terminalSafeArea)
+        XCTAssertEqual(full.terminalAvailableWidth, windowed.terminalAvailableWidth)
+        XCTAssertEqual(full.deckPresentation, windowed.deckPresentation)
+        XCTAssertEqual(full.deckToggles, windowed.deckToggles)
+        XCTAssertEqual(full.railOwnsBottomSafeArea, windowed.railOwnsBottomSafeArea)
+
+        // A compact shell showing its deck leaves the flag dormant.
+        let phone = CGSize(width: 390, height: 844)
+        XCTAssertEqual(
+            resolve(size: phone, idiom: .phone, compactShowsTerminal: false, fullScreen: true),
+            resolve(size: phone, idiom: .phone, compactShowsTerminal: false, fullScreen: false)
+        )
+        XCTAssertEqual(
+            resolve(size: phone, idiom: .phone, compactShowsTerminal: true, fullScreen: true)
+                .terminalFrame,
+            CGRect(origin: .zero, size: phone)
+        )
+    }
+
     func testSafeAreaMathMatchesCompactLandscapeAndBottomRailOwnership() {
         let regular = SingleWindowShellNativeLayout.resolve(
             size: CGSize(width: 600, height: 500),

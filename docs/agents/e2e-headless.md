@@ -242,6 +242,10 @@ app.multiplexterm.multiplex.<name>`:
   COMMANDS grid / CUSTOM SETUP list / with a fresh row's composer expanded.
   A panel already up just switches, so one run can capture all three.
 - `debug.guide` — open the focused terminal's GUIDE field manual for layout capture.
+- `debug.fullscreen` — toggle full screen in the focused terminal's window
+  (the `⋯` row in, the EXIT chip out); fire `debug.summon` first so the
+  window owns focus. `debug.helpercollapse` folds/unfolds the agent strip
+  app-wide (its own fold control).
 - `debug.link` — activate the first visible link through the resolve →
   policy → confirmation path (URL → link sheet, path → file-viewer sheet;
   text both resolvers decline must present nothing). `debug.linkopen` runs

@@ -852,6 +852,157 @@ final class TerminalWindowUIKitTests: XCTestCase {
         )
     }
 
+    func testFullScreenInsetsTrustAPhoneAndCorrectTheIPadWindowingLies() {
+        // A phone's safe area is the truth: sensor housing, home indicator.
+        let phone = UIEdgeInsets(top: 59, left: 0, bottom: 34, right: 0)
+        XCTAssertEqual(TerminalFullScreenInsets.resolve(
+            sceneSafeArea: phone,
+            isPad: false,
+            hostsWindowControls: true,
+            systemTopChromeOverlap: 0,
+            spansDisplay: true
+        ), phone)
+        // The iPhone Duo's inner display reports nothing beside its 55 pt
+        // corners once the status bar hides: the pane clears them with a
+        // band at each end, never along its long sides.
+        XCTAssertEqual(TerminalFullScreenInsets.resolve(
+            sceneSafeArea: UIEdgeInsets(top: 0, left: 0, bottom: 20, right: 0),
+            isPad: false,
+            bareCorners: true,
+            hostsWindowControls: true,
+            systemTopChromeOverlap: 0,
+            spansDisplay: true
+        ), UIEdgeInsets(
+            top: TerminalFullScreenInsets.bareCornerClearance,
+            left: 0,
+            bottom: TerminalFullScreenInsets.bareCornerClearance,
+            right: 0
+        ))
+        // Its outer display keeps the side column around the camera; the
+        // inner display and every other phone give it up.
+        XCTAssertTrue(TerminalFullScreenInsets.keepsSideColumn(
+            isPhone: true, compactWidth: true, systemBarEdge: .trailing
+        ))
+        XCTAssertTrue(TerminalFullScreenInsets.keepsSideColumn(
+            isPhone: true, compactWidth: true, systemBarEdge: .leading
+        ))
+        XCTAssertFalse(TerminalFullScreenInsets.keepsSideColumn(
+            isPhone: true, compactWidth: false, systemBarEdge: .trailing
+        ), "the inner display's column holds no camera")
+        XCTAssertFalse(TerminalFullScreenInsets.keepsSideColumn(
+            isPhone: true, compactWidth: true, systemBarEdge: nil
+        ))
+        XCTAssertFalse(TerminalFullScreenInsets.keepsSideColumn(
+            isPhone: false, compactWidth: true, systemBarEdge: .trailing
+        ))
+        // Where the windowed key rail spends the home strip, so does the
+        // pane, keeping the rail's daylight; the Duo's corner band still wins.
+        XCTAssertEqual(TerminalFullScreenInsets.resolve(
+            sceneSafeArea: UIEdgeInsets(top: 0, left: 0, bottom: 34, right: 84),
+            isPad: false,
+            spentBottomStrip: 8,
+            hostsWindowControls: true,
+            systemTopChromeOverlap: 0,
+            spansDisplay: true
+        ), UIEdgeInsets(top: 0, left: 0, bottom: 8, right: 84))
+        XCTAssertEqual(TerminalFullScreenInsets.resolve(
+            sceneSafeArea: UIEdgeInsets(top: 0, left: 0, bottom: 20, right: 0),
+            isPad: false,
+            bareCorners: true,
+            spentBottomStrip: 8,
+            hostsWindowControls: true,
+            systemTopChromeOverlap: 0,
+            spansDisplay: true
+        ).bottom, TerminalFullScreenInsets.bareCornerClearance)
+        // A floating iPad window reports the display's 32 pt status bar it
+        // is not under; its pane starts below the window-control pill.
+        XCTAssertEqual(TerminalFullScreenInsets.resolve(
+            sceneSafeArea: UIEdgeInsets(top: 32, left: 0, bottom: 20, right: 0),
+            isPad: true,
+            hostsWindowControls: true,
+            systemTopChromeOverlap: 0,
+            spansDisplay: false
+        ), UIEdgeInsets(top: 28, left: 0, bottom: 20, right: 0))
+        // A maximised window has no pill: it clears only a status bar it
+        // still sits under, and nothing once full screen has hidden it.
+        XCTAssertEqual(TerminalFullScreenInsets.resolve(
+            sceneSafeArea: UIEdgeInsets(top: 24, left: 0, bottom: 20, right: 0),
+            isPad: true,
+            hostsWindowControls: true,
+            systemTopChromeOverlap: 24,
+            spansDisplay: true
+        ).top, 24)
+        XCTAssertEqual(TerminalFullScreenInsets.resolve(
+            sceneSafeArea: UIEdgeInsets(top: 0, left: 0, bottom: 20, right: 0),
+            isPad: true,
+            hostsWindowControls: true,
+            systemTopChromeOverlap: 0,
+            spansDisplay: true
+        ), UIEdgeInsets(top: 0, left: 0, bottom: 20, right: 0))
+        // The Mac's scene sits under a real title bar.
+        XCTAssertEqual(TerminalFullScreenInsets.resolve(
+            sceneSafeArea: UIEdgeInsets(top: 28, left: 0, bottom: 0, right: 0),
+            isPad: true,
+            hostsWindowControls: false,
+            systemTopChromeOverlap: 28,
+            spansDisplay: false
+        ).top, 0)
+    }
+
+    func testFullScreenHandsThePaneTheWindowAndOneExitChip() async throws {
+        let host = Host(name: "devbox", hostname: "127.0.0.1", username: "dev")
+        let first = TerminalRoute(hostID: host.id, mode: .attach(sessionName: "main"))
+        let second = TerminalRoute(hostID: host.id, mode: .attach(sessionName: "agent"))
+        let fixture = makeFixture(
+            route: TerminalWindowRoute(tabs: [first, second], activeTabID: first.id),
+            hosts: [host]
+        )
+        let root = fixture.controller.view!
+        fixture.controller.loadViewIfNeeded()
+        root.frame = CGRect(x: 0, y: 0, width: 1_024, height: 768)
+        let active = try XCTUnwrap(fixture.workspace.controller(for: first.id))
+        active.setTalkbackOpen(true)
+        for _ in 0..<8 { await Task.yield() }
+        root.layoutIfNeeded()
+        let panes = try XCTUnwrap(view("terminalWindow.panes", in: root))
+        XCTAssertGreaterThan(panes.frame.minY, 0, "the rail and the tab row sit above the pane")
+        XCTAssertNotNil(view("terminal.talkback.card", in: root))
+        XCTAssertNil(fixture.controller.fullScreenExitButtonForTesting)
+
+        fixture.controller.setFullScreen(true)
+        root.layoutIfNeeded()
+        XCTAssertTrue(fixture.controller.isFullScreen)
+        XCTAssertEqual(panes.frame, root.bounds)
+        XCTAssertEqual(view("terminalWindow.umd", in: root)?.isHidden, true)
+        XCTAssertEqual(view("terminalWindow.tabs", in: root)?.isHidden, true)
+        XCTAssertNil(view("terminal.talkback.card", in: root))
+        XCTAssertTrue(active.talkbackOpen, "full screen hides the box; the draft keeps it open")
+        let keyBars = descendants(of: TerminalKeyBar.self, in: root)
+        XCTAssertFalse(keyBars.isEmpty)
+        XCTAssertTrue(keyBars.allSatisfy(\.isHidden), "no key rail in any pane")
+        let exit = try XCTUnwrap(fixture.controller.fullScreenExitButtonForTesting)
+        XCTAssertEqual(exit.accessibilityLabel, "Exit Full Screen")
+        XCTAssertEqual(exit.frame.maxX, panes.frame.maxX - TerminalFullScreenExitButton.margin)
+        XCTAssertEqual(exit.frame.minY, panes.frame.minY + TerminalFullScreenExitButton.margin)
+        XCTAssertTrue(root.subviews.last === exit, "the chip rides above the pane")
+        XCTAssertTrue(
+            exit.point(inside: CGPoint(x: -6, y: 36), with: nil),
+            "the 30 pt face keeps a 44 pt press target"
+        )
+
+        // The one way out.
+        exit.sendActions(for: .touchUpInside)
+        for _ in 0..<8 { await Task.yield() }
+        root.layoutIfNeeded()
+        XCTAssertFalse(fixture.controller.isFullScreen)
+        XCTAssertNil(fixture.controller.fullScreenExitButtonForTesting)
+        XCTAssertGreaterThan(panes.frame.minY, 0)
+        XCTAssertEqual(view("terminalWindow.umd", in: root)?.isHidden, false)
+        XCTAssertEqual(view("terminalWindow.tabs", in: root)?.isHidden, false)
+        XCTAssertTrue(descendants(of: TerminalKeyBar.self, in: root).allSatisfy { !$0.isHidden })
+        XCTAssertNotNil(view("terminal.talkback.card", in: root), "leaving brings the box back")
+    }
+
     func testClassicRailClearanceNeverReachesThePanes() throws {
         let host = Host(
             name: "devbox",
@@ -1217,6 +1368,54 @@ final class TerminalWindowUIKitTests: XCTestCase {
         XCTAssertEqual(
             fixture.controller.visionOrnamentPresentationForTesting.bottom,
             .hidden
+        )
+    }
+
+    func testFullScreenTakesTheConsoleDownAndParksExitBottomTrailing() throws {
+        let first = TerminalRoute(hostID: UUID(), mode: .attach(sessionName: "main"))
+        let second = TerminalRoute(hostID: UUID(), mode: .attach(sessionName: "scratch"))
+        let fixture = makeFixture(route: TerminalWindowRoute(tabs: [first, second]))
+        fixture.controller.loadViewIfNeeded()
+        fixture.controller.view.frame = CGRect(x: 0, y: 0, width: 900, height: 620)
+        fixture.controller.view.layoutIfNeeded()
+        let windowed = fixture.controller.visionOrnamentPresentationForTesting
+        XCTAssertTrue(windowed.showsTopSourceLabels)
+        XCTAssertNotEqual(windowed.bottom, .hidden)
+
+        fixture.controller.setFullScreen(true)
+        fixture.controller.view.layoutIfNeeded()
+        let full = fixture.controller.visionOrnamentPresentationForTesting
+        XCTAssertEqual(full.bottom, .hidden, "no agent strip to keep, so nothing hangs below")
+        XCTAssertFalse(full.showsTopSourceLabels, "the tab ornament goes too")
+        let exit = try XCTUnwrap(fixture.controller.fullScreenExitButtonForTesting)
+        let margin = TerminalFullScreenExitButton.margin
+        XCTAssertEqual(exit.frame.maxX, 900 - margin)
+        XCTAssertEqual(exit.frame.maxY, 620 - margin)
+        XCTAssertGreaterThanOrEqual(exit.frame.height, 36, "a face gaze can find")
+        XCTAssertEqual(exit.alpha, 1)
+
+        // The one way out.
+        exit.sendActions(for: .touchUpInside)
+        XCTAssertFalse(fixture.controller.isFullScreen)
+        XCTAssertEqual(fixture.controller.visionOrnamentPresentationForTesting, windowed)
+        XCTAssertNil(fixture.controller.fullScreenExitButtonForTesting)
+    }
+
+    func testFullScreenKeepsOnlyTheAgentStripUnderTheGlass() {
+        XCTAssertEqual(
+            TerminalVisionOrnamentPresentation.resolve(
+                tabCount: 2,
+                isAuxiliary: false,
+                hasUMD: true,
+                hasHelper: true,
+                windowWidth: 900,
+                fullScreen: true
+            ),
+            TerminalVisionOrnamentPresentation(
+                showsTopSourceLabels: false,
+                bottom: .fullScreen,
+                maximumConsoleWidth: 876
+            )
         )
     }
 
