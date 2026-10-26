@@ -2798,6 +2798,7 @@ extension TerminalWindowViewController {
                 .ornamentConfiguration
             let viewport = (activePane as? ViewportPaneViewController)?
                 .ornamentConfiguration
+            let chrome = shell?.railChrome ?? .none
             let configuration = ViewportUMDConfiguration(
                 title: umdTitle,
                 mergeSources: mergeSources,
@@ -2811,7 +2812,9 @@ extension TerminalWindowViewController {
                 deckControlLabel: shell?.deckControl.label ?? "DECK",
                 contentSafeArea: umdSafeArea,
                 contentVerticalPadding: profile.verticalPadding,
-                minimumContentHeight: profile.minimumHeight,
+                minimumContentHeight: chrome.bandHeight > 0 ? chrome.bandHeight : profile.minimumHeight,
+                bandRowCenterY: chrome.bandRowCenterY,
+                bandTrailingClearance: chrome.bandTrailingClearance,
                 closeAccessibilityLabel: auxiliaryCloseLabel,
                 textScale: auxiliaryTextScale,
                 fileViewer: fileViewer,
