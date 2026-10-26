@@ -15945,6 +15945,22 @@
         }
       }
     },
+    "Toggle Sidebar" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サイドバーを切り替え"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切換側邊欄"
+          }
+        }
+      }
+    },
     "TOO LARGE — %@" : {
       "localizations" : {
         "ja" : {

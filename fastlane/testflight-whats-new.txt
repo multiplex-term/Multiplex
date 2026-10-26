@@ -2,6 +2,7 @@ NEW SINCE 1.5.0
 • herdr: Select Text stays inside the pane you pressed on herdr 0.9 and later. A multi-line copy no longer picks up the sidebar's border or drops the pane's right edge, and a zoomed pane selects as the whole pane.
 • herdr: long-press text and keep going into a drag to select with herdr itself, the way a mouse drag works in iTerm or Ghostty. herdr keeps the selection inside the pane and puts it on the clipboard when you lift. A long press that doesn't move still opens SELECT / SELECT ALL / PASTE.
 • Full screen: three-dot menu → Full Screen hands the window to the terminal; the rails, tabs, and keys step aside, and the agent bar folds to its dot. One button in the corner brings them back.
+• herdr: the HRDR panel can now show or hide herdr's sidebar (Toggle Sidebar under Workspaces).
 
 PLEASE TRY
 1. On a host running herdr 0.9 or later, long-press text in a pane, tap SELECT ALL, then COPY and paste it into Notes; no sidebar text or border characters should come along, and the pane's last columns should be there. Try it with the sidebar collapsed (Ctrl-B, then b) and expanded, in a split, and on a zoomed pane.

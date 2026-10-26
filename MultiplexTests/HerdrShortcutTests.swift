@@ -13,6 +13,7 @@ final class HerdrShortcutTests: XCTestCase {
             .newTab: Character("c").asciiValue!,
             .newWorkspace: Character("N").asciiValue!,
             .renameWorkspace: Character("W").asciiValue!,
+            .toggleSidebar: Character("b").asciiValue!,
         ]
 
         let safeShortcuts = HerdrShortcut.allCases.filter { !$0.requiresDoubleActivation }
@@ -29,6 +30,7 @@ final class HerdrShortcutTests: XCTestCase {
         XCTAssertEqual(HerdrShortcut.splitTopBottom.bindingLabel, "⌃B -")
         XCTAssertEqual(HerdrShortcut.newWorkspace.bindingLabel, "⌃B ⇧N")
         XCTAssertEqual(HerdrShortcut.renameWorkspace.bindingLabel, "⌃B ⇧W")
+        XCTAssertEqual(HerdrShortcut.toggleSidebar.bindingLabel, "⌃B B")
     }
 
     func testCloseActionsHaveNoTerminalInputAfterUIConfirmation() {
@@ -52,6 +54,7 @@ final class HerdrShortcutTests: XCTestCase {
         XCTAssertEqual(HerdrShortcut.splitTopBottom.command, "split_horizontal")
         XCTAssertEqual(HerdrShortcut.renameWorkspace.command, "rename_workspace")
         XCTAssertEqual(HerdrShortcut.closeWorkspace.command, "close_workspace")
+        XCTAssertEqual(HerdrShortcut.toggleSidebar.command, "toggle_sidebar")
     }
 
     func testCuratedRowsDismissThePanel() {
@@ -69,5 +72,6 @@ final class HerdrShortcutTests: XCTestCase {
         XCTAssertEqual(HerdrShortcut.splitLeftRight.group, .panes)
         XCTAssertEqual(HerdrShortcut.newTab.group, .tabs)
         XCTAssertEqual(HerdrShortcut.renameWorkspace.group, .workspaces)
+        XCTAssertEqual(HerdrShortcut.toggleSidebar.group, .workspaces)
     }
 }
