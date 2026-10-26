@@ -14,6 +14,8 @@ struct TerminalPaneConfiguration {
     var railOwnsBottomSafeArea: Bool
     /// The key rail drops its bezel slab and top rule (iPhone Duo).
     var bareChrome = false
+    /// Full screen: no key rail (iPad/iPhone).
+    var keyRailHidden = false
     var isActive: Bool
     var focusAllowed: Bool
     /// The tier's Key Commands cap and paywall route for the rail's
@@ -233,6 +235,7 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
             contentSafeArea: configuration.contentSafeArea,
             railOwnsBottomSafeArea: configuration.railOwnsBottomSafeArea,
             bareChrome: configuration.bareChrome,
+            keyRailHidden: configuration.keyRailHidden,
             isActive: configuration.isActive && configuration.focusAllowed,
             shortcutBackend: configuration.controller?.route.sessionBackend,
             keyCommandPlan: configuration.keyCommandPlan

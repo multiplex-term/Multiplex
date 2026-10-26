@@ -6108,6 +6108,22 @@
         }
       }
     },
+    "Exit Full Screen" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "フルスクリーンを解除"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "結束全螢幕"
+          }
+        }
+      }
+    },
     "Expand message" : {
       "localizations" : {
         "ja" : {
@@ -6542,6 +6558,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "完整版本說明"
+          }
+        }
+      }
+    },
+    "Full Screen" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "フルスクリーン"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "全螢幕"
           }
         }
       }

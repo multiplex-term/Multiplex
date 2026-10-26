@@ -16,6 +16,8 @@ final class TerminalSurfaceView: UIView {
         var railOwnsBottomSafeArea = false
         /// The key rail drops its bezel slab and top rule.
         var bareChrome = false
+        /// Full screen: the key rail steps aside and the grid takes its rows.
+        var keyRailHidden = false
         var isActive = true
         /// Which multiplexer owns the rail's shortcut key (TMUX/HRDR); nil
         /// drops the key — plain shells and auxiliary panes have no panel.
@@ -276,6 +278,7 @@ final class TerminalSurfaceView: UIView {
         )
         coordinator.keyBarHeightConstraint = keyBarHeight
         coordinator.setRailOwnsBottomSafeArea(configuration.railOwnsBottomSafeArea)
+        coordinator.setKeyRailHidden(configuration.keyRailHidden)
         #endif
 
         // Experimental Metal renderer (visionOS scale + glass fixes live in
@@ -350,6 +353,7 @@ final class TerminalSurfaceView: UIView {
         )
         coordinator.updateContentSafeArea(configuration.contentSafeArea)
         coordinator.setRailOwnsBottomSafeArea(configuration.railOwnsBottomSafeArea)
+        coordinator.setKeyRailHidden(configuration.keyRailHidden)
         coordinator.keyBar?.bareChrome = configuration.bareChrome
         coordinator.keyBar?.keyCommandPlan = configuration.keyCommandPlan
         if fontChanged {
@@ -438,6 +442,7 @@ final class TerminalSurfaceView: UIView {
         #if !os(visionOS)
         weak var keyBar: TerminalKeyBar?
         private(set) var railOwnsBottomSafeArea = false
+        private(set) var keyRailHidden = false
         var keyBarHeightConstraint: NSLayoutConstraint?
         private weak var avoidingContainer: UIView?
         private var bottomConstraint: NSLayoutConstraint?
@@ -518,7 +523,24 @@ final class TerminalSurfaceView: UIView {
             else { return }
             railOwnsBottomSafeArea = owns
             keyBar?.spendsBottomStrip = owns
-            let height = TerminalKeyBar.barHeight(spendsBottomStrip: owns)
+            applyKeyBarHeight()
+        }
+
+        /// Full screen folds the rail to nothing; the grid's bottom rides the
+        /// rail's top, so it takes the rows in the same pass.
+        func setKeyRailHidden(_ hidden: Bool) {
+            guard hidden != keyRailHidden else { return }
+            keyRailHidden = hidden
+            if hidden { keyBar?.stepAside() }
+            keyBar?.isHidden = hidden
+            applyKeyBarHeight()
+        }
+
+        private func applyKeyBarHeight() {
+            let height = TerminalKeyBar.barHeight(
+                spendsBottomStrip: railOwnsBottomSafeArea,
+                hidden: keyRailHidden
+            )
             guard let constraint = keyBarHeightConstraint,
                   constraint.constant != height
             else { return }

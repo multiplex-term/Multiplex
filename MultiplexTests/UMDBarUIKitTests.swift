@@ -379,6 +379,65 @@ final class UMDBarUIKitTests: XCTestCase {
         XCTAssertFalse(terminal.keyBarArranging)
     }
 
+    func testOverflowLeadsWithFullScreenOnEveryRowStyle() throws {
+        let state = UMDBarObservedState(
+            status: .live,
+            contactLost: false,
+            needsYou: false,
+            keyboardLocked: false,
+            hardwareKeyboardConnected: true
+        )
+        for (style, width) in [(UMDBarStyle.regular, nil), (.shell, 375), (.shell, 900)] {
+            var entered = 0
+            let controller = UMDBarViewController(configuration: configuration(
+                controller: terminalController(useMosh: false),
+                toggleFullScreen: { entered += 1 },
+                style: style,
+                availableWidth: width.map { CGFloat($0) }
+            ))
+            controller.loadViewIfNeeded()
+            controller.applyObservedState(state)
+            let overflow = try XCTUnwrap(
+                control("umd.overflow", in: controller.view) as? UIButton,
+                "\(style) at \(String(describing: width)) keeps ⋯ for the standing rows"
+            )
+            let row = try XCTUnwrap(actions(in: try XCTUnwrap(overflow.menu)).first)
+            XCTAssertEqual(row.identifier.rawValue, "umd.fullScreen")
+            XCTAssertEqual(row.title, "Full Screen")
+            controller.perform(.toggleFullScreen)
+            XCTAssertEqual(entered, 1)
+        }
+
+        // The Duo's outer display keeps its column in full screen; there the
+        // row is the way back.
+        let active = UMDBarViewController(configuration: configuration(
+            controller: terminalController(useMosh: false),
+            toggleFullScreen: {},
+            fullScreenActive: true,
+            style: .verticalColumn
+        ))
+        active.loadViewIfNeeded()
+        active.applyObservedState(state)
+        let column = try XCTUnwrap(control("umd.overflow", in: active.view) as? UIButton)
+        XCTAssertEqual(
+            actions(in: try XCTUnwrap(column.menu)).first?.title,
+            "Exit Full Screen"
+        )
+
+        // No route in (a missing host's tab), no row.
+        let none = UMDBarViewController(configuration: configuration(
+            controller: terminalController(useMosh: false),
+            style: .shell,
+            availableWidth: 375
+        ))
+        none.loadViewIfNeeded()
+        none.applyObservedState(state)
+        let overflow = try XCTUnwrap(control("umd.overflow", in: none.view) as? UIButton)
+        XCTAssertFalse(actions(in: try XCTUnwrap(overflow.menu)).contains {
+            $0.identifier.rawValue == "umd.fullScreen"
+        })
+    }
+
     func testStatusClusterPreservesMoshConnectionAttentionAndKeychainSemantics() throws {
         let terminal = terminalController(useMosh: true)
         var openedTip = false
@@ -572,6 +631,8 @@ final class UMDBarUIKitTests: XCTestCase {
         closeSession: (() -> Void)? = nil,
         keychainTip: (() -> Void)? = nil,
         showConnectionStats: (() -> Void)? = nil,
+        toggleFullScreen: (() -> Void)? = nil,
+        fullScreenActive: Bool = false,
         extraNewTabTarget: TerminalRoute.NewTabTarget? = nil,
         shortcutBackend: Host.SessionBackend? = .tmux,
         style: UMDBarStyle = .regular,
@@ -595,6 +656,8 @@ final class UMDBarUIKitTests: XCTestCase {
             closeSession: closeSession,
             keychainTip: keychainTip,
             showConnectionStats: showConnectionStats,
+            toggleFullScreen: toggleFullScreen,
+            fullScreenActive: fullScreenActive,
             extraNewTabTarget: extraNewTabTarget,
             shortcutBackend: shortcutBackend,
             style: style,

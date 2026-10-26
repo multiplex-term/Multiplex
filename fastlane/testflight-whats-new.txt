@@ -1,9 +1,11 @@
 NEW SINCE 1.5.0
 • herdr: Select Text stays inside the pane you pressed on herdr 0.9 and later. A multi-line copy no longer picks up the sidebar's border or drops the pane's right edge, and a zoomed pane selects as the whole pane.
 • herdr: long-press text and keep going into a drag to select with herdr itself, the way a mouse drag works in iTerm or Ghostty. herdr keeps the selection inside the pane and puts it on the clipboard when you lift. A long press that doesn't move still opens SELECT / SELECT ALL / PASTE.
+• Full screen: three-dot menu → Full Screen hands the window to the terminal; the rails, tabs, and keys step aside, and the agent bar folds to its dot. One button in the corner brings them back.
 
 PLEASE TRY
 1. On a host running herdr 0.9 or later, long-press text in a pane, tap SELECT ALL, then COPY and paste it into Notes; no sidebar text or border characters should come along, and the pane's last columns should be there. Try it with the sidebar collapsed (Ctrl-B, then b) and expanded, in a split, and on a zoomed pane.
 2. In a herdr pane running an agent (Hermes, Claude Code), long-press a reply and, without lifting, drag across a few lines; herdr should highlight them and show "copied to clipboard" when you lift. Paste into Notes and compare with the same drag in iTerm or Ghostty on the host; the text should match. Then long-press and lift without moving; the SELECT block should stay.
+3. In a terminal running an agent, open the three-dot menu → Full Screen. Only the terminal, the agent bar's dot, and one button should remain: top right on iPhone and iPad (it fades after a moment), EXIT at the bottom right on Vision Pro. Type, scroll, and open the agent dot as usual, then press the button; the rails, keys, and agent bar should come back as they were. On iPhone the status bar hides too. On iPhone Duo try it closed (the side column stays), open, as a book, and as a laptop.
 
 Feedback: screenshot in TestFlight

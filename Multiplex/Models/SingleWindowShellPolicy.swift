@@ -198,13 +198,15 @@ enum SingleWindowShellBackSwipe {
 
     /// The compact phone keeps edge-back as a navigation shortcut even when
     /// Reduce Motion is enabled. Motion preference changes the interactive
-    /// travel, not whether the route back to the deck exists.
+    /// travel, not whether the route back to the deck exists. A full-screen
+    /// terminal keeps every edge for itself.
     static func isAvailable(
         idiom: ShellModeDecision.Idiom,
         expanded: Bool,
-        compactShowsTerminal: Bool
+        compactShowsTerminal: Bool,
+        terminalFullScreen: Bool = false
     ) -> Bool {
-        idiom == .phone && !expanded && compactShowsTerminal
+        idiom == .phone && !expanded && compactShowsTerminal && !terminalFullScreen
     }
 
     /// Local text-selection drags always stay with the terminal. Otherwise,

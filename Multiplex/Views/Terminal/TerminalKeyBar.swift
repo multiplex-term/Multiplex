@@ -1125,8 +1125,10 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback, KeyBarDropSurface 
     /// The rail's height for a pane that does (or does not) spend the bottom
     /// strip. `barHeight` is the plain case, kept as a constant because the
     /// top rail mirrors it for its own minimum height.
-    static func barHeight(spendsBottomStrip: Bool) -> CGFloat {
-        keyTopInset + keyHeight + keyBottomInset(
+    /// A hidden rail (full screen) takes no rows.
+    static func barHeight(spendsBottomStrip: Bool, hidden: Bool = false) -> CGFloat {
+        guard !hidden else { return 0 }
+        return keyTopInset + keyHeight + keyBottomInset(
             isIOSAppOnMac: ProcessInfo.processInfo.isiOSAppOnMac,
             spendsBottomStrip: spendsBottomStrip
         )
@@ -1311,6 +1313,13 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback, KeyBarDropSurface 
             hideArrangeBar()
             controller?.setKeyBarArranging(false)
         }
+    }
+
+    /// Full screen hides the rail: the C / B slab it hangs in the window and
+    /// the CTRL latch only its key can show go with it.
+    func stepAside() {
+        if ctrlLatched { terminal?.controlModifier = false }
+        controlModifierDidReset()
     }
 
     override func didMoveToWindow() {

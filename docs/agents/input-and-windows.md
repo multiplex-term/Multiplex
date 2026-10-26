@@ -183,6 +183,36 @@ routing, tab moves, keyboard avoidance, or secret fields.
   rides the `⋯` (`guideIsDirectChip`). Proofs: `debug.arrangekeys`,
   `debug.arrangekeysmove`, `build.sh uitest ipad` (the visionOS sim lifts
   nothing; fake `UIDropSession` tests cover the coordinator).
+- **Full screen (`⋯` → Full Screen) is per-window state on
+  `TerminalWindowViewController`** (`isFullScreen`, never persisted).
+  - Chrome steps aside: rail, tab row, the Talkback card (the box stays
+    open), the side panel (a new summon or any ▤/⌗ tab ends the mode), the
+    key rail (`keyRailHidden`: zero height, CTRL latch dropped), and every
+    visionOS ornament but the agent strip.
+  - The agent strip stays, folded to its dot on entry; exit unfolds it only
+    if full screen folded it (a Talkback fold changes hands, never fights).
+  - One EXIT chip: iPad/iPhone a dimming ⤡ at the pane's top-trailing
+    corner; visionOS `⤡ EXIT` at the bottom-trailing corner on the opaque
+    floating-chrome ground, never dimmed (gaze cannot wake it).
+  - The pane fills the window inside its safe area
+    (`TerminalFullScreenInsets`: a phone's safe area, iPad through the
+    rail's top-strip and pill rules) and spends the home strip wherever the
+    windowed key rail does, keeping the rail's daylight. iOS hides the
+    status bar and home indicator (scene root → content → the shell's
+    terminal).
+  - iPhone Duo inner display: zero insets beside its 55 pt corners once the
+    bar hides, so the pane clears them with a band at top and bottom
+    (`bareCornerClearance`); side insets are rejected (24 pt a side costs
+    ~6 columns).
+  - iPhone Duo outer display keeps its side column (`keepsSideColumn`:
+    compact width + a `verticalBarEdge` side; a launch into closed landscape
+    never sees a hinge): status glyphs, the UMD column owning TMUX/HRDR, ⋯
+    reading Exit Full Screen. No cell sits beside the camera.
+  - The shell only lends frames (`resolve(terminalFullScreen:)`), so neither
+    side re-renders; the back swipe is off, going to the deck ends the mode,
+    and on the Duo the pane spans the fold like ◧ HIDE.
+  - The `⋯` row acts a turn later so the menu dismisses before its ornament
+    goes. ⚠ iPhone has no keyboard-dismiss key while the rail is away.
 - **Auxiliary tabs wear their whole bottom chrome in the ornament
   (2026-08-10)** — on classic visionOS windows the in-window ▤/⌗ rails are
   not mounted (`showsInWindowRail: false`); their end chips collided with
