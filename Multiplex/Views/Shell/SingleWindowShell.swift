@@ -79,6 +79,9 @@ final class SingleWindowShellState {
 /// Pure result of the shell's UIKit layout pass. Tests can pin every safe-area
 /// and breakpoint contract without instantiating FleetWall or a live terminal.
 struct SingleWindowShellLayoutMetrics: Equatable {
+    /// The shell size resolved: a breakpoint crossing tells a rotation from
+    /// a display change by it.
+    var size: CGSize
     var expanded: Bool
     var deckFrame: CGRect
     var terminalFrame: CGRect
@@ -269,6 +272,7 @@ enum SingleWindowShellNativeLayout {
         )
 
         var metrics = SingleWindowShellLayoutMetrics(
+            size: size,
             expanded: expanded,
             deckFrame: (consoleShowsDeck ? consoleFrame : nil) ?? CGRect(
                 x: 0,
@@ -757,16 +761,23 @@ final class SingleWindowShellViewController: UIViewController {
             pendingLayoutMetrics = next
             return false
         }
-        continueAcrossBreakpoint(expanding: next.expanded, deckToggled: current.deckToggles)
+        continueAcrossBreakpoint(expanding: next.expanded, from: current.size, to: next.size)
         return true
     }
 
     /// Crossing to single pane shows the attached terminal (the deck when
-    /// nothing is attached); crossing to two panes restores a hidden rail,
-    /// unless ◧ hid it in the pose being left (laptop → book keeps it hidden).
-    private func continueAcrossBreakpoint(expanding: Bool, deckToggled: Bool) {
+    /// nothing is attached); crossing to two panes restores a hidden rail
+    /// only when the deck was showing or the display changed — a rotation
+    /// (book ↔ laptop, landscape ↔ portrait) keeps a hidden rail hidden.
+    private func continueAcrossBreakpoint(expanding: Bool, from previousSize: CGSize, to nextSize: CGSize) {
         if expanding {
-            if !deckToggled { deckRailVisible = true }
+            if SingleWindowShellLayout.restoresDeckRailOnExpand(
+                compactShowsTerminal: compactShowsTerminal,
+                from: previousSize,
+                to: nextSize
+            ) {
+                deckRailVisible = true
+            }
         } else {
             let hasTabs = !shellState.terminalRoute.tabs.isEmpty
             if compactShowsTerminal != hasTabs {

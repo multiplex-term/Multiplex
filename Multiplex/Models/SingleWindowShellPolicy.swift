@@ -86,6 +86,23 @@ enum SingleWindowShellLayout {
         idiom == .phone && horizontalSizeClass == .regular && verticalSizeClass == .regular
     }
 
+    /// Crossing to two panes brings a hidden deck rail back when the single
+    /// pane being left showed the deck, or when the shell changed shape (the
+    /// Duo opening from its outer display, a Split View half going full). A
+    /// rotation only swaps the shell's sides, so a rail ◧ hid stays hidden.
+    static func restoresDeckRailOnExpand(
+        compactShowsTerminal: Bool,
+        from previous: CGSize,
+        to next: CGSize
+    ) -> Bool {
+        !compactShowsTerminal || !sameShapeIgnoringRotation(previous, next)
+    }
+
+    private static func sameShapeIgnoringRotation(_ lhs: CGSize, _ rhs: CGSize) -> Bool {
+        abs(min(lhs.width, lhs.height) - min(rhs.width, rhs.height)) < 1
+            && abs(max(lhs.width, lhs.height) - max(rhs.width, rhs.height)) < 1
+    }
+
     /// The iPad rule: the shell runs full-screen there, so the window's own
     /// usable width is the measure.
     static func isExpanded(width: CGFloat) -> Bool {

@@ -105,6 +105,49 @@ final class SingleWindowShellUIKitTests: XCTestCase {
         XCTAssertEqual(controller.currentLayoutMetrics?.deckFrame.width, 0)
     }
 
+    func testRotatingAcrossTheBreakpointKeepsAHiddenDeckHidden() throws {
+        let harness = makeController(initialRoute: TerminalWindowRoute(
+            tab: terminal("main")
+        ))
+        let controller = harness.controller
+        controller.loadViewIfNeeded()
+        let landscape = CGSize(width: 1_024, height: 600)
+        let portrait = CGSize(width: 600, height: 1_024)
+        controller.applyTestLayout(size: landscape)
+        XCTAssertTrue(controller.currentLayoutMetrics?.expanded == true)
+        controller.showDeck()
+        XCTAssertFalse(controller.deckRailVisible)
+
+        controller.applyTestLayout(size: portrait)
+        XCTAssertFalse(controller.currentLayoutMetrics?.expanded == true)
+        XCTAssertTrue(controller.compactShowsTerminal)
+
+        controller.applyTestLayout(size: landscape)
+        XCTAssertTrue(controller.currentLayoutMetrics?.expanded == true)
+        XCTAssertFalse(controller.deckRailVisible, "a rotation keeps the display; ◧ hid the rail")
+        XCTAssertEqual(controller.currentLayoutMetrics?.deckFrame.width, 0)
+    }
+
+    func testRotatingBackFromTheSinglePaneDeckRestoresTheRail() throws {
+        let harness = makeController(initialRoute: TerminalWindowRoute(
+            tab: terminal("main")
+        ))
+        let controller = harness.controller
+        controller.loadViewIfNeeded()
+        let landscape = CGSize(width: 1_024, height: 600)
+        let portrait = CGSize(width: 600, height: 1_024)
+        controller.applyTestLayout(size: landscape)
+        controller.showDeck()
+        controller.applyTestLayout(size: portrait)
+        // ‹ DECK in the single pane: the user is on the deck now.
+        controller.showDeck()
+        XCTAssertFalse(controller.compactShowsTerminal)
+
+        controller.applyTestLayout(size: landscape)
+        XCTAssertTrue(controller.deckRailVisible)
+        XCTAssertGreaterThan(controller.currentLayoutMetrics?.deckFrame.width ?? 0, 0)
+    }
+
     func testCrossingTheBreakpointWithNothingAttachedShowsTheDeck() throws {
         let harness = makeController()
         let controller = harness.controller

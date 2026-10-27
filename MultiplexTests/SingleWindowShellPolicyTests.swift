@@ -188,6 +188,27 @@ final class SingleWindowShellPolicyTests: XCTestCase {
         ))
     }
 
+    func testExpandingRestoresAHiddenRailOnlyFromTheDeckOrAnotherDisplay() {
+        let book = CGSize(width: 951, height: 669)
+        let portrait = CGSize(width: 669, height: 951)
+        let closed = CGSize(width: 466, height: 678)
+        // Rotation on one display: the rail ◧ hid stays hidden.
+        XCTAssertFalse(SingleWindowShellLayout.restoresDeckRailOnExpand(
+            compactShowsTerminal: true, from: portrait, to: book
+        ))
+        XCTAssertFalse(SingleWindowShellLayout.restoresDeckRailOnExpand(
+            compactShowsTerminal: true, from: CGSize(width: 669.5, height: 951), to: book
+        ))
+        // ‹ DECK in the single pane: the user went to the deck.
+        XCTAssertTrue(SingleWindowShellLayout.restoresDeckRailOnExpand(
+            compactShowsTerminal: false, from: portrait, to: book
+        ))
+        // Opening the Duo from its outer display.
+        XCTAssertTrue(SingleWindowShellLayout.restoresDeckRailOnExpand(
+            compactShowsTerminal: true, from: closed, to: book
+        ))
+    }
+
     func testCornerInsetOnlyWhereThePhoneHasNoInsetAboveOrBesideTheCorner() {
         func inset(top: CGFloat, leading: CGFloat, idiom: ShellModeDecision.Idiom,
                    width: ShellSizeClass = .regular) -> CGFloat {
