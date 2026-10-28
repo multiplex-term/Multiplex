@@ -2360,6 +2360,15 @@ private final class FleetHostRailView: UIView, UIContextMenuInteractionDelegate 
             row.axis = .horizontal
             row.alignment = .firstBaseline
             row.spacing = 14
+            // First-baseline alignment does not grow the row to fit the
+            // taller faces: SHELL and ⋯ overhung its top. A press there
+            // still lit their hover highlight, but hit-testing stops at the
+            // row's bounds — on visionOS, where the pinch lands where you
+            // look, a press on either control mostly did nothing.
+            for view in row.arrangedSubviews {
+                view.topAnchor.constraint(greaterThanOrEqualTo: row.topAnchor).isActive = true
+                view.bottomAnchor.constraint(lessThanOrEqualTo: row.bottomAnchor).isActive = true
+            }
             stack.addArrangedSubview(row)
         }
         accessibilityLabel = "\(host.name), \(host.address)"
