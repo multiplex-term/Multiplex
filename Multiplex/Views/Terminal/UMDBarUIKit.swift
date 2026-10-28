@@ -1260,13 +1260,22 @@ final class UMDBarViewController: UIViewController,
                 configuration.controller?.suspendFocusForPresentation() == true
         }
 
+        // A column's own width is its strip; the panel opens beside the
+        // chip, over the pane, so its room is the window's side of the chip
+        // the pane is on (the 24 below clears the arrow and screen margin).
+        let room: CGFloat?
+        if configuration.style == .verticalColumn, let window = view.window {
+            let chip = source.convert(source.bounds, to: window)
+            room = max(
+                chip.minX - window.safeAreaInsets.left,
+                window.bounds.width - window.safeAreaInsets.right - chip.maxX
+            )
+        } else {
+            room = configuration.availableWidth
+        }
         let panelWidth = min(
             ShortcutPanelViewController.preferredWidth,
-            max(
-                280,
-                (configuration.availableWidth
-                    ?? ShortcutPanelViewController.preferredWidth + 24) - 24
-            )
+            max(280, (room ?? ShortcutPanelViewController.preferredWidth + 24) - 24)
         )
         let panel = ShortcutPanelViewController(
             content: content,
@@ -1318,8 +1327,13 @@ final class UMDBarViewController: UIViewController,
         if let popover = panel.popoverPresentationController {
             popover.sourceView = source
             popover.sourceRect = source.bounds
-            popover.permittedArrowDirections = configuration.style == .regular
-                ? .down : .up
+            // A column chip opens the panel sideways, toward the pane: below
+            // a chip low in the column it would get only the strip's tail.
+            popover.permittedArrowDirections = switch configuration.style {
+            case .regular: .down
+            case .shell: .up
+            case .verticalColumn: [.left, .right]
+            }
             #if !os(visionOS)
             popover.backgroundColor = UIKitChassis.bezel
             #endif

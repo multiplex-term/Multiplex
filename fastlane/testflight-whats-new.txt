@@ -6,6 +6,7 @@ NEW SINCE 1.5.0
 • iPhone Duo: the file viewer's top bar stops short of the clock and Wi-Fi glyphs on the open display held upright, like a terminal's, so CLOSE is no longer hidden under them.
 • Single-window mode: a deck you hid with HIDE stays hidden when you rotate between landscape and portrait (iPhone Duo open, Pro Max). It still comes back if you went to the deck in portrait, or when you open the Duo from the closed display.
 • Hosts: a host you add, or bind with mpx, now lands at the top of the host list instead of the bottom.
+• iPhone Duo: on the closed display, the TMUX / HRDR panel opens beside the side column instead of below it, so it gets the screen's full height and width; its right edge no longer runs under the panel's pointer.
 
 PLEASE TRY
 1. On a host running herdr 0.9 or later, long-press text in a pane, tap SELECT ALL, then COPY and paste it into Notes; no sidebar text or border characters should come along, and the pane's last columns should be there. Try it with the sidebar collapsed (Ctrl-B, then b) and expanded, in a split, and on a zoomed pane.
