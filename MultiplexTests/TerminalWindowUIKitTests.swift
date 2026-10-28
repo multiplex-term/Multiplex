@@ -1505,7 +1505,7 @@ final class TerminalWindowUIKitTests: XCTestCase {
         )!
         let workspace = suppliedWorkspace ?? TerminalWorkspace()
         let store = HostStore(directory: directory, knownMirroredIDs: [])
-        for host in hosts { store.add(host) }
+        for host in hosts.reversed() { store.add(host) }
         let dependencies = TerminalWindowDependencies(
             store: store,
             hub: ConnectionHub(),
