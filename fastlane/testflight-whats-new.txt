@@ -9,6 +9,7 @@ NEW SINCE 1.5.0
 • iPhone Duo: on the closed display, the TMUX / HRDR panel opens beside the side column instead of below it, so it gets the screen's full height and width; its right edge no longer runs under the panel's pointer.
 • Deck: a host's SHELL and three-dot buttons answer a press anywhere on them. A press near their top edge, where Vision Pro often lands a pinch, used to do nothing.
 • Settings → Screen → Keep screen on (iPhone and iPad): the display stays lit while a terminal or the file viewer is on screen, instead of dimming and locking on the device's Auto-Lock timer. The deck alone still sleeps as usual. Off by default.
+• Terminal: three-dot menu → Smaller Text / Larger Text leaves the menu open, so you can tap again to keep stepping the size while you watch the terminal.
 
 PLEASE TRY
 1. On a host running herdr 0.9 or later, long-press text in a pane, tap SELECT ALL, then COPY and paste it into Notes; no sidebar text or border characters should come along, and the pane's last columns should be there. Try it with the sidebar collapsed (Ctrl-B, then b) and expanded, in a split, and on a zoomed pane.

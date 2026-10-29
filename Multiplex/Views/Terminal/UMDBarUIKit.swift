@@ -1106,14 +1106,18 @@ final class UMDBarViewController: UIViewController,
                 title: String(localized: "Text Size"),
                 options: .displayInline,
                 children: [
+                    // Keep the menu up so repeated taps step the size
+                    // while the reader watches the terminal resize.
                     menuAction(
                         title: String(localized: "Smaller Text"),
                         identifier: "umd.fontDown.action",
+                        attributes: .keepsMenuPresented,
                         action: .fontDown
                     ),
                     menuAction(
                         title: String(localized: "Larger Text"),
                         identifier: "umd.fontUp.action",
+                        attributes: .keepsMenuPresented,
                         action: .fontUp
                     ),
                 ]
