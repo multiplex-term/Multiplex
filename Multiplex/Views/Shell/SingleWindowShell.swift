@@ -412,6 +412,12 @@ final class SingleWindowShellViewController: UIViewController {
     /// Resolved by `continueAcrossBreakpointIfCrossed` for the `applyLayout`
     /// that follows it, so one layout pass resolves once.
     private var pendingLayoutMetrics: SingleWindowShellLayoutMetrics?
+    /// The last layout resolved outside the background, which breakpoint
+    /// crossings are measured from. iOS lays a backgrounded scene out at
+    /// other displays' sizes for its snapshots (the Duo's closed display
+    /// while open, and back); those passes never carry the shell across.
+    private var seenLayoutMetrics: SingleWindowShellLayoutMetrics?
+    private var testSceneInBackground = false
 
     private let workspace: TerminalWorkspace
     private let shellRootView = SingleWindowShellRootView()
@@ -757,12 +763,21 @@ final class SingleWindowShellViewController: UIViewController {
     @discardableResult
     private func continueAcrossBreakpointIfCrossed() -> Bool {
         let next = resolvedLayoutMetrics()
-        guard let current = currentLayoutMetrics, current.expanded != next.expanded else {
+        guard !sceneInBackground,
+              let current = seenLayoutMetrics,
+              current.expanded != next.expanded
+        else {
             pendingLayoutMetrics = next
             return false
         }
         continueAcrossBreakpoint(expanding: next.expanded, from: current.size, to: next.size)
         return true
+    }
+
+    private var sceneInBackground: Bool {
+        testLayoutInput == nil
+            ? shellRootView.window?.windowScene?.activationState == .background
+            : testSceneInBackground
     }
 
     /// Crossing to single pane shows the attached terminal (the deck when
@@ -933,10 +948,12 @@ final class SingleWindowShellViewController: UIViewController {
         size: CGSize,
         safeArea: UIEdgeInsets = .zero,
         verticalSizeClass: ShellSizeClass = .regular,
-        division: CGRect? = nil
+        division: CGRect? = nil,
+        inBackground: Bool = false
     ) {
         loadViewIfNeeded()
         testLayoutInput = (size, safeArea, verticalSizeClass, division)
+        testSceneInBackground = inBackground
         shellRootView.frame = CGRect(origin: .zero, size: size)
         continueAcrossBreakpointIfCrossed()
         applyLayout(animated: false)
@@ -1218,6 +1235,7 @@ final class SingleWindowShellViewController: UIViewController {
             }
         }
         currentLayoutMetrics = metrics
+        if !sceneInBackground { seenLayoutMetrics = metrics }
         targetLayoutMetrics = metrics
         let shouldAnimate = animated
             && !shellState.reduceMotion

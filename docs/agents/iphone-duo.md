@@ -147,6 +147,11 @@ Measured on the 27.1 simulator with `MULTIPLEX_DUO_PROBE=1` (log category
   the sides, so a hidden deck survives laptop ↔ book and the flat
   landscape ↔ portrait turn (where portrait has no ◧). Divider and key
   rail move on one spring; hinge angle drives nothing.
+- **Background snapshots** — a backgrounded scene is laid out at the other
+  display's size (measured: 951×669 while on the closed display);
+  crossings are measured from the last foreground layout
+  (`seenLayoutMetrics`), so going to the background and back never
+  re-opens a hidden deck.
 
 ## Traps
 

@@ -4,7 +4,7 @@ NEW SINCE 1.5.0
 • Full screen: three-dot menu → Full Screen hands the window to the terminal; the rails, tabs, and keys step aside, and the agent bar folds to its dot. One button in the corner brings them back.
 • herdr: the HRDR panel can now show or hide herdr's sidebar (Toggle Sidebar under Workspaces).
 • iPhone Duo: the file viewer's top bar stops short of the clock and Wi-Fi glyphs on the open display held upright, like a terminal's, so CLOSE is no longer hidden under them.
-• Single-window mode: a deck you hid with HIDE stays hidden when you rotate between landscape and portrait (iPhone Duo open, Pro Max). It still comes back if you went to the deck in portrait, or when you open the Duo from the closed display.
+• Single-window mode: a deck you hid with HIDE stays hidden when you rotate between landscape and portrait (iPhone Duo open, Pro Max). It still comes back if you went to the deck in portrait, or when you open the Duo from the closed display. Leaving the app and coming back keeps it hidden too.
 • Hosts: a host you add, or bind with mpx, now lands at the top of the host list instead of the bottom.
 • iPhone Duo: on the closed display, the TMUX / HRDR panel opens beside the side column instead of below it, so it gets the screen's full height and width; its right edge no longer runs under the panel's pointer.
 • Deck: a host's SHELL and three-dot buttons answer a press anywhere on them. A press near their top edge, where Vision Pro often lands a pinch, used to do nothing.

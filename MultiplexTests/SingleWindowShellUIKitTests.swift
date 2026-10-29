@@ -148,6 +148,28 @@ final class SingleWindowShellUIKitTests: XCTestCase {
         XCTAssertGreaterThan(controller.currentLayoutMetrics?.deckFrame.width ?? 0, 0)
     }
 
+    func testBackgroundSnapshotLayoutsLeaveAHiddenDeckHidden() throws {
+        let harness = makeController(initialRoute: TerminalWindowRoute(
+            tab: terminal("main")
+        ))
+        let controller = harness.controller
+        controller.loadViewIfNeeded()
+        let open = CGSize(width: 951, height: 669)
+        controller.applyTestLayout(size: open)
+        XCTAssertTrue(controller.currentLayoutMetrics?.expanded == true)
+        controller.showDeck()
+        XCTAssertFalse(controller.deckRailVisible)
+
+        // Backgrounded, iOS snapshots the scene at the closed display's size.
+        controller.applyTestLayout(size: CGSize(width: 466, height: 678), inBackground: true)
+        XCTAssertFalse(controller.currentLayoutMetrics?.expanded == true)
+
+        controller.applyTestLayout(size: open)
+        XCTAssertTrue(controller.currentLayoutMetrics?.expanded == true)
+        XCTAssertFalse(controller.deckRailVisible, "a snapshot pass is not an unfold")
+        XCTAssertEqual(controller.currentLayoutMetrics?.deckFrame.width, 0)
+    }
+
     func testCrossingTheBreakpointWithNothingAttachedShowsTheDeck() throws {
         let harness = makeController()
         let controller = harness.controller
