@@ -93,7 +93,7 @@ approaches. Don't re-litigate a recorded decision without new facts.
   systemd-run), file attach/drop.
 - `agent-helpers.md` — CLI-agent detection, helper chips, launch model
   override, keychain-locked tip, HISTORY/jump.
-- `lifecycle-and-attention.md` — disabled hosts, session resume, background
+- `lifecycle-and-attention.md` — disabled hosts, session resume, keep screen on, background
   keep-alive + `BGAppRefreshTask`, attention alerts and notification rules.
 - `mosh.md` — the clean-room mosh transport.
 - `bind-host.md` — Bind Host flow + `mpx` CLI distribution.

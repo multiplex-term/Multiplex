@@ -246,6 +246,7 @@ final class SettingsViewController: UIViewController {
             ),
             makeWindowModeSection(),
             makeRendererSection(),
+            makeScreenSection(),
             voiceInputSection,
             makeConnectionStatsSection(),
             makeAlertsSection(state),
@@ -490,6 +491,31 @@ final class SettingsViewController: UIViewController {
                 """),
             rows: [control]
         )
+    }
+
+    /// iPhone and iPad: Vision Pro's display never idles out under the user.
+    private func makeScreenSection() -> UIView? {
+        #if os(visionOS)
+        return nil
+        #else
+        // Writes through the center so an open terminal starts or stops
+        // holding the display the moment the row flips.
+        let control = SettingsBooleanRow(
+            title: String(localized: "Keep screen on"),
+            isOn: ScreenAwakeCenter.shared.isEnabled
+        ) { enabled in
+            ScreenAwakeCenter.shared.setEnabled(enabled)
+        }
+        control.accessibilityIdentifier = "settings.keepScreenOn"
+        return SettingsSectionView(
+            title: String(localized: "Screen"),
+            detail: String(localized: """
+                Stops the display from dimming and locking while a terminal or the file viewer \
+                is on screen. The deck alone still sleeps as usual. Uses more battery.
+                """),
+            rows: [control]
+        )
+        #endif
     }
 
     private func makeConnectionStatsSection() -> UIView {

@@ -500,6 +500,12 @@ final class TerminalWindowViewController: UIViewController,
         noteActiveSessionOpened()
         restoreActiveTerminalFocusIfOwner()
         presentPendingFeatureIfPossible()
+        // A classic window always shows a terminal or ▤ tab; inside the
+        // Shell, the shell knows whether its terminal pane is the one on
+        // screen and reports for it.
+        if shell == nil {
+            ScreenAwakeCenter.shared.setShowing(true, owner: self, view: view)
+        }
         #if !os(visionOS)
         startWindowPositionWatchIfNeeded()
         #endif
@@ -507,6 +513,7 @@ final class TerminalWindowViewController: UIViewController,
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
+        ScreenAwakeCenter.shared.setShowing(false, owner: self, view: view)
         #if !os(visionOS)
         stopWindowPositionWatch()
         #endif

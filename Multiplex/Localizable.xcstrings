@@ -7390,6 +7390,22 @@
         }
       }
     },
+    "Keep screen on" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "画面をオンのままにする"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保持螢幕開啟"
+          }
+        }
+      }
+    },
     "Keep terminals alive through headset sleep, network roaming and IP changes." : {
       "localizations" : {
         "ja" : {
@@ -12488,6 +12504,22 @@
         }
       }
     },
+    "Screen" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "画面"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "螢幕"
+          }
+        }
+      }
+    },
     "Script" : {
       "localizations" : {
         "ja" : {
@@ -14060,6 +14092,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "停止載入"
+          }
+        }
+      }
+    },
+    "Stops the display from dimming and locking while a terminal or the file viewer is on screen. The deck alone still sleeps as usual. Uses more battery." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ターミナルまたはファイルビューアが表示されている間は、画面が暗くなったり自動ロックされたりしません。Deckだけのときは通常どおりスリープします。バッテリー消費が増えます。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "終端機或檔案檢視器顯示在螢幕上時，螢幕不會變暗或自動鎖定。只顯示 Deck 時仍會照常進入睡眠。會較耗電。"
           }
         }
       }

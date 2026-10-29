@@ -47,6 +47,12 @@ final class SettingsUIKitTests: XCTestCase {
         // Window mode is the iPad's single-window opt-in; the iPhone is
         // always the Shell and visionOS never is, so neither shows it.
         let windowMode = ShellModeDecision.Idiom.device == .pad ? ["Window mode"] : []
+        // Keep screen on: Vision Pro's display never idles out under the user.
+        #if os(visionOS)
+        let screen: [String] = []
+        #else
+        let screen = ["Screen"]
+        #endif
         XCTAssertEqual(headers.compactMap(\.accessibilityLabel), [
             "Appearance",
             "Current theme",
@@ -54,6 +60,7 @@ final class SettingsUIKitTests: XCTestCase {
             "Your themes",
         ] + windowMode + [
             "Terminal renderer",
+        ] + screen + [
             "Voice input",
             "Connection stats",
             "Agent alerts",

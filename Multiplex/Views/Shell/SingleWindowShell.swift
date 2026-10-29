@@ -629,6 +629,7 @@ final class SingleWindowShellViewController: UIViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         externalCoordinator?.attach()
+        updateScreenAwake()
         #if os(iOS)
         attachBackSwipeRecognizer()
         startWindowPositionWatchIfNeeded()
@@ -637,6 +638,7 @@ final class SingleWindowShellViewController: UIViewController {
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
+        updateScreenAwake()
         #if os(iOS)
         if view.window == nil { detachBackSwipeRecognizer() }
         windowPositionWatch.stop()
@@ -1342,11 +1344,22 @@ final class SingleWindowShellViewController: UIViewController {
             panel.updateWidth(metrics.deckFrame.width)
             panel.updateHeaderCornerInset(metrics.deckHeaderChrome.cornerInset)
         }
+        updateScreenAwake(metrics)
         guard shellState.presentation != presentation else { return }
         shellState.presentation = presentation
         shellRootView.bareChrome = presentation.bareChrome
         if !deferDeck { updateNativeDeckController() }
         updateNativeTerminalController()
+    }
+
+    /// Keep screen on follows the terminal pane, not the shell: a compact
+    /// shell paged to the deck lets the device sleep like the deck window.
+    private func updateScreenAwake(_ metrics: SingleWindowShellLayoutMetrics? = nil) {
+        let metrics = metrics ?? currentLayoutMetrics
+        let showsTerminal = view.window != nil
+            && !shellState.terminalRoute.tabs.isEmpty
+            && (metrics?.expanded == true || compactShowsTerminal)
+        ScreenAwakeCenter.shared.setShowing(showsTerminal, owner: self, view: view)
     }
 
     private func focusAfterNavigation(
