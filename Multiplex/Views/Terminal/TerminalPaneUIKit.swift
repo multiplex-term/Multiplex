@@ -484,9 +484,14 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
         } else if state.keyboardLocked {
             // Top-center, not top-trailing: the trailing slot carries the
             // window's own chrome (the backend switch), which the tip covered.
+            // Full screen hides the rail and its keyboard key, so the tip
+            // carries the way back to typing itself.
             let locked = TerminalKeyboardLockedView(
                 isDictating: state.isDictating,
-                toggleDictation: { [weak controller] in controller?.toggleDictation() }
+                toggleDictation: { [weak controller] in controller?.toggleDictation() },
+                unlock: configuration.keyRailHidden
+                    ? { [weak controller] in controller?.toggleKeyboardLock() }
+                    : nil
             )
             locked.accessibilityIdentifier = "terminalPane.keyboardLocked"
             topCenterStack.addArrangedSubview(locked)
@@ -1218,7 +1223,11 @@ extension TerminalContextBarView {
 #if !os(visionOS)
 @MainActor
 final class TerminalKeyboardLockedView: UIKitTallyBorderedView {
-    init(isDictating: Bool, toggleDictation: @escaping () -> Void) {
+    init(
+        isDictating: Bool,
+        toggleDictation: @escaping () -> Void,
+        unlock: (() -> Void)? = nil
+    ) {
         super.init(frame: .zero)
         backgroundColor = UIKitChassis.bezel
         layer.cornerRadius = 8
@@ -1294,7 +1303,32 @@ final class TerminalKeyboardLockedView: UIKitTallyBorderedView {
             mic.heightAnchor.constraint(equalToConstant: 32),
         ])
 
-        let row = UIStackView(arrangedSubviews: [labelShell, divider, mic])
+        var unlockButton: UIButton?
+        if let unlock {
+            let button = UIButton(type: .custom)
+            button.setImage(UIImage(systemName: "lock.open"), for: .normal)
+            button.setPreferredSymbolConfiguration(
+                UIImage.SymbolConfiguration(
+                    pointSize: 12 * Theme.typeScale,
+                    weight: .semibold
+                ),
+                forImageIn: .normal
+            )
+            button.tintColor = UIKitChassis.signal2
+            button.accessibilityLabel = String(localized: "Unlock Keyboard")
+            button.accessibilityIdentifier = "terminalPane.keyboardLocked.unlock"
+            button.addAction(UIAction { _ in unlock() }, for: .touchUpInside)
+            button.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                button.widthAnchor.constraint(equalToConstant: 36),
+                button.heightAnchor.constraint(equalToConstant: 32),
+            ])
+            unlockButton = button
+        }
+
+        let row = UIStackView(
+            arrangedSubviews: [labelShell, divider] + [unlockButton, mic].compactMap { $0 }
+        )
         row.axis = .horizontal
         row.alignment = .center
         row.spacing = 0
