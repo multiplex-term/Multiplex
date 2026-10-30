@@ -1,9 +1,11 @@
-Multiplex 1.5 — the shell follows iPhone Duo's fold, iPad can run in a single window, and you can talk to your agent through the message box with background noise filtered out.
+Multiplex 1.5.1 — give the whole window to the terminal, and select text in herdr panes the way a mouse drag does on your desktop.
 
-• iPhone Duo: on the closed display the chips stack beside the clock, on the camera's side in landscape. Folded as a book, the deck takes the left page and the terminal the right; folded as a laptop, the terminal sits above the fold and the deck below. HIDE hands the whole display to the terminal and stays hidden when you rotate. In Split View a half behaves like an iPhone.
-• iPad single-window mode: Settings ▸ Window mode ▸ Single-window mode runs Multiplex in one window, as on iPhone — the deck beside the terminal, sessions as tabs. Off by default; it takes effect the next time Multiplex launches.
-• A mic in the message box: tap it beside the send button and talk; words land as you speak, and sending mid-sentence waits for the last words.
-• Noise reduction: Settings ▸ Voice input downloads a model that filters background noise out of the microphone before dictation hears it.
-• Dictation listens through AirPods or any Bluetooth headset mic when one is connected.
-• Small iPhones in landscape give the terminal the full width; swipe from the edge to return to the deck.
-• Hermes Agent is recognized again on hosts with its current installer, and Claude Code's folder-trust question now raises an agent alert.
+• Full screen: three-dot menu ▸ Full Screen hands the window to the terminal. The rails, tabs, and keys step aside and the agent bar folds to its dot; one button in the corner brings them back.
+• herdr: on herdr 0.9 and later, Select Text stays inside the pane you pressed. Multi-line copies no longer pick up the sidebar's border or lose the pane's right edge.
+• herdr: long-press text and keep going into a drag to let herdr select it, the way a mouse drag works in iTerm or Ghostty. Lifting copies it to the clipboard.
+• herdr: the HRDR panel can show or hide herdr's sidebar (Toggle Sidebar under Workspaces).
+• Keep screen on: Settings ▸ Screen ▸ Keep screen on keeps the display lit while a terminal or the file viewer is on screen, instead of locking on Auto-Lock. Off by default.
+• Smaller Text and Larger Text leave the three-dot menu open, so you can keep stepping the size.
+• A deck you hid with HIDE stays hidden when you rotate the iPhone or leave the app and come back.
+• iPhone Duo: the file viewer's CLOSE clears the clock on the open display, and the TMUX / HRDR panel gets the full screen on the closed display.
+• A host you add, or bind with mpx, lands at the top of the host list.

@@ -29,22 +29,23 @@ final class ReleaseNotesViewUIKitTests: XCTestCase {
         XCTAssertNotNil(chip(named: "whatsNew.done", in: controller.view))
     }
 
-    /// iPhone Duo leads the phone's card and never reaches Vision Pro, whose
-    /// card names what it left out instead.
-    func testThePhoneCardShowsIPhoneDuoAndTheVisionCardDoesNot() {
+    /// Keep screen on reaches the phone's card and never Vision Pro's, whose
+    /// fourth row is the deck buttons' pinch fix instead.
+    func testThePhoneCardShowsKeepScreenOnAndTheVisionCardDoesNot() {
         let vision = WhatsNewViewController(platform: .vision)
         render(vision, width: 620, height: 700)
         let renderedVision = renderedText(in: vision.view).joined(separator: "\n")
-        XCTAssertFalse(renderedVision.contains("THE SHELL FOLLOWS IPHONE DUO"))
-        XCTAssertTrue(renderedVision.contains("A MIC IN THE MESSAGE BOX"))
-        XCTAssertTrue(renderedVision.contains("Claude Code's folder-trust question"))
+        XCTAssertFalse(renderedVision.contains("KEEP THE SCREEN ON"))
+        XCTAssertTrue(renderedVision.contains("FULL SCREEN FOR THE TERMINAL"))
+        XCTAssertTrue(renderedVision.contains("DECK BUTTONS ANSWER EVERY PRESS"))
+        XCTAssertTrue(renderedVision.contains("Toggle Sidebar in the HRDR panel"))
 
         let phone = WhatsNewViewController(platform: .phone)
         render(phone, width: 375, height: 700)
         let renderedPhone = renderedText(in: phone.view).joined(separator: "\n")
-        XCTAssertTrue(renderedPhone.contains("THE SHELL FOLLOWS IPHONE DUO"))
-        XCTAssertTrue(renderedPhone.contains("A MIC IN THE MESSAGE BOX"))
-        XCTAssertTrue(renderedPhone.contains("AirPods dictation"))
+        XCTAssertTrue(renderedPhone.contains("KEEP THE SCREEN ON"))
+        XCTAssertTrue(renderedPhone.contains("FULL SCREEN FOR THE TERMINAL"))
+        XCTAssertTrue(renderedPhone.contains("iPhone Duo fixes"))
     }
 
     func testBothChipsReportThroughTheirOwnCallback() throws {
@@ -91,7 +92,7 @@ final class ReleaseNotesViewUIKitTests: XCTestCase {
     // MARK: The full record
 
     /// Every release's record, each under its own header — a reader updating
-    /// from 1.2 straight to 1.5 is owed every intervening release's story too.
+    /// from 1.2 straight to 1.5.1 is owed every intervening release's story too.
     func testTheLogCarriesEveryReleasesChangesForItsPlatform() {
         let controller = ReleaseLogViewController(platform: .pad)
         render(controller, width: 720, height: 4_800)

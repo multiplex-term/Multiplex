@@ -1,20 +1,3 @@
-NEW SINCE 1.5.0
-• herdr: Select Text stays inside the pane you pressed on herdr 0.9 and later. A multi-line copy no longer picks up the sidebar's border or drops the pane's right edge, and a zoomed pane selects as the whole pane.
-• herdr: long-press text and keep going into a drag to select with herdr itself, the way a mouse drag works in iTerm or Ghostty. herdr keeps the selection inside the pane and puts it on the clipboard when you lift. A long press that doesn't move still opens SELECT / SELECT ALL / PASTE.
-• Full screen: three-dot menu → Full Screen hands the window to the terminal; the rails, tabs, and keys step aside, and the agent bar folds to its dot. One button in the corner brings them back, and a locked keyboard unlocks from its KEYBOARD LOCKED tip.
-• herdr: the HRDR panel can now show or hide herdr's sidebar (Toggle Sidebar under Workspaces).
-• iPhone Duo: the file viewer's top bar stops short of the clock and Wi-Fi glyphs on the open display held upright, like a terminal's, so CLOSE is no longer hidden under them.
-• Single-window mode: a deck you hid with HIDE stays hidden when you rotate between landscape and portrait (iPhone Duo open, Pro Max). It still comes back if you went to the deck in portrait, or when you open the Duo from the closed display. Leaving the app and coming back keeps it hidden too.
-• Hosts: a host you add, or bind with mpx, now lands at the top of the host list instead of the bottom.
-• iPhone Duo: on the closed display, the TMUX / HRDR panel opens beside the side column instead of below it, so it gets the screen's full height and width; its right edge no longer runs under the panel's pointer.
-• Deck: a host's SHELL and three-dot buttons answer a press anywhere on them. A press near their top edge, where Vision Pro often lands a pinch, used to do nothing.
-• Settings → Screen → Keep screen on (iPhone and iPad): the display stays lit while a terminal or the file viewer is on screen, instead of dimming and locking on the device's Auto-Lock timer. The deck alone still sleeps as usual. Off by default.
-• Terminal: three-dot menu → Smaller Text / Larger Text leaves the menu open, so you can tap again to keep stepping the size while you watch the terminal.
-
-PLEASE TRY
-1. On a host running herdr 0.9 or later, long-press text in a pane, tap SELECT ALL, then COPY and paste it into Notes; no sidebar text or border characters should come along, and the pane's last columns should be there. Try it with the sidebar collapsed (Ctrl-B, then b) and expanded, in a split, and on a zoomed pane.
-2. In a herdr pane running an agent (Hermes, Claude Code), long-press a reply and, without lifting, drag across a few lines; herdr should highlight them and show "copied to clipboard" when you lift. Paste into Notes and compare with the same drag in iTerm or Ghostty on the host; the text should match. Then long-press and lift without moving; the SELECT block should stay.
-3. In a terminal running an agent, open the three-dot menu → Full Screen. Only the terminal, the agent bar's dot, and one button should remain: top right on iPhone and iPad (it fades after a moment), EXIT at the bottom right on Vision Pro. Type, scroll, and open the agent dot as usual, then press the button; the rails, keys, and agent bar should come back as they were. On iPhone the status bar hides too. On iPhone Duo try it closed (the side column stays), open, as a book, and as a laptop.
-4. Set Auto-Lock to 30 seconds in the Settings app, turn on Settings → Screen → Keep screen on in Multiplex, and leave a terminal untouched for a minute; the screen should stay lit. Open a file in the file viewer and wait again. Then go back to the deck (or turn the setting off) and the screen should dim and lock on schedule.
+NEW SINCE 1.5.1
 
 Feedback: screenshot in TestFlight

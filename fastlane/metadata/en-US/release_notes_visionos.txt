@@ -1,7 +1,9 @@
-Multiplex 1.5 — talk to your agent through the message box, with background noise filtered out and AirPods doing the listening.
+Multiplex 1.5.1 — give the whole window to the terminal, and select text in herdr panes the way a mouse drag does on your desktop.
 
-• A mic in the message box: tap it beside the send button and talk; words land as you speak, and sending mid-sentence waits for the last words.
-• Noise reduction: Settings ▸ Voice input downloads a model that filters background noise out of the microphone before dictation hears it.
-• Dictation listens through AirPods or any Bluetooth headset mic when one is connected.
-• Hermes Agent is recognized again on hosts with its current installer, and Claude Code's folder-trust question now raises an agent alert.
-• A NO TMUX or NO HERDR tile's hint wraps across the tile instead of one character per line.
+• Full screen: three-dot menu ▸ Full Screen hands the window to the terminal. The rails, tabs, keys, and ornaments step aside and the agent bar folds to its dot; EXIT in the corner brings them back.
+• herdr: on herdr 0.9 and later, Select Text stays inside the pane you pressed. Multi-line copies no longer pick up the sidebar's border or lose the pane's right edge.
+• herdr: long-press text and keep going into a drag to let herdr select it, the way a mouse drag works in iTerm or Ghostty. Lifting copies it to the clipboard.
+• herdr: the HRDR panel can show or hide herdr's sidebar (Toggle Sidebar under Workspaces).
+• A host's SHELL and three-dot buttons on the deck answer a pinch anywhere on them; one near their top edge used to do nothing.
+• Smaller Text and Larger Text leave the three-dot menu open, so you can keep stepping the size.
+• A host you add, or bind with mpx, lands at the top of the host list.
