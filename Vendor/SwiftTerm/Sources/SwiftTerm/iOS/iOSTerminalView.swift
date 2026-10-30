@@ -2851,6 +2851,20 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 #if canImport(MetalKit)
         if useMetalRenderer, let metalView = metalView {
             metalView.frame = bounds
+#if os(iOS)
+            // Multiplex patch: pin the drawable to the scale the renderer lays
+            // the grid out at (`metalRenderingScaleFactor()`, 2 on iPad). MTKView
+            // sizes its drawable by its own contentScaleFactor, which it takes
+            // from the screen's nativeScale — 1.72 under iPad display zoom
+            // (measured on device). The grid built at 2x then overflowed the
+            // smaller texture from its bottom-left origin: rows magnified,
+            // the top row cut off, and taps drifting off the drawn rows.
+            // 1.18 set `drawableSize = bounds * scale` for the same reason.
+            let renderScale = max(traitCollection.displayScale, backingScaleFactor())
+            if metalView.contentScaleFactor != renderScale {
+                metalView.contentScaleFactor = renderScale
+            }
+#endif
             frameDriver.markDirty()
         } else {
 	    if sizeChanged || originChanged {

@@ -228,7 +228,21 @@ input encoding, or terminal rendering.
       `FrameColor` resolves it against the view's traits. Sim-verified
       matching CG pixel-for-pixel in DARK/LIGHT/GLASS at 1.18; not re-run
       at 1.99, and selection, marked text, and kitty images under Metal are
-      still unverified. Do NOT judge Metal
+      still unverified. **iOS pins the MTKView's `contentScaleFactor` to the
+      layout scale** (`max(displayScale, backingScaleFactor())`, in
+      `layoutSubviews`): MTKView otherwise takes the screen's `nativeScale`,
+      1.72 under iPad display zoom (More Space) against a 2.0 display scale
+      (measured on an iPad Pro 13", 2026-10-30). The renderer lays the grid
+      out at `metalRenderingScaleFactor()` (2.0) into that 1.72x texture, so
+      the grid was magnified ~1.16x from its bottom-left origin — top rows
+      cut off, taps drifting off the drawn rows, from the first frame, every
+      window size, tmux and herdr alike. Shipped in the 1.5.1 build, never in
+      1.5.0: 1.18 set `drawableSize = bounds * scale` itself. The simulator
+      cannot show it (nativeScale == scale there) — verify on a device with
+      display zoom. Upstream #739 (1.99.1) is also backported: the viewport
+      comes from the drawable TEXTURE, not the fractional `drawableSize`.
+      Drop that backport when the fork moves to ≥ 1.99.1; keep the scale pin
+      unless upstream sizes the drawable from the layout scale. Do NOT judge Metal
       performance in the simulator: `com.apple.metal.simulator` presents at
       ~2–4 fps under streaming load with the row cache warm (rows rebuilt
       0/58) — the stall is the sim's present path, not the renderer; only a

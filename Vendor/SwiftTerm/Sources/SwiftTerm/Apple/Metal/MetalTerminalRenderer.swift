@@ -1178,7 +1178,13 @@ final class MetalTerminalRenderer {
             return
         }
         let drawable = drawableFrame.drawable
-        let drawableSize = drawableFrame.geometry.drawableSize
+        // Multiplex patch (backport of upstream #739, shipped in 1.99.1): the
+        // viewport must match the texture we render into. Under a non-integral
+        // size the reported drawableSize is fractional while the texture is
+        // truncated to whole pixels; using drawableSize shifts every cell and
+        // lets the sampler bleed neighbouring atlas glyphs. The 1.72x drawable
+        // under iPad display zoom is fractional the same way.
+        let drawableSize = CGSize(width: drawable.texture.width, height: drawable.texture.height)
 #if canImport(os)
         let buildID = OSSignpostID(log: MetalTerminalRenderer.profileLog)
         if MetalTerminalRenderer.profileEnabled {
