@@ -34,10 +34,13 @@ struct SingleWindowShellPresentation: Equatable {
     var deckSafeArea = UIEdgeInsets.zero
     var terminalAvailableWidth: CGFloat = 0
     var terminalSafeArea = UIEdgeInsets.zero
+    /// What the terminal's bottom rails add to clear the display's corners
+    /// (iPhone Duo).
+    var terminalBottomCornerClearance = BottomCornerClearance.none
     var railOwnsBottomSafeArea = false
     var deckControl = ShellDeckControl.back
     var terminalFocusAllowed = false
-    /// The device reports a hinge (iPhone Duo).
+    /// iPhone Duo (`SingleWindowShellViewController.isFoldable`).
     var foldable = false
     /// The display is compact width: the Duo's closed display (a Split View
     /// half on the inner display is not).
@@ -105,6 +108,8 @@ struct SingleWindowShellLayoutMetrics: Equatable {
     /// display corner it owns, and iPhone Duo's inner-portrait status band.
     var deckHeaderChrome = ShellHeaderChrome.none
     var terminalRailChrome = ShellHeaderChrome.none
+    /// The display's bottom corners the terminal pane reaches.
+    var terminalBottomCorners = ShellBottomCorners()
 
     /// The expanded shell shows the deck rail beside the terminal.
     var hasDeckColumn: Bool { expanded && deckFrame.width > 0 }
@@ -161,6 +166,7 @@ enum SingleWindowShellNativeLayout {
         foldable: Bool = false,
         displayHorizontalSizeClass: ShellSizeClass? = nil,
         ownsLeadingDisplayCorner: Bool = true,
+        ownsTrailingDisplayCorner: Bool = true,
         windowControlsInset: CGFloat = 0,
         terminalFullScreen: Bool = false
     ) -> SingleWindowShellLayoutMetrics {
@@ -325,6 +331,11 @@ enum SingleWindowShellNativeLayout {
             terminalRailChrome: ShellHeaderChrome(
                 cornerInset: terminalX == 0 && (expanded || compactShowsTerminal) ? cornerInset : 0,
                 bandHeight: topBand
+            ),
+            // Above the laptop fold the pane has no display corners at all.
+            terminalBottomCorners: ShellBottomCorners(
+                left: consoleFrame == nil && terminalOriginX == 0 && ownsLeadingDisplayCorner,
+                right: consoleFrame == nil && ownsTrailingDisplayCorner
             )
         )
         // A full-screen terminal takes the whole shell while it is on screen
@@ -1091,9 +1102,10 @@ final class SingleWindowShellViewController: UIViewController {
             compactShowsTerminal: compactShowsTerminal,
             compactBackSwipeOffset: compactBackSwipeOffset,
             compactBackSwipeActive: compactBackSwipeActive,
-            foldable: hingePresent,
+            foldable: isFoldable,
             displayHorizontalSizeClass: testLayoutInput == nil ? displayHorizontalSizeClass : nil,
             ownsLeadingDisplayCorner: testLayoutInput == nil ? (windowFrameOnScreen.map { $0.minX < 1 } ?? true) : true,
+            ownsTrailingDisplayCorner: testLayoutInput == nil ? windowReachesDisplayTrailingEdge : true,
             windowControlsInset: chrome?.controlsInset ?? 0,
             terminalFullScreen: terminalFullScreen
         )
@@ -1171,14 +1183,49 @@ final class SingleWindowShellViewController: UIViewController {
     private var displayHorizontalSizeClass: ShellSizeClass? {
         #if os(iOS)
         guard let screen = shellRootView.window?.windowScene?.screen else { return nil }
+        // The screen's own trait reads regular on the closed display in
+        // landscape, where the window's stays compact.
+        if displayIsClosed { return .compact }
         return ShellSizeClass(screen.traitCollection.horizontalSizeClass)
         #else
         return nil
         #endif
     }
 
+    private var windowReachesDisplayTrailingEdge: Bool {
+        #if os(iOS)
+        guard let frame = windowFrameOnScreen, let screen = shellRootView.window?.windowScene?.screen else {
+            return true
+        }
+        return frame.maxX > screen.bounds.width - 1
+        #else
+        return true
+        #endif
+    }
+
+    /// The display's width class, the window's until it has a screen.
+    private var displaySizeClass: ShellSizeClass {
+        displayHorizontalSizeClass ?? ShellSizeClass(traitCollection.horizontalSizeClass)
+    }
+
     private var displayIsCompact: Bool {
-        (displayHorizontalSizeClass ?? ShellSizeClass(traitCollection.horizontalSizeClass)) == .compact
+        displaySizeClass == .compact
+    }
+
+    /// A launch straight into closed landscape never sees a hinge.
+    private var isFoldable: Bool {
+        hingePresent || displayIsClosed
+    }
+
+    /// `SingleWindowShellLayout.isClosedDisplay`; false until the shell has a
+    /// screen to measure.
+    private var displayIsClosed: Bool {
+        #if os(iOS)
+        guard let screen = shellRootView.window?.windowScene?.screen else { return false }
+        return SingleWindowShellLayout.isClosedDisplay(idiom: .device, screenSize: screen.bounds.size)
+        #else
+        return false
+        #endif
     }
 
     private func installHingeObservation() {
@@ -1310,12 +1357,29 @@ final class SingleWindowShellViewController: UIViewController {
         // The window's own strips: a Split View half away from the system
         // column has none and keeps the top rail.
         let windowSafeArea = testLayoutInput?.safeArea ?? shellRootView.safeAreaInsets
+        let isLandscape = shellRootView.bounds.width > shellRootView.bounds.height
         let sideColumn = ShellSideColumn.resolve(
             traits: traitCollection,
-            isLandscape: shellRootView.bounds.width > shellRootView.bounds.height,
-            foldable: hingePresent,
+            isLandscape: isLandscape,
+            foldable: isFoldable,
             leadingSafeArea: windowSafeArea.left,
             trailingSafeArea: windowSafeArea.right
+        )
+        let closedDisplay = displayIsClosed
+        let cornerClearance = SingleWindowShellLayout.bottomCornerClearance(
+            idiom: .device,
+            closedDisplay: closedDisplay,
+            displayHorizontalSizeClass: displaySizeClass,
+            verticalSizeClass: ShellSizeClass(traitCollection.verticalSizeClass),
+            isLandscape: isLandscape,
+            columnEdge: sideColumn.edge,
+            corners: metrics.terminalBottomCorners
+        )
+        var terminalRailChrome = metrics.terminalRailChrome
+        terminalRailChrome.trailingCornerInset = SingleWindowShellLayout.topTrailingCornerClearance(
+            closedDisplay: closedDisplay,
+            isLandscape: isLandscape,
+            columnEdge: sideColumn.edge
         )
         let presentation = SingleWindowShellPresentation(
             expanded: metrics.expanded,
@@ -1323,13 +1387,14 @@ final class SingleWindowShellViewController: UIViewController {
             deckSafeArea: metrics.deckSafeArea,
             terminalAvailableWidth: metrics.terminalAvailableWidth,
             terminalSafeArea: metrics.terminalSafeArea,
+            terminalBottomCornerClearance: cornerClearance,
             railOwnsBottomSafeArea: metrics.railOwnsBottomSafeArea,
             deckControl: metrics.deckToggles && columnPanel == nil
                 ? (deckRailVisible ? .hide : .show)
                 : .back,
             terminalFocusAllowed: (metrics.expanded || compactShowsTerminal)
                 && terminalFocusReady,
-            foldable: hingePresent,
+            foldable: isFoldable,
             compactWidth: displayIsCompact,
             sideColumn: sideColumn,
             deckActionColumn: SingleWindowShellLayout.deckActionColumn(
@@ -1337,7 +1402,7 @@ final class SingleWindowShellViewController: UIViewController {
                 deckSpansShell: metrics.deckPresentation == .shellCompact
             ),
             deckHeaderChrome: metrics.deckHeaderChrome,
-            terminalRailChrome: metrics.terminalRailChrome,
+            terminalRailChrome: terminalRailChrome,
             columnAvailable: metrics.columnAvailable
         )
         if let panel = columnPanel?.controller as? SidePanelViewController {
@@ -1523,6 +1588,7 @@ final class SingleWindowShellViewController: UIViewController {
             deckControl: presentation.deckControl,
             availableWidth: presentation.terminalAvailableWidth,
             contentSafeArea: presentation.terminalSafeArea,
+            bottomCornerClearance: presentation.terminalBottomCornerClearance,
             railChrome: presentation.terminalRailChrome,
             railOwnsBottomSafeArea: presentation.railOwnsBottomSafeArea,
             columnAvailable: presentation.columnAvailable,

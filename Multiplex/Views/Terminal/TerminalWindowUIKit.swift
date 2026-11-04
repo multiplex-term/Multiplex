@@ -19,6 +19,8 @@ struct TerminalWindowShellConfiguration {
     var deckControl: ShellDeckControl
     var availableWidth: CGFloat
     var contentSafeArea: UIEdgeInsets = .zero
+    /// What the bottom rails add to clear the display's corners (iPhone Duo).
+    var bottomCornerClearance = BottomCornerClearance.none
     /// What the UMD rail alone clears beyond the safe area (a bare display
     /// corner, iPhone Duo's status band); never reaches the pane.
     var railChrome = ShellHeaderChrome.none
@@ -43,12 +45,24 @@ struct TerminalWindowShellConfiguration {
     var revealTab: (UUID) -> Void
     var tabsEmptied: () -> Void
     var terminalFocusAllowed: Bool
+
+    /// `contentSafeArea` as the pane's key rail reads it: through the side
+    /// strip and off the display's corners.
+    var keyRailSafeArea: UIEdgeInsets {
+        sideColumn.keyRailSafeArea(paneSafeArea: contentSafeArea, cornerClearance: bottomCornerClearance)
+    }
+
+    /// `contentSafeArea` as a ▤/⌗ tab's bottom rail reads it.
+    var auxiliaryRailSafeArea: UIEdgeInsets {
+        bottomCornerClearance.applied(to: contentSafeArea)
+    }
 }
 
 private struct TerminalWindowShellPresentationKey: Equatable {
     var deckControl: ShellDeckControl
     var availableWidth: CGFloat
     var contentSafeArea: UIEdgeInsets
+    var bottomCornerClearance: BottomCornerClearance
     var railChrome: ShellHeaderChrome
     var railOwnsBottomSafeArea: Bool
     var columnAvailable: Bool
@@ -61,6 +75,7 @@ private struct TerminalWindowShellPresentationKey: Equatable {
         deckControl = shell.deckControl
         availableWidth = shell.availableWidth
         contentSafeArea = shell.contentSafeArea
+        bottomCornerClearance = shell.bottomCornerClearance
         railChrome = shell.railChrome
         railOwnsBottomSafeArea = shell.railOwnsBottomSafeArea
         columnAvailable = shell.columnAvailable
@@ -607,8 +622,18 @@ final class TerminalWindowViewController: UIViewController,
         return shell.sideColumn.frame(
             in: rootView.bounds,
             strip: edge == .trailing ? shell.contentSafeArea.right : shell.contentSafeArea.left,
-            obstruction: paneKeyboardObstruction
+            obstruction: paneKeyboardObstruction + keyRailHeight
         )
+    }
+
+    /// The key rail's height; full screen folds the rail and hands the foot of
+    /// the column's strip back.
+    private var keyRailHeight: CGFloat {
+        #if os(visionOS)
+        return 0
+        #else
+        return TerminalKeyBar.barHeight(spendsBottomStrip: railOwnsBottomSafeArea, hidden: isFullScreen)
+        #endif
     }
 
     /// The trait-based default size, until A−/A+ is pressed in this window.
@@ -798,6 +823,11 @@ final class TerminalWindowViewController: UIViewController,
         #endif
     }
 
+    /// What a ▤/⌗ tab's bottom rail insets by.
+    private var auxiliaryRailSafeArea: UIEdgeInsets {
+        shell?.auxiliaryRailSafeArea ?? contentSafeArea
+    }
+
     /// What the rail is asked to clear. The shell hands its panes' insets
     /// straight through; the classic window adds the window-control pill and
     /// window-edge clearance — see `TerminalClassicRailInsets`.
@@ -805,6 +835,7 @@ final class TerminalWindowViewController: UIViewController,
         if let shell {
             var insets = shell.contentSafeArea
             insets.left += shell.railChrome.cornerInset
+            insets.right += shell.railChrome.trailingCornerInset
             return insets
         }
         #if os(visionOS)
@@ -2071,7 +2102,7 @@ final class TerminalWindowViewController: UIViewController,
     private var paneChromeBottom: CGFloat {
         rootView.paneContainer.frame.maxY
             - paneKeyboardObstruction
-            - TerminalKeyBar.barHeight(spendsBottomStrip: railOwnsBottomSafeArea, hidden: isFullScreen)
+            - keyRailHeight
     }
     #endif
 
@@ -2475,7 +2506,7 @@ extension TerminalWindowViewController {
             guard let viewport = workspace.viewportController(for: tab.id) else { return nil }
             return ViewportPaneViewController(
                 controller: viewport,
-                contentSafeArea: contentSafeArea,
+                contentSafeArea: auxiliaryRailSafeArea,
                 showsInWindowRail: showsInWindowAuxiliaryRail,
                 ornamentRailDidChange: { [weak self] in
                     self?.auxiliaryOrnamentDidChange()
@@ -2487,7 +2518,7 @@ extension TerminalWindowViewController {
             guard let fileViewer = workspace.fileViewerController(for: tab.id) else { return nil }
             return FileViewerPaneViewController(
                 controller: fileViewer,
-                contentSafeArea: contentSafeArea,
+                contentSafeArea: auxiliaryRailSafeArea,
                 isActive: tab.id == activeTab?.id,
                 showsInWindowRail: showsInWindowAuxiliaryRail,
                 ornamentRailDidChange: { [weak self] in
@@ -2517,7 +2548,7 @@ extension TerminalWindowViewController {
             terminal.update(configuration: paneConfiguration(for: tab, isActive: isActive))
         } else if let viewport = pane as? ViewportPaneViewController {
             viewport.update(
-                contentSafeArea: contentSafeArea,
+                contentSafeArea: auxiliaryRailSafeArea,
                 close: { [weak self] in self?.closeTab(tab.id) },
                 ornamentRailDidChange: { [weak self] in
                     self?.auxiliaryOrnamentDidChange()
@@ -2525,7 +2556,7 @@ extension TerminalWindowViewController {
             )
         } else if let fileViewer = pane as? FileViewerPaneViewController {
             fileViewer.update(
-                contentSafeArea: contentSafeArea,
+                contentSafeArea: auxiliaryRailSafeArea,
                 isActive: isActive,
                 openInNewTab: { [weak self] row in
                     self?.openFileInNewViewerTab(row, after: tab.id)
@@ -2552,6 +2583,7 @@ extension TerminalWindowViewController {
             theme: resolvedTerminalTheme,
             bottomChromeHeight: terminalBottomChromeHeight,
             contentSafeArea: paneContentSafeArea,
+            keyRailSafeArea: isFullScreen ? .zero : shell?.keyRailSafeArea ?? contentSafeArea,
             // A full-screen pane spends the home strip exactly where the
             // key rail would (`TerminalFullScreenInsets.spentBottomStrip`).
             railOwnsBottomSafeArea: railOwnsBottomSafeArea,
@@ -2770,7 +2802,12 @@ extension TerminalWindowViewController {
         return nil
         #else
         guard profile.hasKeyRail else { return nil }
-        if let shell { return shell.availableWidth }
+        if let shell {
+            // The rail's insets are not the grid's (`keyRailSafeArea`).
+            return shell.availableWidth
+                + (shell.contentSafeArea.left - shell.keyRailSafeArea.left)
+                + (shell.contentSafeArea.right - shell.keyRailSafeArea.right)
+        }
         // Unmeasurable yet reads as roomy: the key rail keeps its own key
         // until a real width says otherwise.
         guard isViewLoaded else { return .greatestFiniteMagnitude }

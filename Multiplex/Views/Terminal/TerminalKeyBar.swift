@@ -1006,16 +1006,23 @@ enum TerminalKeyBarLayout {
         return result
     }
 
+    /// `returnOnlyWhileLocked`: this rail has RET only because the keyboard is
+    /// locked (a phone). Locking must not change which keys a roomy row shows,
+    /// so RET does not count against a tier on the regular faces and
+    /// `keyFrames` narrows the faces for it. The tight and floor tiers still
+    /// count it: `SingleWindowShellLayout`'s 390 / 420 cutoffs read them.
     static func specification(
         width: CGFloat,
         contentSafeArea: UIEdgeInsets,
         showsTmux: Bool,
-        includesReturn: Bool
+        includesReturn: Bool,
+        returnOnlyWhileLocked: Bool = false
     ) -> Specification {
         let usable = max(0, width - contentSafeArea.left - contentSafeArea.right)
         let candidates = candidates(showsTmux: showsTmux, includesReturn: includesReturn)
         return candidates.first {
-            $0.idealWidth(includesReturn: includesReturn) <= usable + 0.5
+            let returnCounts = includesReturn && !(returnOnlyWhileLocked && $0.metric == .regular)
+            return $0.idealWidth(includesReturn: returnCounts) <= usable + 0.5
         } ?? candidates[candidates.count - 1]
     }
 
@@ -1282,7 +1289,8 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback, KeyBarDropSurface 
                 width: bounds.width,
                 contentSafeArea: contentSafeArea,
                 showsTmux: shortcutBackend != nil,
-                includesReturn: includesReturn
+                includesReturn: includesReturn,
+                returnOnlyWhileLocked: !showsReturnKey
             )
             let signature = RenderSignature(tier: specification.tier, state: state)
             let expectedKeys = specification.keyCount(includesReturn: includesReturn)

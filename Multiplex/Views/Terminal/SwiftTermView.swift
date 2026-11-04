@@ -13,6 +13,9 @@ final class TerminalSurfaceView: UIView {
         var theme: TerminalTheme
         var bottomChromeHeight: CGFloat = 0
         var contentSafeArea: UIEdgeInsets = .zero
+        /// `contentSafeArea` as the key rail reads it (iPhone Duo's closed
+        /// display: the rail runs through the side strip).
+        var keyRailSafeArea: UIEdgeInsets = .zero
         var railOwnsBottomSafeArea = false
         /// The key rail drops its bezel slab and top rule.
         var bareChrome = false
@@ -205,7 +208,7 @@ final class TerminalSurfaceView: UIView {
             },
             shortcutBackend: configuration.shortcutBackend
         )
-        keyBar.contentSafeArea = configuration.contentSafeArea
+        keyBar.contentSafeArea = configuration.keyRailSafeArea
         keyBar.spendsBottomStrip = configuration.railOwnsBottomSafeArea
         keyBar.bareChrome = configuration.bareChrome
         keyBar.keyCommandPlan = configuration.keyCommandPlan
@@ -352,6 +355,7 @@ final class TerminalSurfaceView: UIView {
             Self.terminalInsets.bottom + configuration.bottomChromeHeight
         )
         coordinator.updateContentSafeArea(configuration.contentSafeArea)
+        coordinator.keyBar?.contentSafeArea = configuration.keyRailSafeArea
         coordinator.setRailOwnsBottomSafeArea(configuration.railOwnsBottomSafeArea)
         coordinator.setKeyRailHidden(configuration.keyRailHidden)
         coordinator.keyBar?.bareChrome = configuration.bareChrome
@@ -560,7 +564,6 @@ final class TerminalSurfaceView: UIView {
         /// other, and hiding the deck rail hands the leading band to this
         /// pane. Both change the grid's clearance without rebuilding it.
         func updateContentSafeArea(_ safeArea: UIEdgeInsets) {
-            keyBar?.contentSafeArea = safeArea
             guard let leadingConstraint = terminalLeadingConstraint,
                   let trailingConstraint = terminalTrailingConstraint
             else { return }

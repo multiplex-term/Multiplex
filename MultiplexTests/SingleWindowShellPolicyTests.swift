@@ -276,6 +276,278 @@ final class SingleWindowShellPolicyTests: XCTestCase {
         XCTAssertEqual(leading.centerX(stripWidth: 48), 48)
     }
 
+    func testTheColumnStandsAboveTheKeyRailCrossingItsStrip() {
+        let bounds = CGRect(x: 0, y: 0, width: 466, height: 678)
+        let upright = ShellSideColumn(edge: .trailing, placement: .init(top: 160, bottom: 0))
+        XCTAssertEqual(upright.frame(in: bounds, strip: 84, obstruction: 49).maxY, 629)
+        XCTAssertEqual(
+            upright.frame(in: bounds, strip: 84, obstruction: 252 + 49).maxY, 377,
+            "the keyboard lifts the rail, and the column above it"
+        )
+        XCTAssertEqual(upright.frame(in: bounds, strip: 84).maxY, 678, "full screen folds the rail")
+        let camera = ShellSideColumn(edge: .trailing, placement: .init(top: 12, bottom: 80))
+        XCTAssertEqual(
+            camera.frame(in: bounds, strip: 84, obstruction: 49).maxY, 598,
+            "the camera's 80 pt already clears a resting rail"
+        )
+        XCTAssertEqual(
+            camera.frame(in: bounds, strip: 84, obstruction: 193 + 49).maxY, 436,
+            "the rail lifted over the keyboard stops the column"
+        )
+    }
+
+    func testTheKeyRailRunsThroughTheColumnsStripAndKeepsOffCorners() {
+        let pane = UIEdgeInsets(top: 0, left: 12, bottom: 0, right: 84)
+        let trailing = ShellSideColumn(edge: .trailing, placement: .init(top: 160, bottom: 0))
+        XCTAssertEqual(
+            trailing.keyRailSafeArea(paneSafeArea: pane, cornerClearance: .none),
+            UIEdgeInsets(top: 0, left: 12, bottom: 0, right: 0)
+        )
+        XCTAssertEqual(
+            trailing.keyRailSafeArea(paneSafeArea: pane, cornerClearance: .init(left: 0, right: 25)),
+            UIEdgeInsets(top: 0, left: 12, bottom: 0, right: 25),
+            "across the strip, the corner sets the inset"
+        )
+        let leading = ShellSideColumn(edge: .leading, placement: .init(top: 80, bottom: 12))
+        XCTAssertEqual(
+            leading.keyRailSafeArea(paneSafeArea: pane, cornerClearance: .none),
+            UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 84)
+        )
+        let inner = ShellSideColumn(edge: .trailing, placement: .init(top: 120, bottom: 0))
+        XCTAssertEqual(
+            inner.keyRailSafeArea(paneSafeArea: .zero, cornerClearance: .init(left: 21, right: 21)),
+            UIEdgeInsets(top: 0, left: 21, bottom: 0, right: 21),
+            "inner display, deck hidden: through the strip, off both corners"
+        )
+        XCTAssertEqual(
+            inner.keyRailSafeArea(
+                paneSafeArea: UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 84),
+                cornerClearance: .init(left: 0, right: 21)
+            ),
+            UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 21),
+            "inner display beside the deck rail"
+        )
+        XCTAssertEqual(
+            ShellSideColumn.none.keyRailSafeArea(paneSafeArea: pane, cornerClearance: .none),
+            pane,
+            "no column: the pane's own insets"
+        )
+    }
+
+    #if !os(visionOS)
+    /// The widths each pose hands the rail, against what the device masks cut
+    /// at the faces' bottom edge: every tier, the narrow book page's included.
+    func testTheRailsEndKeysStayOnTheGlassInEveryPose() {
+        let closed = SingleWindowShellLayout.closedBottomCornerClearance
+        let inner = SingleWindowShellLayout.innerBottomCornerClearance
+        struct Pose {
+            var name: String
+            var width: CGFloat
+            var clearance: CGFloat
+            var cut: CGFloat
+            var left = true
+        }
+        let poses = [
+            Pose(name: "closed upright", width: 466, clearance: closed, cut: 30, left: false),
+            Pose(name: "closed, column right", width: 678, clearance: closed, cut: 30),
+            Pose(name: "inner landscape, deck hidden", width: 951, clearance: inner, cut: 26),
+            Pose(name: "inner landscape, beside the deck", width: 635, clearance: inner, cut: 26, left: false),
+            Pose(name: "inner upright", width: 669, clearance: inner, cut: 26),
+            Pose(name: "book page", width: 455.5, clearance: inner, cut: 26, left: false),
+        ]
+        for pose in poses {
+            for includesReturn in [false, true] {
+                for showsTmux in [false, true] {
+                    let safeArea = UIEdgeInsets(
+                        top: 0,
+                        left: pose.left ? pose.clearance : 0,
+                        bottom: 0,
+                        right: pose.clearance
+                    )
+                    let specification = TerminalKeyBarLayout.specification(
+                        width: pose.width,
+                        contentSafeArea: safeArea,
+                        showsTmux: showsTmux,
+                        includesReturn: includesReturn,
+                        returnOnlyWhileLocked: true
+                    )
+                    let frames = TerminalKeyBarLayout.keyFrames(
+                        specification: specification,
+                        keyCount: specification.keyCount(includesReturn: includesReturn),
+                        includesReturn: includesReturn,
+                        width: pose.width,
+                        contentSafeArea: safeArea,
+                        keyTop: 7,
+                        keyHeight: 34
+                    )
+                    let faceInset = specification.metric.faceInset
+                    if pose.left, let first = frames.first {
+                        XCTAssertGreaterThanOrEqual(first.minX + faceInset, pose.cut, pose.name)
+                    }
+                    if let last = frames.last {
+                        XCTAssertGreaterThanOrEqual(pose.width - last.maxX + faceInset, pose.cut, pose.name)
+                    }
+                }
+            }
+        }
+    }
+    #endif
+
+    func testBottomCornerClearanceFollowsTheDisplaysBigCorners() {
+        func clearance(
+            idiom: ShellModeDecision.Idiom = .phone,
+            closed: Bool = false,
+            display: ShellSizeClass,
+            vertical: ShellSizeClass,
+            landscape: Bool,
+            column: ShellRailEdge,
+            corners: ShellBottomCorners = ShellBottomCorners(left: true, right: true)
+        ) -> BottomCornerClearance {
+            SingleWindowShellLayout.bottomCornerClearance(
+                idiom: idiom,
+                closedDisplay: closed,
+                displayHorizontalSizeClass: display,
+                verticalSizeClass: vertical,
+                isLandscape: landscape,
+                columnEdge: column,
+                corners: corners
+            )
+        }
+        XCTAssertEqual(
+            clearance(closed: true, display: .compact, vertical: .regular, landscape: false, column: .trailing),
+            .init(left: 0, right: 25),
+            "closed upright: the hinge side's corners are small"
+        )
+        XCTAssertEqual(
+            clearance(closed: true, display: .regular, vertical: .compact, landscape: true, column: .trailing),
+            .init(left: 25, right: 25),
+            "closed, column right: the big corners are along the bottom"
+        )
+        XCTAssertEqual(
+            clearance(closed: true, display: .regular, vertical: .compact, landscape: true, column: .leading),
+            .none,
+            "closed, column left: the hinge side is along the bottom"
+        )
+        XCTAssertEqual(
+            clearance(display: .regular, vertical: .regular, landscape: false, column: .top),
+            .init(left: 21, right: 21),
+            "inner display"
+        )
+        XCTAssertEqual(
+            clearance(
+                display: .regular,
+                vertical: .regular,
+                landscape: true,
+                column: .trailing,
+                corners: ShellBottomCorners(left: false, right: true)
+            ),
+            .init(left: 0, right: 21),
+            "a pane beside the deck rail has no left corner"
+        )
+        XCTAssertEqual(
+            clearance(closed: true, display: .compact, vertical: .regular, landscape: false, column: .top),
+            .none,
+            "closed, no column"
+        )
+        XCTAssertEqual(
+            clearance(display: .compact, vertical: .regular, landscape: false, column: .top),
+            .none,
+            "shipped iPhone"
+        )
+        XCTAssertEqual(
+            clearance(idiom: .pad, display: .regular, vertical: .regular, landscape: true, column: .top),
+            .none,
+            "iPad"
+        )
+    }
+
+    func testTheTopRailKeepsOffTheClosedDisplaysTopRightCorner() {
+        func inset(closed: Bool = true, landscape: Bool = true, column: ShellRailEdge) -> CGFloat {
+            SingleWindowShellLayout.topTrailingCornerClearance(
+                closedDisplay: closed, isLandscape: landscape, columnEdge: column
+            )
+        }
+        XCTAssertEqual(inset(column: .leading), 25, "column left: the big corners are along the top")
+        XCTAssertEqual(inset(column: .trailing), 0, "column right: the hinge side is along the top")
+        XCTAssertEqual(inset(landscape: false, column: .trailing), 0, "upright: the column's strip clears it")
+        XCTAssertEqual(inset(closed: false, column: .leading), 0, "inner display")
+    }
+
+    func testCornerClearanceWidensAnAuxiliaryRailWithoutEnteringTheStrip() {
+        let clearance = BottomCornerClearance(left: 25, right: 25)
+        XCTAssertEqual(
+            clearance.applied(to: UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 84)),
+            UIEdgeInsets(top: 0, left: 25, bottom: 0, right: 84),
+            "closed, column right: off the far corner, the column keeps its strip"
+        )
+        XCTAssertEqual(
+            BottomCornerClearance.none.applied(to: UIEdgeInsets(top: 0, left: 84, bottom: 0, right: 0)),
+            UIEdgeInsets(top: 0, left: 84, bottom: 0, right: 0)
+        )
+    }
+
+    func testTheClosedDisplayIsKnownByItsShortEdgeInEveryRotation() {
+        func closed(_ width: CGFloat, _ height: CGFloat, idiom: ShellModeDecision.Idiom = .phone) -> Bool {
+            SingleWindowShellLayout.isClosedDisplay(idiom: idiom, screenSize: CGSize(width: width, height: height))
+        }
+        XCTAssertTrue(closed(466, 678), "upright")
+        XCTAssertTrue(closed(678, 466), "landscape, where the screen's width class reads regular")
+        XCTAssertFalse(closed(669, 951), "inner display, upright")
+        XCTAssertFalse(closed(951, 669), "inner display, landscape")
+        XCTAssertFalse(closed(466, 678, idiom: .pad))
+        XCTAssertFalse(closed(440, 956), "the widest shipped iPhone")
+        XCTAssertFalse(closed(956, 440), "the widest shipped iPhone, landscape")
+    }
+
+    func testTheTerminalReachesOnlyTheDisplayCornersItTouches() {
+        func corners(
+            division: CGRect? = nil,
+            deck: Bool = true,
+            size: CGSize = CGSize(width: 951, height: 669),
+            ownsLeading: Bool = true,
+            ownsTrailing: Bool = true
+        ) -> ShellBottomCorners {
+            SingleWindowShellNativeLayout.resolve(
+                size: size,
+                safeArea: .zero,
+                verticalSizeClass: .regular,
+                horizontalSizeClass: .regular,
+                idiom: .phone,
+                division: division,
+                deckRailVisible: deck,
+                compactShowsTerminal: true,
+                compactBackSwipeOffset: 0,
+                compactBackSwipeActive: false,
+                foldable: true,
+                ownsLeadingDisplayCorner: ownsLeading,
+                ownsTrailingDisplayCorner: ownsTrailing
+            ).terminalBottomCorners
+        }
+        XCTAssertEqual(corners(), .init(left: false, right: true), "beside the deck rail")
+        XCTAssertEqual(corners(deck: false), .init(left: true, right: true), "deck hidden")
+        let book = CGRect(x: 455.5, y: 0, width: 40, height: 669)
+        XCTAssertEqual(corners(division: book), .init(left: false, right: true), "the right-hand page")
+        let portrait = CGSize(width: 669, height: 951)
+        let laptop = CGRect(x: 0, y: 455.5, width: 669, height: 40)
+        XCTAssertEqual(corners(division: laptop, size: portrait), .init(), "above the fold")
+        XCTAssertEqual(
+            corners(division: laptop, deck: false, size: portrait),
+            .init(left: true, right: true),
+            "◧ HIDE hands the pane the whole display"
+        )
+        let half = CGSize(width: 475, height: 669)
+        XCTAssertEqual(
+            corners(size: half, ownsLeading: false),
+            .init(left: false, right: true),
+            "the Split View half on the right"
+        )
+        XCTAssertEqual(
+            corners(deck: false, size: half, ownsTrailing: false),
+            .init(left: true, right: false),
+            "the Split View half on the left"
+        )
+    }
+
     func testBareTopPaddingOnlyOnTheInnerDisplayWithNoTopInset() {
         func padding(
             top: CGFloat, idiom: ShellModeDecision.Idiom = .phone,

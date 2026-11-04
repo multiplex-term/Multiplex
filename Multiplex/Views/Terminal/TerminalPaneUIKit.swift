@@ -11,6 +11,7 @@ struct TerminalPaneConfiguration {
     var theme: TerminalTheme
     var bottomChromeHeight: CGFloat
     var contentSafeArea: UIEdgeInsets
+    var keyRailSafeArea: UIEdgeInsets
     var railOwnsBottomSafeArea: Bool
     /// The key rail drops its bezel slab and top rule (iPhone Duo).
     var bareChrome = false
@@ -233,6 +234,7 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
             theme: configuration.theme,
             bottomChromeHeight: configuration.bottomChromeHeight,
             contentSafeArea: configuration.contentSafeArea,
+            keyRailSafeArea: configuration.keyRailSafeArea,
             railOwnsBottomSafeArea: configuration.railOwnsBottomSafeArea,
             bareChrome: configuration.bareChrome,
             keyRailHidden: configuration.keyRailHidden,

@@ -104,7 +104,8 @@ Measured on the 27.1 simulator with `MULTIPLEX_DUO_PROBE=1` (log category
   corner inset.
 - **Column** — on a side edge the UMD renders as
   `UMDBarStyle.verticalColumn`: 44 pt symbol-over-caption chips 4 pt
-  apart, centred on the glyph line, ending above the keyboard. Placement
+  apart, centred on the glyph line, ending above the key rail crossing the
+  strip. Placement
   (`RailFit.columnPlacement`): inner display starts 120 pt down (under the
   glyphs); closed portrait 160 (glyphs under the camera); closed landscape
   keeps 80 pt clear of the camera end (30…66 pt from the corner: top when
@@ -119,6 +120,26 @@ Measured on the 27.1 simulator with `MULTIPLEX_DUO_PROBE=1` (log category
   changes. `UMDSourceStripView` (20 pt) over the pane carries the title
   and lamp. The key rail stays horizontal. The tab row is inset by the
   side safe areas (camera strip, chip column), like the pane.
+- **Key rail across the strip** — wherever a column stands, closed and
+  inner displays alike (`ShellSideColumn.keyRailSafeArea`): the key rail runs
+  the pane's full width through the strip, the chips end above it
+  (`keyRailHeight`), and the TMUX/HRDR decision measures that wider rail. The
+  grid stays out of the strip. On the closed display with the column on the
+  right the faces (8…42 pt up) meet the camera's 30…66 pt; user's call, full
+  width wins.
+- **Bottom rail corners** — `bottomCornerClearance(…)`: a pane's bottom rail
+  (key rail, ▤/⌗ tab's rail) stays off a display corner the pane actually
+  reaches (`terminalBottomCorners`: not past the deck rail, a fold, or a Split
+  View half's inner edge). A ▤/⌗ rail keeps the strip's inset too
+  (`auxiliaryRailSafeArea`); panels wear a header instead. Corners from the
+  profile masks in `iPhone Duo.simdevicetype`, not safe areas: closed is 10 pt
+  on the hinge side and 76 pt on the other, so at the faces' bottom edge 30 pt
+  is cut upright bottom right, along the whole bottom edge with the column
+  right, and nothing with the column left. Inner is 68 pt on all four, 26 pt
+  cut. Clearance 25 closed, 21 inner, on top of the 6 the key rail's narrowest
+  tier keeps (a book page). The closed display with the column on the left
+  has its big corners along the top: the horizontal top rail (a ▤/⌗ tab's
+  CLOSE) clears the right one (`topTrailingCornerClearance`).
 - **Deck action column** — `deckActionColumnEdge`: while the deck spans
   the display on a side edge, its + HOST / FAQ / SETTINGS chips stand in
   the strip (`FleetActionColumnView`, same placement as the UMD column)
@@ -155,6 +176,10 @@ Measured on the 27.1 simulator with `MULTIPLEX_DUO_PROBE=1` (log category
 
 ## Traps
 
+- `screen.traitCollection.horizontalSizeClass` reads regular on the closed
+  display in landscape (678 pt wide), though the window's own trait stays
+  compact. `displayHorizontalSizeClass` answers compact there through
+  `isClosedDisplay` (short edge 450…500); read those, never the raw trait.
 - A fold-resized pane must invalidate its `TerminalSurfaceView` before the
   forced pass, or the key rail keeps its old width under the chip column.
   `TerminalKeyBar.narrowFloor` (32 pt faces below 375) and `keyFrames`

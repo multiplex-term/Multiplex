@@ -530,16 +530,53 @@ final class TerminalKeyBarUIKitTests: XCTestCase {
         return defaults
     }
 
+    /// Locking only swaps the keyboard key for the lock and adds RET: a roomy
+    /// row keeps its symbols, its page keys, and TMUX, inside its own bounds.
+    func testLockingTheKeyboardKeepsARoomyRowsKeys() {
+        for width in stride(from: CGFloat(552), through: 1_100, by: 2) {
+            let unlocked = specification(width: width, returns: false)
+            let locked = specification(width: width, returns: true, onlyWhileLocked: true)
+            XCTAssertEqual(locked.symbols, unlocked.symbols, "\(width)")
+            XCTAssertEqual(locked.pageKeys, unlocked.pageKeys, "\(width)")
+            XCTAssertEqual(locked.tmux, unlocked.tmux, "\(width)")
+            let frames = TerminalKeyBarLayout.keyFrames(
+                specification: locked,
+                keyCount: locked.keyCount(includesReturn: true),
+                includesReturn: true,
+                width: width,
+                contentSafeArea: .zero,
+                keyTop: 7,
+                keyHeight: 34
+            )
+            XCTAssertEqual(frames.count, unlocked.keyCount(includesReturn: false) + 1, "\(width)")
+            XCTAssertLessThanOrEqual(frames.last?.maxX ?? 0, width, "\(width)")
+            XCTAssertGreaterThanOrEqual(frames.first?.width ?? 0, 41, "faces stay pressable at \(width)")
+        }
+    }
+
+    /// Below the regular faces the RET ladder still rules, cutoffs included.
+    func testLockingOnANarrowRowStaysOnTheReturnLadder() {
+        for width in [375, 390, 420, 466, 540] as [CGFloat] {
+            XCTAssertEqual(
+                specification(width: width, returns: true, onlyWhileLocked: true),
+                specification(width: width, returns: true),
+                "\(width)"
+            )
+        }
+    }
+
     private func specification(
         width: CGFloat,
         returns: Bool,
-        safeArea: UIEdgeInsets = .zero
+        safeArea: UIEdgeInsets = .zero,
+        onlyWhileLocked: Bool = false
     ) -> TerminalKeyBarLayout.Specification {
         TerminalKeyBarLayout.specification(
             width: width,
             contentSafeArea: safeArea,
             showsTmux: true,
-            includesReturn: returns
+            includesReturn: returns,
+            returnOnlyWhileLocked: onlyWhileLocked
         )
     }
 

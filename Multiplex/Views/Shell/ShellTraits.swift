@@ -44,7 +44,33 @@ extension ShellRailEdge {
     }
 }
 
+extension BottomCornerClearance {
+    /// `insets`, widened at either end to clear a display corner.
+    func applied(to insets: UIEdgeInsets) -> UIEdgeInsets {
+        var result = insets
+        result.left = max(result.left, left)
+        result.right = max(result.right, right)
+        return result
+    }
+}
+
 extension ShellSideColumn {
+    /// The pane's insets as the key rail reads them: the rail runs through the
+    /// column's strip, and either end keeps clear of a display corner it runs
+    /// into.
+    func keyRailSafeArea(
+        paneSafeArea: UIEdgeInsets,
+        cornerClearance: BottomCornerClearance
+    ) -> UIEdgeInsets {
+        var insets = paneSafeArea
+        switch edge {
+        case .top: break
+        case .leading: insets.left = 0
+        case .trailing: insets.right = 0
+        }
+        return cornerClearance.applied(to: insets)
+    }
+
     /// The side column from live traits, resolved once by the shell for
     /// both panes: the iOS 27.1 vertical-bar trait when the system reports
     /// one, else `ShellRailPlacement`'s rule; placement from the display.

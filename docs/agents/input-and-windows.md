@@ -697,3 +697,11 @@ routing, tab moves, keyboard avoidance, or secret fields.
   device testing alone; if IME regresses, suspect a mutation path that
   reads the buffer without clearing filler first. Both constants are
   tuning knobs.
+
+## Key rail and the keyboard lock
+
+On a phone RET exists only while the keyboard is locked. A row on the regular
+faces keeps its unlocked tier when locked and narrows the faces 2 to 4 pt for
+the extra key (`returnOnlyWhileLocked`), so locking never drops `~`, `/`, or the
+page keys. The tight and floor tiers stay on the RET ladder, which
+`SingleWindowShellLayout`'s 390 / 420 cutoffs read.

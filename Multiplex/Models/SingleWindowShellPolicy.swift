@@ -193,6 +193,74 @@ enum SingleWindowShellLayout {
             : 0
     }
 
+    /// What a pane's bottom rail (the key rail, a ▤/⌗ tab's rail) adds at each
+    /// end to keep its faces on the glass, beyond the 6 pt the key rail's
+    /// narrowest tier keeps itself (a book page runs that tier). Read off the
+    /// device profile's display masks at the faces' bottom edge, 8 pt up, plus
+    /// 1 pt of daylight: the closed display's big corners cut 30 pt, the inner
+    /// display's 26. The closed display's two small corners (10 pt tall, under
+    /// 1 pt in at that height) cost nothing.
+    static let closedBottomCornerClearance: CGFloat = 25
+    static let innerBottomCornerClearance: CGFloat = 21
+
+    /// The Duo's closed display by its short edge (466 pt; the inner display's
+    /// is 669, the widest shipped iPhone's 440), which a rotation cannot move.
+    /// The screen's width class cannot tell: it reads regular once the closed
+    /// display turns to 678 pt wide.
+    static func isClosedDisplay(idiom: ShellModeDecision.Idiom, screenSize: CGSize) -> Bool {
+        idiom == .phone && (450..<500).contains(min(screenSize.width, screenSize.height))
+    }
+
+    /// The top rail's end at the display's top right. Only the closed display
+    /// with its column on the left puts a big corner there with no strip to
+    /// clear it (a ▤/⌗ tab's CLOSE).
+    static func topTrailingCornerClearance(
+        closedDisplay: Bool,
+        isLandscape: Bool,
+        columnEdge: ShellRailEdge
+    ) -> CGFloat {
+        closedDisplay && isLandscape && columnEdge == .leading ? closedBottomCornerClearance : 0
+    }
+
+    /// The closed display's big corners are on the side away from the hinge:
+    /// bottom right held upright, both bottom corners with the column on the
+    /// right, neither with it on the left. The inner display's four match.
+    /// `corners` are the ones the pane actually reaches.
+    static func bottomCornerClearance(
+        idiom: ShellModeDecision.Idiom,
+        closedDisplay: Bool,
+        displayHorizontalSizeClass: ShellSizeClass,
+        verticalSizeClass: ShellSizeClass,
+        isLandscape: Bool,
+        columnEdge: ShellRailEdge,
+        corners: ShellBottomCorners
+    ) -> BottomCornerClearance {
+        let bigCorners: BottomCornerClearance
+        if closedDisplay {
+            let inset = closedBottomCornerClearance
+            switch columnEdge {
+            case .top: bigCorners = .none
+            case .leading: bigCorners = BottomCornerClearance(left: 0, right: isLandscape ? 0 : inset)
+            case .trailing: bigCorners = BottomCornerClearance(left: isLandscape ? inset : 0, right: inset)
+            }
+        } else if isInnerDisplay(
+            idiom: idiom,
+            horizontalSizeClass: displayHorizontalSizeClass,
+            verticalSizeClass: verticalSizeClass
+        ) {
+            bigCorners = BottomCornerClearance(
+                left: innerBottomCornerClearance,
+                right: innerBottomCornerClearance
+            )
+        } else {
+            bigCorners = .none
+        }
+        return BottomCornerClearance(
+            left: corners.left ? bigCorners.left : 0,
+            right: corners.right ? bigCorners.right : 0
+        )
+    }
+
     static func showsTopBarTmuxShortcut(
         availableWidth: CGFloat,
         supportsTmuxShortcuts: Bool,
@@ -279,6 +347,8 @@ enum ShellSizeClass: Equatable {
 struct ShellHeaderChrome: Equatable {
     /// `SingleWindowShellLayout.cornerLeadingInset`; zero elsewhere.
     var cornerInset: CGFloat = 0
+    /// `SingleWindowShellLayout.topTrailingCornerClearance`; zero elsewhere.
+    var trailingCornerInset: CGFloat = 0
     /// `SingleWindowShellLayout.topBandHeight`; zero elsewhere.
     var bandHeight: CGFloat = 0
     /// The row hugs the pane's top edge (the console deck under the fold).
@@ -318,6 +388,21 @@ enum ShellRailEdge: Equatable {
     case trailing
 }
 
+/// The display's bottom corners a pane reaches: not across a fold, past the
+/// deck rail, or from a Split View half on the display's other side.
+struct ShellBottomCorners: Equatable {
+    var left = false
+    var right = false
+}
+
+/// `SingleWindowShellLayout.bottomCornerClearance`.
+struct BottomCornerClearance: Equatable {
+    var left: CGFloat = 0
+    var right: CGFloat = 0
+
+    static let none = BottomCornerClearance()
+}
+
 /// The system's side strip as the shell's panes use it: the column's edge
 /// (`.top` = no column) and the chips' placement inside the strip.
 struct ShellSideColumn: Equatable {
@@ -329,8 +414,9 @@ struct ShellSideColumn: Equatable {
     var isPresent: Bool { edge != .top }
 
     /// The column's frame in a pane spanning the strip: `strip` is the
-    /// pane's safe inset on the column's edge, `obstruction` the keyboard's
-    /// height from the bottom.
+    /// pane's safe inset on the column's edge, `obstruction` the height the
+    /// column stands above from the bottom (the keyboard, and the terminal's
+    /// key rail riding on top of it across the strip).
     func frame(in bounds: CGRect, strip: CGFloat, obstruction: CGFloat = 0) -> CGRect {
         let width = max(strip, RailFit.chipHeight + RailFit.gap)
         let bottom = bounds.maxY - max(obstruction, placement.bottom)
