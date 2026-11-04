@@ -131,6 +131,45 @@ final class TerminalPathTargetTests: XCTestCase {
         XCTAssertEqual(TerminalPathTarget.resolve("src/foo.ts")?.base, .workingDirectory)
     }
 
+    func testPressedSlashCommandsAreNotPaths() {
+        for text in [
+            "/compact",
+            "/help?",
+            "/model opus",
+            "/compact keep the failing test output",
+            // A file argument still leaves the whole row a command.
+            "/review src/foo.ts",
+            "/fix notes.md",
+            "/compact:12",
+        ] {
+            XCTAssertNil(TerminalPathTarget.resolvePressed(text), text)
+        }
+    }
+
+    func testPressedPathsKeepTheirEvidence() {
+        for (text, path) in [
+            ("/etc/hosts", "/etc/hosts"),
+            ("/data/report", "/data/report"),
+            ("/data/", "/data/"),
+            ("/notes.md", "/notes.md"),
+            ("/.ssh", "/.ssh"),
+            ("/tmp", "/tmp"),
+            ("/Users", "/Users"),
+            ("/etc/hosts is missing", "/etc/hosts"),
+            ("/Users/me/My Documents/file.txt", "/Users/me/My Documents/file.txt"),
+            ("src/foo.ts", "src/foo.ts"),
+            ("~/notes", "~/notes"),
+            // URI syntax already proved this one names a file.
+            ("file:///compact", "/compact"),
+        ] {
+            XCTAssertEqual(TerminalPathTarget.resolvePressed(text)?.path, path, text)
+        }
+    }
+
+    func testTheSheetFieldStillTakesATypedRootPath() {
+        XCTAssertEqual(TerminalPathTarget.resolve("/data")?.path, "/data")
+    }
+
     func testFileURLsResolveToAbsoluteHostPaths() {
         let direct = TerminalPathTarget.resolve("file:///etc/hosts")
         XCTAssertEqual(direct?.raw, "file:///etc/hosts")

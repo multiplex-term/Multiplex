@@ -81,6 +81,22 @@ final class TerminalWindowUIKitTests: XCTestCase {
         XCTAssertNil(controller.pendingPath)
     }
 
+    func testPressOnASlashCommandDeclinesToTheRemote() {
+        let host = Host(name: "devbox", hostname: "127.0.0.1", username: "dev")
+        let controller = TerminalSessionController(
+            route: TerminalRoute(hostID: host.id, mode: .attach(sessionName: "main")),
+            host: host
+        )
+
+        XCTAssertFalse(controller.activateLink("/compact"))
+        XCTAssertFalse(controller.activateLink("/review src/foo.ts"))
+        XCTAssertNil(controller.pendingLink)
+        XCTAssertNil(controller.pendingPath)
+
+        XCTAssertTrue(controller.activateLink("/etc/hosts"))
+        XCTAssertEqual(controller.pendingPath?.path, "/etc/hosts")
+    }
+
     func testAgentHelperReuseIsKeyedByHostNotOnlyAgentKind() {
         let firstHost = UUID()
         let secondHost = UUID()

@@ -2135,8 +2135,8 @@ final class TerminalSessionController {
     /// whether this pane claims the gesture. URLs confirm through the link
     /// sheet; path-shaped text (implicit detection matches those too) now
     /// confirms through the file-viewer sheet instead of falling to
-    /// selection; only what neither resolver accepts ($VAR/…, colon prose)
-    /// still declines into text selection.
+    /// selection; only what neither resolver accepts ($VAR/…, colon prose,
+    /// an agent's `/compact`) still declines into text selection.
     ///
     /// `rowFragments` is the match split at its hard-wrap seams (empty when
     /// it fit one row, or from callers without seam info — the debug hook,
@@ -2174,7 +2174,7 @@ final class TerminalSessionController {
             pendingActivation = .link(link)
             return true
         }
-        if let path = TerminalPathTarget.resolve(target) {
+        if let path = TerminalPathTarget.resolvePressed(target) {
             pendingActivation = .path(path)
             pathPressScreenCell = cell
             return true

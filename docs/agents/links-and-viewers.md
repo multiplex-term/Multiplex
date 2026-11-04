@@ -99,7 +99,15 @@ link/path resolution, the ⌗ viewport, or the ▤ file viewer.
   This file-URI check MUST precede `TerminalLink`, while ordinary links
   MUST precede ordinary paths so `example.com/docs` stays a URL. Only text
   BOTH resolvers decline ($VAR/…, colon prose, whitespace in a
-  bare-relative shape) still falls to selection. Paths with spaces resolve
+  bare-relative shape) still falls to selection. **A press on an agent's
+  slash command is not a path** (`TerminalPathTarget.resolvePressed`, the
+  press road only; the sheet's field keeps `resolve`, a typed path being
+  intent): a lone dotless first segment needs a well-known system root
+  (`/tmp`) to count, so `/compact` and `/review src/foo.ts` decline to the
+  remote while `/data/x`, `/data/`, and `/notes.md` still confirm. Accepted
+  trade: bare `/data` and spaced `/My Dir/x` no longer confirm from a press.
+  The fork's pointer-hover underline is regex-only and still lights them.
+  Paths with spaces resolve
   when rooted by a base marker (`/`, `~/`, `./`, `$HOME/`); bare relatives
   keep the prose guard. `trimmingProseTail` sheds trailing
   chunks carrying neither `/` nor `.` — hence the sheet's OPENS row

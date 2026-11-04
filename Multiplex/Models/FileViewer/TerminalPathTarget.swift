@@ -99,6 +99,39 @@ struct TerminalPathTarget: Equatable, Identifiable {
         return resolvePath(raw: raw, text: text, syntax: .implicitMatch)
     }
 
+    /// `resolve` for a press on pane text, which also has to tell a path from
+    /// an agent's slash command. `/compact` and `/review src/foo.ts` in a
+    /// composer or command menu are path-shaped to the matcher, and nothing
+    /// about the spelling separates them from a directory at the root — so a
+    /// lone dotless first segment counts as a path only when it names a
+    /// well-known system root (`/tmp`). A second segment (`/data/x`), a
+    /// trailing slash (`/data/`), or a dot (`/notes.md`) is evidence enough.
+    ///
+    /// Accepted trade: a press on bare `/data`, or on a spaced `/My Dir/x`,
+    /// declines to the remote. Only the press road pays it: `resolve` still
+    /// serves the sheet's field, where the person typed the path on purpose,
+    /// and a `file:` URI has already proved it names a file.
+    static func resolvePressed(_ raw: String) -> TerminalPathTarget? {
+        guard let target = resolve(raw) else { return nil }
+        let isFileURL = hasFileScheme(raw.trimmingCharacters(in: .whitespaces))
+        return !isFileURL && readsAsSlashCommand(target) ? nil : target
+    }
+
+    private static func readsAsSlashCommand(_ target: TerminalPathTarget) -> Bool {
+        guard target.base == .absolute else { return false }
+        let head = target.path.dropFirst().prefix { $0 != " " }
+        return !head.contains("/") && !head.contains(".")
+            && !systemRootNames.contains(String(head))
+    }
+
+    /// Root directories of Linux and macOS hosts, the ones a pane prints bare.
+    private static let systemRootNames: Set<String> = [
+        "Applications", "Library", "System", "Users", "Volumes",
+        "bin", "boot", "dev", "etc", "home", "lib", "lib64", "media", "mnt",
+        "nix", "opt", "private", "proc", "root", "run", "sbin", "snap", "srv",
+        "sys", "tmp", "usr", "var",
+    ]
+
     /// A path supplied deliberately by app automation rather than inferred
     /// from terminal prose. Explicit input may be a bare file name or contain
     /// spaces and colons; relative paths resolve against the host's configured
