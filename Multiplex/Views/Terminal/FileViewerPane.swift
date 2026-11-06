@@ -80,6 +80,10 @@ struct FileViewerOrnamentConfiguration {
         var treeCaption: String
         var isBusy: Bool
         var isWorking: Bool
+        /// FIND is offered on the text screens (rendered markdown flips to
+        /// its source); prominent while the bar is open.
+        var findAvailable: Bool
+        var findActive: Bool
     }
 
     var key: RenderKey
@@ -90,6 +94,7 @@ struct FileViewerOrnamentConfiguration {
     var toggleMarkdownSelection: () -> Void
     var toggleTree: () -> Void
     var refresh: () -> Void
+    var toggleFind: () -> Void
 }
 
 /// Native WORKBENCH pane. The controller composes the already-native tree and
@@ -112,11 +117,20 @@ final class FileViewerPaneViewController: UIViewController {
     private let startsController: Bool
     private let showsInWindowRail: Bool
     private var ornamentRailDidChange: () -> Void
+    /// A tab-road viewer becomes first responder while active (no terminal
+    /// holds the keyboard there), so ⌘F reaches it with nothing selected.
+    /// A side panel leaves the host terminal's keyboard alone.
+    private let claimsHardwareKeys: Bool
+    /// The side panel's find field borrows the host terminal's keyboard and
+    /// hands it back on close; tab panes leave both as no-ops.
+    private var borrowKeyboard: (UIView) -> Void
+    private var returnKeyboard: () -> Void
 
     private(set) var treeDocked = true
     private(set) var drawerOpen: Bool
     private(set) var isCompactLayout = false
     private(set) var selectingMarkdownSource = false
+    private(set) var findActive = false
 
     private let rootStack = UIStackView()
     private let contentRegion = UIView()
@@ -133,6 +147,11 @@ final class FileViewerPaneViewController: UIViewController {
     private let treeShell = UIView()
     private let treeDivider = UIView()
     private(set) var treeView = FileViewerTreeColumnView()
+    private(set) lazy var findBar = FileViewerFindBarView(
+        queryChanged: { [weak self] _ in self?.runFind(.typed) },
+        step: { [weak self] in self?.stepFind(by: $0) },
+        close: { [weak self] in self?.endFind() }
+    )
 
     private(set) var backChip: UIKitChassisChip?
     private(set) var forwardChip: UIKitChassisChip?
@@ -141,6 +160,7 @@ final class FileViewerPaneViewController: UIViewController {
     private(set) var selectChip: UIKitChassisChip?
     private(set) var treeChip: UIKitChassisChip?
     private(set) var refreshChip: UIKitChassisChip?
+    private(set) var findChip: UIKitChassisChip?
     private(set) var closeChip: UIKitChassisChip?
     private(set) var currentBodyView: UIView?
 
@@ -161,6 +181,14 @@ final class FileViewerPaneViewController: UIViewController {
     private var observationGeneration = 0
     private var startTask: Task<Void, Never>?
     private var watchTask: Task<Void, Never>?
+    private(set) var findResult = FileViewerFind.Result.empty
+    private(set) var findIndex: Int?
+    private var findTask: Task<Void, Never>?
+    private var findGeneration = 0
+    /// A typed run found no text yet (rendered markdown flipping to source
+    /// builds off-main): the run that follows the text's arrival lands too.
+    private var findAwaitsText = false
+    private weak var boundFindTextView: FileViewerTextView?
 
     #if DEBUG
     private var debugObservers: [NSObjectProtocol] = []
@@ -172,8 +200,11 @@ final class FileViewerPaneViewController: UIViewController {
         isActive: Bool = true,
         startsController: Bool = true,
         showsInWindowRail: Bool = true,
+        claimsHardwareKeys: Bool = true,
         textScaleStore: FileViewerTextScaleStore = .shared,
         ornamentRailDidChange: @escaping () -> Void = {},
+        borrowKeyboard: @escaping (UIView) -> Void = { _ in },
+        returnKeyboard: @escaping () -> Void = {},
         openInNewTab: @escaping (FileTree.Row) -> Void = { _ in },
         openViewport: @escaping (ViewportOffer) -> Void = { _ in },
         close: @escaping () -> Void
@@ -185,6 +216,9 @@ final class FileViewerPaneViewController: UIViewController {
         self.startsController = startsController
         self.showsInWindowRail = showsInWindowRail
         self.ornamentRailDidChange = ornamentRailDidChange
+        self.claimsHardwareKeys = claimsHardwareKeys
+        self.borrowKeyboard = borrowKeyboard
+        self.returnKeyboard = returnKeyboard
         openInNewTabAction = openInNewTab
         openViewportAction = openViewport
         closeAction = close
@@ -198,6 +232,7 @@ final class FileViewerPaneViewController: UIViewController {
     deinit {
         startTask?.cancel()
         watchTask?.cancel()
+        findTask?.cancel()
         #if DEBUG
         for observer in debugObservers { NotificationCenter.default.removeObserver(observer) }
         #endif
@@ -250,8 +285,18 @@ final class FileViewerPaneViewController: UIViewController {
                     _ = audio.playChip.accessibilityActivate()
                 }
             },
+            center.addObserver(
+                forName: .multiplexDebugFileViewerFind, object: nil, queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in self?.debugFind() }
+            },
         ]
         #endif
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        claimHardwareKeysIfNeeded()
     }
 
     override func viewDidLayoutSubviews() {
@@ -304,10 +349,19 @@ final class FileViewerPaneViewController: UIViewController {
         guard isActive != active else { return }
         isActive = active
         if isViewLoaded, startsController { restartWatch() }
+        if active {
+            claimHardwareKeysIfNeeded()
+        } else {
+            if findBar.textField.isFirstResponder { findBar.textField.resignFirstResponder() }
+            if isFirstResponder { resignFirstResponder() }
+        }
     }
 
     func prepareForRemoval() {
         observationGeneration &+= 1
+        findTask?.cancel()
+        if findBar.textField.isFirstResponder { findBar.textField.resignFirstResponder() }
+        if isFirstResponder { resignFirstResponder() }
         startTask?.cancel()
         startTask = nil
         watchTask?.cancel()
@@ -409,6 +463,8 @@ final class FileViewerPaneViewController: UIViewController {
         divider.backgroundColor = UIKitChassis.bezelHi
         divider.heightAnchor.constraint(equalToConstant: 1).isActive = true
         contentColumn.addArrangedSubview(divider)
+        findBar.isHidden = true
+        contentColumn.addArrangedSubview(findBar)
         bodyContainer.backgroundColor = UIKitChassis.screen
         bodyContainer.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         contentColumn.addArrangedSubview(bodyContainer)
@@ -516,9 +572,15 @@ final class FileViewerPaneViewController: UIViewController {
             markdownSelectKey = selectKey
             selectingMarkdownSource = false
         }
+        // An open find keeps reading source as the reader moves through the
+        // tree: rendered blocks are not one searchable text.
+        if findActive, case .markdown = bodyKey(for: state), markdownSelectionAvailable(state) {
+            selectingMarkdownSource = true
+        }
         observedState = state
         updateHeader(state)
         updateBody(state)
+        syncFind(state)
         // A pure size change leaves the body state untouched, so `updateBody`
         // keeps the live view (scroll position and selection with it) and the
         // screen rebuilds itself at the new size in place.
@@ -841,6 +903,20 @@ final class FileViewerPaneViewController: UIViewController {
             railStack.addArrangedSubview(select)
         }
 
+        findChip = nil
+        if findAvailable(state) || findActive {
+            let find = makeChip(
+                "FIND",
+                prominent: findActive,
+                accessibility: findActive
+                    ? String(localized: "Close find")
+                    : String(localized: "Find in file")
+            ) { [weak self] in self?.toggleFind() }
+            find.accessibilityIdentifier = "fileViewer.find"
+            findChip = find
+            railStack.addArrangedSubview(find)
+        }
+
         railPathLabel.attributedText = pathText(state.railPath)
         railPathLabel.accessibilityLabel = state.railPath
         railStack.addArrangedSubview(railPathLabel)
@@ -902,7 +978,9 @@ final class FileViewerPaneViewController: UIViewController {
                 hostName: state.hostName,
                 treeCaption: treeVisible ? "HIDE" : "TREE",
                 isBusy: state.isBusy,
-                isWorking: isWorking(state)
+                isWorking: isWorking(state),
+                findAvailable: findAvailable(state) || findActive,
+                findActive: findActive
             ),
             goBack: { [weak controller] in controller?.goBack() },
             goForward: { [weak controller] in controller?.goForward() },
@@ -917,7 +995,8 @@ final class FileViewerPaneViewController: UIViewController {
             },
             toggleMarkdownSelection: { [weak self] in self?.toggleMarkdownSelection() },
             toggleTree: { [weak self] in self?.toggleTree() },
-            refresh: { [weak controller] in controller?.refresh() }
+            refresh: { [weak controller] in controller?.refresh() },
+            toggleFind: { [weak self] in self?.toggleFind() }
         )
     }
 
@@ -950,6 +1029,7 @@ final class FileViewerPaneViewController: UIViewController {
         selectingMarkdownSource.toggle()
         updateHeader(state)
         updateBody(state)
+        syncFind(state)
         rebuildRail(state)
     }
 
@@ -964,6 +1044,24 @@ final class FileViewerPaneViewController: UIViewController {
               let destination = markdown.firstMountedImageDestination()
         else { return }
         showMarkdownImage(destination)
+    }
+    #endif
+
+    #if DEBUG
+    /// `debug.fvfind`: the first post opens find with
+    /// `MULTIPLEX_FIND_QUERY` (default `func`) typed in; each later post is
+    /// a Return — the next match.
+    private func debugFind() {
+        guard isActive else { return }
+        if findActive {
+            stepFind(by: 1)
+            return
+        }
+        if findBar.query.isEmpty {
+            findBar.textField.text = ProcessInfo.processInfo
+                .environment["MULTIPLEX_FIND_QUERY"] ?? "func"
+        }
+        beginFind()
     }
     #endif
 
@@ -1369,6 +1467,258 @@ final class FileViewerPaneViewController: UIViewController {
             onCopy: { UIPasteboard.general.string = $0 },
             onOpenViewport: { [weak self] in self?.openViewportAction($0) }
         )
+    }
+
+    // MARK: Find
+
+    /// What an open find can do with the current body.
+    private enum FindSupport {
+        /// A selectable text screen (code, diff, markdown source) — or
+        /// rendered markdown, which flips to its source.
+        case searchable
+        /// Between documents (loading, nothing chosen): the bar stays up so
+        /// a query survives a walk through the tree.
+        case transitional
+        /// A picture, PDF, sound, BINARY or failure panel: the bar closes.
+        case unsupported
+    }
+
+    private func findSupport(_ state: FileViewerPaneObservedState) -> FindSupport {
+        switch bodyKey(for: state) {
+        case .code, .markdownSource, .diff: .searchable
+        case .markdown: markdownSelectionAvailable(state) ? .searchable : .unsupported
+        case .idle, .loading: .transitional
+        case .binary, .image, .pdf, .pdfLocked, .audio, .audioUnplayable, .failure: .unsupported
+        }
+    }
+
+    private func findAvailable(_ state: FileViewerPaneObservedState) -> Bool {
+        findSupport(state) == .searchable
+    }
+
+    /// The selectable screen a find reads, when one is mounted.
+    private var findTextView: FileViewerTextView? {
+        switch currentBodyView {
+        case let code as FileViewerCodeContentView: code.textView
+        case let source as FileViewerMarkdownSourceContentView: source.textView
+        case let diff as FileViewerDiffContentView: diff.textView
+        default: nil
+        }
+    }
+
+    private func toggleFind() {
+        if findActive { endFind() } else { beginFind() }
+    }
+
+    /// FIND / ⌘F. Already open: re-focus the field with its query selected.
+    func beginFind() {
+        guard isActive, !TerminalFocusArbiter.inputSuppressed,
+              let state = observedState, findAvailable(state)
+        else { return }
+        if case .markdown = bodyKey(for: state) {
+            selectingMarkdownSource = true
+            updateBody(state)
+        }
+        let opening = !findActive
+        findActive = true
+        findBar.isHidden = false
+        borrowKeyboard(findBar.textField)
+        findBar.focus()
+        if opening {
+            syncFind(state)
+            rebuildRail(state)
+            runFind(.typed)
+        }
+    }
+
+    /// DONE / Esc / FIND again. The query stays in the field for next time;
+    /// the washes go.
+    func endFind() {
+        guard findActive else { return }
+        findActive = false
+        findTask?.cancel()
+        findGeneration &+= 1
+        let hadKeyboard = findBar.textField.isFirstResponder
+        if hadKeyboard { findBar.textField.resignFirstResponder() }
+        findBar.isHidden = true
+        boundFindTextView?.contentDidChange = nil
+        boundFindTextView?.setFindMatches([], current: nil)
+        boundFindTextView = nil
+        findResult = .empty
+        findIndex = nil
+        findAwaitsText = false
+        if let state = observedState { rebuildRail(state) }
+        if hadKeyboard { returnKeyboard() }
+        claimHardwareKeysIfNeeded()
+    }
+
+    /// Keeps an open find attached to whichever text screen is mounted: a
+    /// new screen (another file, SOURCE ⇄ DIFF) re-searches once its text
+    /// lands; a screen that can't be searched closes the bar.
+    private func syncFind(_ state: FileViewerPaneObservedState) {
+        guard findActive else { return }
+        switch findSupport(state) {
+        case .unsupported:
+            endFind()
+            return
+        case .transitional, .searchable:
+            break
+        }
+        let target = findTextView
+        guard target !== boundFindTextView else { return }
+        boundFindTextView?.contentDidChange = nil
+        boundFindTextView?.setFindMatches([], current: nil)
+        boundFindTextView = target
+        findResult = .empty
+        findIndex = nil
+        target?.contentDidChange = { [weak self] in self?.runFind(.refreshed) }
+        runFind(.refreshed)
+    }
+
+    private enum FindRun {
+        /// The query changed: land on the hit nearest the reader and show it.
+        case typed
+        /// The text changed under the query (rescale, appearance, watch
+        /// swap, a new screen): re-wash in place, never move the reader.
+        case refreshed
+    }
+
+    private func runFind(_ requested: FindRun) {
+        findTask?.cancel()
+        findGeneration &+= 1
+        let generation = findGeneration
+        let query = findBar.query
+        let run: FindRun = findAwaitsText ? .typed : requested
+        findAwaitsText = false
+        guard findActive, let textView = findTextView, let content = textView.content,
+              !query.isEmpty
+        else {
+            findAwaitsText = findActive && run == .typed && !query.isEmpty
+            showFind(.empty, current: nil, on: findTextView)
+            // No text on screen yet is not NO MATCH.
+            findBar.apply(count: "", hasMatches: false)
+            return
+        }
+        let previous = findIndex.flatMap {
+            findResult.ranges.indices.contains($0) ? findResult.ranges[$0].location : nil
+        }
+        let anchor: Int? = switch run {
+        case .typed: previous ?? textView.firstVisibleOffset()
+        case .refreshed: previous
+        }
+        let text = content.text.string
+        // A capped 1.5 MB file costs a scan per keystroke; let a burst of
+        // typing settle first. Small files answer on the keystroke.
+        let settles = content.text.length > 200_000
+        findTask = Task { [weak self] in
+            if settles {
+                try? await Task.sleep(for: .milliseconds(120))
+                guard !Task.isCancelled else { return }
+            }
+            let result = await Task.detached {
+                FileViewerFind.matches(of: query, in: text)
+            }.value
+            guard !Task.isCancelled, let self, generation == self.findGeneration,
+                  textView === self.findTextView
+            else { return }
+            let current = anchor.flatMap { FileViewerFind.index(atOrAfter: $0, in: result.ranges) }
+            self.showFind(result, current: current, on: textView)
+            if run == .typed, let current { textView.revealFindMatch(current) }
+        }
+    }
+
+    private func showFind(
+        _ result: FileViewerFind.Result,
+        current: Int?,
+        on textView: FileViewerTextView?
+    ) {
+        findResult = result
+        findIndex = current
+        textView?.setFindMatches(result.ranges, current: current)
+        findBar.apply(
+            count: FileViewerFind.countText(current: current, result: result, query: findBar.query),
+            hasMatches: !result.ranges.isEmpty
+        )
+    }
+
+    /// ◂ ▸ / Return / ⇧Return / ⌘G / ⇧⌘G. With no current hit (the text
+    /// changed under the query), the first step counts from the screen top.
+    func stepFind(by delta: Int) {
+        let ranges = findResult.ranges
+        guard findActive, let textView = findTextView, !ranges.isEmpty else { return }
+        let next: Int?
+        if let findIndex {
+            next = FileViewerFind.step(from: findIndex, by: delta, count: ranges.count)
+        } else {
+            let below = FileViewerFind.index(atOrAfter: textView.firstVisibleOffset(), in: ranges)
+            next = delta > 0 ? below : FileViewerFind.step(from: below, by: -1, count: ranges.count)
+        }
+        showFind(findResult, current: next, on: textView)
+        if let next { textView.revealFindMatch(next) }
+    }
+
+    // MARK: Hardware keys
+
+    override var canBecomeFirstResponder: Bool { claimsHardwareKeys && isActive }
+
+    /// Tab road only: nothing else holds this window's keyboard while a ▤
+    /// tab is in front (switching to it released the terminal), so the pane
+    /// takes first responder to receive ⌘F. It is not a text input — no
+    /// keyboard, no input session for `TerminalFocusArbiter` to juggle.
+    private func claimHardwareKeysIfNeeded() {
+        guard claimsHardwareKeys, isActive, isViewLoaded, view.window != nil,
+              !TerminalFocusArbiter.inputSuppressed, presentedViewController == nil,
+              !isFirstResponder, !findBar.textField.isFirstResponder
+        else { return }
+        becomeFirstResponder()
+    }
+
+    override var keyCommands: [UIKeyCommand]? {
+        guard let state = observedState, findAvailable(state) || findActive else { return nil }
+        let find = UIKeyCommand(
+            title: String(localized: "Find…"),
+            action: #selector(UIResponderStandardEditActions.find(_:)),
+            input: "f",
+            modifierFlags: .command
+        )
+        guard findActive else { return [find] }
+        let next = UIKeyCommand(
+            title: String(localized: "Find Next"),
+            action: #selector(UIResponderStandardEditActions.findNext(_:)),
+            input: "g",
+            modifierFlags: .command
+        )
+        let previous = UIKeyCommand(
+            title: String(localized: "Find Previous"),
+            action: #selector(UIResponderStandardEditActions.findPrevious(_:)),
+            input: "g",
+            modifierFlags: [.command, .shift]
+        )
+        return [find, next, previous]
+    }
+
+    // The standard edit actions, so the system Find menu (⌘F ⌘G ⇧⌘G) lands
+    // here too when the screen's text view holds a selection.
+    override func find(_ sender: Any?) { beginFind() }
+
+    override func findNext(_ sender: Any?) {
+        if findActive { stepFind(by: 1) } else { beginFind() }
+    }
+
+    override func findPrevious(_ sender: Any?) {
+        if findActive { stepFind(by: -1) } else { beginFind() }
+    }
+
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        switch action {
+        case #selector(UIResponderStandardEditActions.find(_:)),
+             #selector(UIResponderStandardEditActions.findNext(_:)),
+             #selector(UIResponderStandardEditActions.findPrevious(_:)):
+            guard let state = observedState else { return false }
+            return isActive && (findAvailable(state) || findActive)
+        default:
+            return super.canPerformAction(action, withSender: sender)
+        }
     }
 
     // MARK: Helpers

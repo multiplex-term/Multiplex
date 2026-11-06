@@ -3788,6 +3788,38 @@
         }
       }
     },
+    "Close find" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "検索を閉じる"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "關閉尋找"
+          }
+        }
+      }
+    },
+    "Close Find" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "検索を閉じる"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "關閉尋找"
+          }
+        }
+      }
+    },
     "Close message box" : {
       "localizations" : {
         "ja" : {
@@ -6312,6 +6344,86 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在聽寫收音前，先用 RNNoise 濾掉麥克風中持續的背景噪音 — 風扇、車流、耳機的嘶嘶聲；訊息框和按鍵列的聽寫都適用。模型只需從 xiph.org 下載一次（%@），會比對其公布的 SHA-256，且只保存在這部裝置上。"
+          }
+        }
+      }
+    },
+    "Find in file" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ファイル内を検索"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "在檔案中尋找"
+          }
+        }
+      }
+    },
+    "Find in File…" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ファイル内を検索…"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "在檔案中尋找…"
+          }
+        }
+      }
+    },
+    "Find Next" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "次を検索"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "尋找下一個"
+          }
+        }
+      }
+    },
+    "Find Previous" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "前を検索"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "尋找上一個"
+          }
+        }
+      }
+    },
+    "Find…" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "検索…"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "尋找…"
           }
         }
       }
@@ -9290,6 +9402,22 @@
         }
       }
     },
+    "Next match" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "次の一致"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "下一個符合項目"
+          }
+        }
+      }
+    },
     "Next Window" : {
       "localizations" : {
         "ja" : {
@@ -11234,6 +11362,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ 終端機主題的預覽"
+          }
+        }
+      }
+    },
+    "Previous match" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "前の一致"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "上一個符合項目"
           }
         }
       }

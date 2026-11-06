@@ -248,6 +248,38 @@ link/path resolution, the ⌗ viewport, or the ▤ file viewer.
   ⚠ `mountBlocksIfNeeded` must `setNeedsLayout` the scroll view before
   reading `contentSize`, or a teardown's stale tall height reads as a full
   viewport and the screen stays BLANK until the reader scrolls.
+- **FIND searches the selectable screen, and the bar is pane chrome**
+  (2026-11-06; `FileViewerFind` pure + tested, `FileViewerFindBarView`).
+  The query runs literal and case-insensitive over exactly
+  `FileViewerTextContent.text` (UTF-16 `NSRange`s, capped at 5 000 hits,
+  so the count reads `5000+`). Code, diff, and markdown source are searchable.
+  Rendered markdown flips to its source first (its blocks are not one text),
+  and the flip holds while find stays open across files. A picture, PDF, sound,
+  BINARY, or failure screen closes the bar; loading/idle keep it, so a query
+  survives a walk through the tree. Rules:
+  - Hits are DECOR, like the row grounds: `FileViewerTextView` washes them in
+    the backdrop (per text segment, only on visible rows), never as text
+    attributes and never through the selection. A copy carries none of it.
+  - The screen fires `contentDidChange` after every `setContent` (a rescale,
+    an appearance flip, a watch tick's quiet swap), and the pane re-searches
+    in place. A re-search never moves the reader: only a typed query or a
+    step reveals a hit, and a reveal leaves an already-visible hit alone and
+    centers an off-screen one. Large texts (>200 k units) wait 120 ms after
+    each keystroke; the scan runs detached.
+  - The bar sits under the header on every platform, so a raised keyboard
+    never covers it. The rails carry only a FIND chip (in-window rail,
+    visionOS ornament, side-panel header with `⋯` fallback). Return/⇧Return
+    and ◂ ▸ step, Esc and DONE close, and the query is kept for next time.
+  - ⌘F / ⌘G / ⇧⌘G are the standard `find:` / `findNext:` / `findPrevious:`
+    actions on the pane, so a selection in the screen still reaches them. **A
+    tab-road ▤ pane becomes first responder while active**
+    (`claimsHardwareKeys`): switching to it released the terminal, so nothing
+    else in the window holds keys, and with no responder ⌘F would reach no
+    one. It is not a text input, so `TerminalFocusArbiter` has no input
+    session to juggle. A side panel does NOT claim (the host terminal keeps
+    the keyboard, and ⌘F goes to the remote there). Its find field borrows
+    the terminal's keyboard (`lend`) and hands it back on close
+    (`resumeAfterPresentation`).
 - **The side panel is the first home for a terminal-summoned ▤/⌗ on iPad and
   visionOS** (2026-08-21; `SidePanelViewController`, `SidePanelPolicy`,
   `SidePanelWidth`): an overlay over the pane on regular-width iPad (≥ 660 pt)

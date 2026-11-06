@@ -958,6 +958,7 @@ final class ViewportUMDViewController: UIViewController {
     private(set) var fileSourceChip: UIKitChassisChip?
     private(set) var fileDiffChip: UIKitChassisChip?
     private(set) var fileSelectChip: UIKitChassisChip?
+    private(set) var fileFindChip: UIKitChassisChip?
     private(set) var fileTreeChip: UIKitChassisChip?
     private(set) var fileRefreshChip: UIKitChassisChip?
     private(set) var filePathLabel: UILabel?
@@ -1083,6 +1084,7 @@ final class ViewportUMDViewController: UIViewController {
         fileSourceChip = nil
         fileDiffChip = nil
         fileSelectChip = nil
+        fileFindChip = nil
         fileTreeChip = nil
         fileRefreshChip = nil
         filePathLabel = nil
@@ -1153,6 +1155,20 @@ final class ViewportUMDViewController: UIViewController {
             select.accessibilityIdentifier = "fileViewer.markdownSelect"
             fileSelectChip = select
             views.append(select)
+        }
+
+        if state.findAvailable {
+            let find = fileChip(
+                "FIND",
+                prominent: state.findActive,
+                accessibility: state.findActive
+                    ? String(localized: "Close find")
+                    : String(localized: "Find in file"),
+                action: fileViewer.toggleFind
+            )
+            find.accessibilityIdentifier = "fileViewer.find"
+            fileFindChip = find
+            views.append(find)
         }
 
         let path = UILabel()

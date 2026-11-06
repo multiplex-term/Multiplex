@@ -2328,7 +2328,19 @@ extension TerminalWindowViewController {
                 contentSafeArea: .zero,
                 isActive: true,
                 showsInWindowRail: false,
+                // The host terminal keeps the keyboard beside a panel; the
+                // find field borrows it and hands it back on close.
+                claimsHardwareKeys: false,
                 ornamentRailDidChange: refreshHeader,
+                borrowKeyboard: { [weak self] field in
+                    let terminal = self?.workspace.controller(for: hostTabID)?.terminalView
+                    TerminalFocusArbiter.lend(terminal, to: field)
+                },
+                returnKeyboard: { [weak self] in
+                    guard let terminal = self?.workspace.controller(for: hostTabID)?.terminalView
+                    else { return }
+                    TerminalFocusArbiter.resumeAfterPresentation(terminal)
+                },
                 openInNewTab: { [weak self, weak fileViewer] row in
                     guard let fileViewer else { return }
                     self?.openFileInNewViewerTab(

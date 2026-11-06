@@ -266,6 +266,14 @@ final class FileViewerTextView: UITextView {
     private let backdrop = DecorView()
     private let gutter = DecorView()
     private var pendingTargetLine: Int?
+    /// Find washes (`FileViewerFind`): decor like the row grounds, drawn
+    /// behind the glyphs, so a copy never carries them.
+    private(set) var findMatches: [NSRange] = []
+    private(set) var currentFindMatch: Int?
+    private var pendingFindReveal: Int?
+    /// Fires after every `setContent` — a rescale, an appearance flip, or a
+    /// watch tick's quiet swap — so an open find re-runs over the new text.
+    var contentDidChange: (() -> Void)?
     /// The pinch recognizer holds its target weakly — this is its owner.
     private var scalePinch: FileViewerTextScalePinch?
     /// Keeps the hand-built TextKit 2 stack alive: the storage retains its
@@ -341,6 +349,52 @@ final class FileViewerTextView: UITextView {
             pendingTargetLine = targetLine
         }
         setNeedsLayout()
+        contentDidChange?()
+    }
+
+    /// Paints `ranges` as find hits, `current` stronger. Ranges index the
+    /// current `content.text`; the caller re-searches on `contentDidChange`.
+    func setFindMatches(_ ranges: [NSRange], current: Int?) {
+        findMatches = ranges
+        currentFindMatch = current.flatMap { ranges.indices.contains($0) ? $0 : nil }
+        backdrop.setNeedsDisplay()
+    }
+
+    /// Brings a match on screen: untouched if already in view, otherwise
+    /// centered (the `path:12` landing's rule). Defers past first layout.
+    func revealFindMatch(_ index: Int) {
+        guard findMatches.indices.contains(index) else { return }
+        guard bounds.height > 0, bounds.width > 0 else {
+            pendingFindReveal = index
+            return
+        }
+        let rects = findMatchRects(findMatches[index], ensuringLayout: true)
+        guard let first = rects.first else { return }
+        let rect = rects.dropFirst().reduce(first) { $0.union($1) }
+        let visible = CGRect(
+            x: bounds.minX, y: bounds.minY + textContainerInset.top,
+            width: bounds.width,
+            height: max(0, bounds.height - textContainerInset.top - textContainerInset.bottom)
+        )
+        guard !visible.contains(rect) else { return }
+        let centered = rect.minY - (bounds.height - rect.height) / 2
+        let limit = max(0, contentSize.height - bounds.height)
+        setContentOffset(CGPoint(x: 0, y: min(max(0, centered), limit)), animated: false)
+    }
+
+    /// UTF-16 offset of the first visible character — where a fresh search
+    /// starts counting, so the first hit is the one the reader is looking at.
+    func firstVisibleOffset() -> Int {
+        guard let layoutManager = textLayoutManager,
+              let contentManager = layoutManager.textContentManager,
+              let fragment = layoutManager.textLayoutFragment(
+                  for: CGPoint(x: 0, y: max(0, bounds.origin.y - textContainerInset.top))
+              )
+        else { return 0 }
+        return contentManager.offset(
+            from: layoutManager.documentRange.location,
+            to: fragment.rangeInElement.location
+        )
     }
 
     override func layoutSubviews() {
@@ -356,6 +410,10 @@ final class FileViewerTextView: UITextView {
         // One main-queue hop after the first real layout pass: applying
         // inside this pass reads pre-settle container geometry and the
         // centered offset lands short.
+        if let index = pendingFindReveal, bounds.height > 0, bounds.width > 0 {
+            pendingFindReveal = nil
+            DispatchQueue.main.async { [weak self] in self?.revealFindMatch(index) }
+        }
         if pendingTargetLine != nil, bounds.height > 0, bounds.width > 0 {
             let line = pendingTargetLine
             pendingTargetLine = nil
@@ -404,7 +462,11 @@ final class FileViewerTextView: UITextView {
     private func drawGrounds(in _: CGRect) {
         guard let content else { return }
         let shift = bounds.origin.y
+        var visibleRows: ClosedRange<Int>?
         forEachVisibleRow { line, frame in
+            visibleRows = visibleRows.map {
+                min($0.lowerBound, line)...max($0.upperBound, line)
+            } ?? line...line
             guard line < content.rows.count,
                   let ground = content.rows[line].ground
             else { return }
@@ -417,6 +479,60 @@ final class FileViewerTextView: UITextView {
                 .normal
             )
         }
+        if let visibleRows { drawFindWashes(rows: visibleRows, shift: shift) }
+    }
+
+    /// Over the row grounds (a hit inside a diff's add/delete tint still
+    /// reads), under the glyphs. Only matches on visible rows are measured.
+    private func drawFindWashes(rows: ClosedRange<Int>, shift: CGFloat) {
+        guard let content, !findMatches.isEmpty else { return }
+        let start = content.lineStarts[rows.lowerBound]
+        let end = rows.upperBound + 1 < content.lineStarts.count
+            ? content.lineStarts[rows.upperBound + 1] : content.text.length
+        guard var index = FileViewerFind.index(atOrAfter: start, in: findMatches),
+              findMatches[index].location >= start
+        else { return }
+        let hit = TallyPalette.caution.withAlphaComponent(0.28)
+            .resolvedColor(with: traitCollection)
+        let current = TallyPalette.caution.withAlphaComponent(0.7)
+            .resolvedColor(with: traitCollection)
+        while index < findMatches.count, findMatches[index].location < end {
+            (index == currentFindMatch ? current : hit).setFill()
+            for rect in findMatchRects(findMatches[index], ensuringLayout: false) {
+                UIBezierPath(
+                    roundedRect: rect.offsetBy(dx: 0, dy: -shift).insetBy(dx: -1, dy: 0),
+                    cornerRadius: 2
+                ).fill()
+            }
+            index += 1
+        }
+    }
+
+    /// A match's segment rects in content coordinates — one per visual line,
+    /// so a hit that wraps washes two short bars, never a box across the
+    /// text. `ensuringLayout` realizes layout from the top so an off-screen
+    /// frame is exact, not an estimate.
+    private func findMatchRects(_ range: NSRange, ensuringLayout: Bool) -> [CGRect] {
+        guard let layoutManager = textLayoutManager,
+              let contentManager = layoutManager.textContentManager,
+              let start = contentManager.location(
+                  layoutManager.documentRange.location, offsetBy: range.location
+              ),
+              let end = contentManager.location(start, offsetBy: range.length),
+              let textRange = NSTextRange(location: start, end: end)
+        else { return [] }
+        if ensuringLayout,
+           let prefix = NSTextRange(location: layoutManager.documentRange.location, end: end) {
+            layoutManager.ensureLayout(for: prefix)
+        }
+        var rects: [CGRect] = []
+        layoutManager.enumerateTextSegments(
+            in: textRange, type: .highlight, options: [.rangeNotRequired]
+        ) { _, frame, _, _ in
+            rects.append(frame.offsetBy(dx: textContainerInset.left, dy: textContainerInset.top))
+            return true
+        }
+        return rects
     }
 
     private func drawGutter(in _: CGRect) {

@@ -521,6 +521,7 @@ final class SidePanelHeaderView: UIView {
         case refresh
         case sourceDiff
         case select
+        case find
         case textScale
         case host
     }
@@ -698,6 +699,9 @@ final class SidePanelHeaderView: UIView {
         if let caption = state.markdownSelectionCaption {
             candidates.append((.select, Self.chipWidth(caption) + gap))
         }
+        if state.findAvailable {
+            candidates.append((.find, Self.chipWidth("FIND") + gap))
+        }
         candidates.append((.textScale, Self.chipWidth("A−") + 2 + Self.chipWidth("A+") + gap))
         candidates.append((.host, Self.badgeWidth(state.hostName.uppercased()) + gap))
 
@@ -868,6 +872,17 @@ final class SidePanelHeaderView: UIView {
                 )
                 select.accessibilityIdentifier = "sidePanel.file.select"
                 row.addArrangedSubview(select)
+            case .find:
+                let find = UIKitChassisChip.rail(
+                    "FIND",
+                    prominent: state.findActive,
+                    accessibilityLabel: state.findActive
+                        ? String(localized: "Close find")
+                        : String(localized: "Find in file"),
+                    action: configuration.toggleFind
+                )
+                find.accessibilityIdentifier = "sidePanel.file.find"
+                row.addArrangedSubview(find)
             case .textScale:
                 let store = FileViewerTextScaleStore.shared
                 let smaller = UIKitChassisChip.rail(
@@ -939,6 +954,14 @@ final class SidePanelHeaderView: UIView {
                         ? String(localized: "Done Selecting")
                         : String(localized: "Select Source Text")
                 ) { _ in configuration.toggleMarkdownSelection() })
+            case .find:
+                guard state.findAvailable else { continue }
+                actions.append(UIAction(
+                    title: state.findActive
+                        ? String(localized: "Close Find")
+                        : String(localized: "Find in File…"),
+                    state: state.findActive ? .on : .off
+                ) { _ in configuration.toggleFind() })
             case .textScale:
                 let scaleStore = FileViewerTextScaleStore.shared
                 actions.append(UIAction(

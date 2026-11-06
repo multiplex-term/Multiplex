@@ -29,6 +29,9 @@ extension Notification.Name {
     static let multiplexDebugFileViewerPlay = Notification.Name(
         "MultiplexDebugFileViewerPlay"
     )
+    static let multiplexDebugFileViewerFind = Notification.Name(
+        "MultiplexDebugFileViewerFind"
+    )
     static let multiplexDebugSidePanelSplit = Notification.Name(
         "MultiplexDebugSidePanelSplit"
     )
@@ -120,7 +123,9 @@ enum SidePanelDebugHook {
 /// resolve → open path a finger takes, which no sim tap can drive.
 /// `….debug.fvplay` presses PLAY/PAUSE on the active viewer's sound screen
 /// (the panel's own chip action; proof is the PLAYING lamp and a moving
-/// clock in the next screenshot).
+/// clock in the next screenshot). `….debug.fvfind` opens the active
+/// viewer's find bar with `MULTIPLEX_FIND_QUERY` (default `func`) and steps
+/// to the next match on every later post.
 @MainActor
 enum FileViewerDebugHook {
     private static var installed = false
@@ -170,6 +175,14 @@ enum FileViewerDebugHook {
         ) { _ in
             NotificationCenter.default.post(
                 name: .multiplexDebugFileViewerPlay, object: nil
+            )
+        }
+        var findToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.fvfind", &findToken, .main
+        ) { _ in
+            NotificationCenter.default.post(
+                name: .multiplexDebugFileViewerFind, object: nil
             )
         }
     }

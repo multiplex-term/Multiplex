@@ -315,6 +315,10 @@ app.multiplexterm.multiplex.<name>`:
   the drop plumbing is covered by the fake-session unit tests.
 - `debug.kbdlock` — toggle the software-keyboard lock headlessly.
 - `debug.fvselect` — the file viewer's markdown SELECT mode.
+- `debug.fvfind` — open the active viewer's find bar with
+  `MULTIPLEX_FIND_QUERY` (default `func`) typed in; each later post steps
+  to the next match (a Return). Proof is the `n/N` readout and the strong
+  wash moving in the next screenshot. ⌘F itself has no headless route.
 - `debug.fvimage` — press the first image placeholder on the rendered
   markdown screen (destination → resolve → open, the finger's own path).
 - `debug.fvplay` — press PLAY/PAUSE on the active viewer's sound screen;

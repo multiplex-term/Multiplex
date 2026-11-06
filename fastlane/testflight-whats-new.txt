@@ -4,11 +4,13 @@ NEW SINCE 1.5.1
 • iPhone Duo: on the closed display in landscape, the bars now match portrait, without the grey bands, and the session title sits at the left edge.
 • iPhone: locking the keyboard no longer takes keys off a roomy key row. In landscape, ~ and / stay while the keyboard is locked, with RET added alongside them.
 • Terminal: tapping a slash command such as /compact in an agent's input bar or command list no longer offers to open it as a file.
+• File viewer: FIND searches the open file. Press FIND on the bar (or Command-F with a keyboard), type, and every match is marked, with a count; Return or the arrows step through them, and Command-G and Shift-Command-G step from the keyboard. It works on code, diffs and markdown (which switches to its source), and stays open as you pick other files from the tree.
 
 PLEASE TRY
 1. On iPhone Duo closed, held upright, attach a session: the key row should reach under the side column, with TMUX on it and fully on screen, not clipped by the rounded corner. The column's chips should end above the row, with the keyboard up or down. Turn the phone both ways in landscape: the row should run under the column both times, and ESC and the last key should stay clear of the corners. Then open the phone flat in landscape: the row should run under the column there too, with the deck showing and with it hidden. Try it as a book, and held upright with the deck hidden: the ends of the row should clear the corners.
 2. Open a file (three-dot menu or FILE) in its own tab, on the closed display both ways in landscape, and on the open display upright: the buttons at the ends of the bottom bar should be fully on screen and easy to press. Try a web page tab too. On the closed display in landscape, the bars should have no grey bands, as in portrait.
 3. On iPhone in landscape, attach a session and lock the keyboard (hold the keyboard key), then unlock it: the row should keep the same keys in both states, apart from the lock and RET.
 4. In Claude Code or Codex, type /compact in the input bar and tap it: no file sheet should appear. Tap a real path such as /etc/hosts in the pane: the file sheet should still open.
+5. Open a code file in the file viewer and press FIND, then type a word that appears several times: each match should be marked, the count should read 1/N, and Return should move to the next match, scrolling to it. Pick another file from the tree: the search should carry over. Try a diff and a README too, and Command-F with a hardware keyboard. On iPad, open a path from a terminal into the side panel, use FIND, then DONE: typing should go back to the terminal.
 
 Feedback: screenshot in TestFlight
