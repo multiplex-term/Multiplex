@@ -492,10 +492,8 @@ final class FileViewerTextView: UITextView {
         guard var index = FileViewerFind.index(atOrAfter: start, in: findMatches),
               findMatches[index].location >= start
         else { return }
-        let hit = TallyPalette.caution.withAlphaComponent(0.28)
-            .resolvedColor(with: traitCollection)
-        let current = TallyPalette.caution.withAlphaComponent(0.7)
-            .resolvedColor(with: traitCollection)
+        let hit = FileViewerFindWashView.ink(current: false, traits: traitCollection)
+        let current = FileViewerFindWashView.ink(current: true, traits: traitCollection)
         while index < findMatches.count, findMatches[index].location < end {
             (index == currentFindMatch ? current : hit).setFill()
             for rect in findMatchRects(findMatches[index], ensuringLayout: false) {

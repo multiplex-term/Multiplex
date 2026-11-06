@@ -28,25 +28,41 @@ enum FileViewerFind {
         in text: String,
         limit: Int = defaultLimit
     ) -> Result {
-        guard !query.isEmpty, limit > 0 else { return .empty }
         let haystack = text as NSString
-        let options: NSString.CompareOptions = [.caseInsensitive]
         var ranges: [NSRange] = []
-        var location = 0
-        while location < haystack.length {
+        let truncated = collect(
+            query, in: haystack,
+            within: NSRange(location: 0, length: haystack.length),
+            limit: limit, into: &ranges
+        )
+        return Result(ranges: ranges, truncated: truncated)
+    }
+
+    /// Appends the hits inside `within` to `ranges`; true when `limit` cut
+    /// the search short.
+    fileprivate static func collect(
+        _ query: String,
+        in haystack: NSString,
+        within: NSRange,
+        limit: Int,
+        into ranges: inout [NSRange]
+    ) -> Bool {
+        guard !query.isEmpty, limit > 0 else { return false }
+        let options: NSString.CompareOptions = [.caseInsensitive]
+        let end = NSMaxRange(within)
+        var location = within.location
+        while location < end {
             let found = haystack.range(
                 of: query,
                 options: options,
-                range: NSRange(location: location, length: haystack.length - location)
+                range: NSRange(location: location, length: end - location)
             )
             guard found.location != NSNotFound, found.length > 0 else { break }
-            if ranges.count == limit {
-                return Result(ranges: ranges, truncated: true)
-            }
+            if ranges.count >= limit { return true }
             ranges.append(found)
             location = NSMaxRange(found)
         }
-        return Result(ranges: ranges, truncated: false)
+        return false
     }
 
     /// The match a fresh search lands on: the first one at or after `offset`
@@ -76,5 +92,68 @@ enum FileViewerFind {
         let total = "\(result.ranges.count)" + (result.truncated ? "+" : "")
         let position = current.map { "\($0 + 1)" } ?? "–"
         return "\(position)/\(total)"
+    }
+}
+
+/// What a find searches: one or more runs of text, each a separate surface on
+/// screen, joined into a single offset space so ranges, landing, and stepping
+/// stay plain `NSRange` arithmetic. A code screen is one run; rendered
+/// Markdown is one run per text block (a paragraph, a heading, a fence, a
+/// table cell). A hit never spans two runs — the reader can't see a word
+/// that starts in one paragraph and ends in the next.
+struct FileViewerFindCorpus: Equatable {
+    /// The runs joined by `separator`.
+    let text: String
+    /// Each run's first UTF-16 offset in `text`, ascending.
+    let runStarts: [Int]
+    let runLengths: [Int]
+
+    static let separator = "\n"
+
+    init(runs: [String]) {
+        var starts: [Int] = []
+        var lengths: [Int] = []
+        var offset = 0
+        for run in runs {
+            let length = (run as NSString).length
+            starts.append(offset)
+            lengths.append(length)
+            offset += length + 1
+        }
+        text = runs.joined(separator: Self.separator)
+        runStarts = starts
+        runLengths = lengths
+    }
+
+    init(text: String) { self.init(runs: [text]) }
+
+    var length: Int { (text as NSString).length }
+
+    func matches(of query: String, limit: Int = FileViewerFind.defaultLimit) -> FileViewerFind.Result {
+        let haystack = text as NSString
+        var ranges: [NSRange] = []
+        var truncated = false
+        for (start, length) in zip(runStarts, runLengths) where !truncated {
+            truncated = FileViewerFind.collect(
+                query, in: haystack,
+                within: NSRange(location: start, length: length),
+                limit: limit, into: &ranges
+            )
+        }
+        return FileViewerFind.Result(ranges: ranges, truncated: truncated)
+    }
+
+    /// The run a range sits in, and the range in that run's own offsets.
+    func locate(_ range: NSRange) -> (run: Int, range: NSRange)? {
+        var low = 0, high = runStarts.count
+        while low < high {
+            let mid = (low + high) / 2
+            if runStarts[mid] <= range.location { low = mid + 1 } else { high = mid }
+        }
+        let run = low - 1
+        guard runStarts.indices.contains(run) else { return nil }
+        let local = NSRange(location: range.location - runStarts[run], length: range.length)
+        guard NSMaxRange(local) <= runLengths[run] else { return nil }
+        return (run, local)
     }
 }

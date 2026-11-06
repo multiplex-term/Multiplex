@@ -248,21 +248,37 @@ link/path resolution, the ⌗ viewport, or the ▤ file viewer.
   ⚠ `mountBlocksIfNeeded` must `setNeedsLayout` the scroll view before
   reading `contentSize`, or a teardown's stale tall height reads as a full
   viewport and the screen stays BLANK until the reader scrolls.
-- **FIND searches the selectable screen, and the bar is pane chrome**
-  (2026-11-06; `FileViewerFind` pure + tested, `FileViewerFindBarView`).
-  The query runs literal and case-insensitive over exactly
-  `FileViewerTextContent.text` (UTF-16 `NSRange`s, capped at 5 000 hits,
-  so the count reads `5000+`). Code, diff, and markdown source are searchable.
-  Rendered markdown flips to its source first (its blocks are not one text),
-  and the flip holds while find stays open across files. A picture, PDF, sound,
+- **FIND searches what the screen shows, and the bar is pane chrome**
+  (2026-11-06; `FileViewerFind` / `FileViewerFindCorpus` /
+  `MarkdownFindText` pure + tested, `FileViewerFindBarView`,
+  `FileViewerFindTarget`). The query runs literal and case-insensitive over
+  the screen's own text (UTF-16 `NSRange`s, capped at 5 000 hits, so the
+  count reads `5000+`). Code, diff, markdown source, AND the rendered
+  markdown preview are searchable. **The preview is searched as it reads,
+  never flipped to source** (the first cut flipped it, which threw away the
+  rendering the reader was searching and their place in it). It is one run per
+  text surface — heading, paragraph, list prose, fence, table cell — and a
+  hit never spans two runs. `MarkdownFindText` spells each run exactly as
+  the renderer does (an empty run is one space, an image is its `⟨image: …⟩`
+  / `⌄ image: …` caption), and a UIKit test holds the two together. Blocks
+  past the mount frontier have no view: they wash as they mount, and a
+  reveal mounts through the hit's block first. That is the price of
+  scrolling there, paid in one go: measured ~1.5 s to reach paragraph 350
+  of 400 (visionOS sim, Debug), split between building the TextKit views and
+  laying out the stack. A width hint to skip the second measurement saved
+  only ~0.1 s and was dropped. Estimated heights stay rejected (see the
+  mount record above). A picture, PDF, sound,
   BINARY, or failure screen closes the bar; loading/idle keep it, so a query
   survives a walk through the tree. Rules:
   - Hits are DECOR, like the row grounds: `FileViewerTextView` washes them in
-    the backdrop (per text segment, only on visible rows), never as text
-    attributes and never through the selection. A copy carries none of it.
-  - The screen fires `contentDidChange` after every `setContent` (a rescale,
-    an appearance flip, a watch tick's quiet swap), and the pane re-searches
-    in place. A re-search never moves the reader: only a typed query or a
+    the backdrop (per text segment, only on visible rows), and a preview
+    text surface carries a `FileViewerFindWashView` behind its TextKit
+    canvas (inside the text view, so a sideways-scrolled fence keeps its
+    washes). Never text attributes, never the selection, and a copy carries
+    none of it.
+  - The screen fires `findCorpusDidChange` when its text changes (a rescale,
+    an appearance flip, a watch tick's quiet swap, a picture shown in place
+    re-spelling its caption), and the pane re-searches in place. A re-search never moves the reader: only a typed query or a
     step reveals a hit, and a reveal leaves an already-visible hit alone and
     centers an off-screen one. Large texts (>200 k units) wait 120 ms after
     each keystroke; the scan runs detached.

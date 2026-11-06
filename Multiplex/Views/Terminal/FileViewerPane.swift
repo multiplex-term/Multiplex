@@ -185,10 +185,10 @@ final class FileViewerPaneViewController: UIViewController {
     private(set) var findIndex: Int?
     private var findTask: Task<Void, Never>?
     private var findGeneration = 0
-    /// A typed run found no text yet (rendered markdown flipping to source
-    /// builds off-main): the run that follows the text's arrival lands too.
+    /// A typed run found no text yet (a screen still filling): the run that
+    /// follows the text's arrival lands too.
     private var findAwaitsText = false
-    private weak var boundFindTextView: FileViewerTextView?
+    private weak var boundFindTarget: FileViewerFindTarget?
 
     #if DEBUG
     private var debugObservers: [NSObjectProtocol] = []
@@ -571,11 +571,6 @@ final class FileViewerPaneViewController: UIViewController {
         if selectKey != markdownSelectKey {
             markdownSelectKey = selectKey
             selectingMarkdownSource = false
-        }
-        // An open find keeps reading source as the reader moves through the
-        // tree: rendered blocks are not one searchable text.
-        if findActive, case .markdown = bodyKey(for: state), markdownSelectionAvailable(state) {
-            selectingMarkdownSource = true
         }
         observedState = state
         updateHeader(state)
@@ -1473,8 +1468,8 @@ final class FileViewerPaneViewController: UIViewController {
 
     /// What an open find can do with the current body.
     private enum FindSupport {
-        /// A selectable text screen (code, diff, markdown source) — or
-        /// rendered markdown, which flips to its source.
+        /// A text screen (code, diff, markdown source) or the rendered
+        /// Markdown preview, searched as it reads.
         case searchable
         /// Between documents (loading, nothing chosen): the bar stays up so
         /// a query survives a walk through the tree.
@@ -1485,8 +1480,7 @@ final class FileViewerPaneViewController: UIViewController {
 
     private func findSupport(_ state: FileViewerPaneObservedState) -> FindSupport {
         switch bodyKey(for: state) {
-        case .code, .markdownSource, .diff: .searchable
-        case .markdown: markdownSelectionAvailable(state) ? .searchable : .unsupported
+        case .code, .markdownSource, .diff, .markdown: .searchable
         case .idle, .loading: .transitional
         case .binary, .image, .pdf, .pdfLocked, .audio, .audioUnplayable, .failure: .unsupported
         }
@@ -1496,12 +1490,13 @@ final class FileViewerPaneViewController: UIViewController {
         findSupport(state) == .searchable
     }
 
-    /// The selectable screen a find reads, when one is mounted.
-    private var findTextView: FileViewerTextView? {
+    /// The screen a find reads, when one is mounted.
+    private var findTarget: FileViewerFindTarget? {
         switch currentBodyView {
         case let code as FileViewerCodeContentView: code.textView
         case let source as FileViewerMarkdownSourceContentView: source.textView
         case let diff as FileViewerDiffContentView: diff.textView
+        case let markdown as FileViewerMarkdownContentView: markdown
         default: nil
         }
     }
@@ -1515,10 +1510,6 @@ final class FileViewerPaneViewController: UIViewController {
         guard isActive, !TerminalFocusArbiter.inputSuppressed,
               let state = observedState, findAvailable(state)
         else { return }
-        if case .markdown = bodyKey(for: state) {
-            selectingMarkdownSource = true
-            updateBody(state)
-        }
         let opening = !findActive
         findActive = true
         findBar.isHidden = false
@@ -1541,9 +1532,9 @@ final class FileViewerPaneViewController: UIViewController {
         let hadKeyboard = findBar.textField.isFirstResponder
         if hadKeyboard { findBar.textField.resignFirstResponder() }
         findBar.isHidden = true
-        boundFindTextView?.contentDidChange = nil
-        boundFindTextView?.setFindMatches([], current: nil)
-        boundFindTextView = nil
+        boundFindTarget?.findCorpusDidChange = nil
+        boundFindTarget?.setFindMatches([], current: nil)
+        boundFindTarget = nil
         findResult = .empty
         findIndex = nil
         findAwaitsText = false
@@ -1564,14 +1555,14 @@ final class FileViewerPaneViewController: UIViewController {
         case .transitional, .searchable:
             break
         }
-        let target = findTextView
-        guard target !== boundFindTextView else { return }
-        boundFindTextView?.contentDidChange = nil
-        boundFindTextView?.setFindMatches([], current: nil)
-        boundFindTextView = target
+        let target = findTarget
+        guard target !== boundFindTarget else { return }
+        boundFindTarget?.findCorpusDidChange = nil
+        boundFindTarget?.setFindMatches([], current: nil)
+        boundFindTarget = target
         findResult = .empty
         findIndex = nil
-        target?.contentDidChange = { [weak self] in self?.runFind(.refreshed) }
+        target?.findCorpusDidChange = { [weak self] in self?.runFind(.refreshed) }
         runFind(.refreshed)
     }
 
@@ -1590,11 +1581,11 @@ final class FileViewerPaneViewController: UIViewController {
         let query = findBar.query
         let run: FindRun = findAwaitsText ? .typed : requested
         findAwaitsText = false
-        guard findActive, let textView = findTextView, let content = textView.content,
+        guard findActive, let target = findTarget, let corpus = target.findCorpus,
               !query.isEmpty
         else {
             findAwaitsText = findActive && run == .typed && !query.isEmpty
-            showFind(.empty, current: nil, on: findTextView)
+            showFind(.empty, current: nil, on: findTarget)
             // No text on screen yet is not NO MATCH.
             findBar.apply(count: "", hasMatches: false)
             return
@@ -1603,38 +1594,37 @@ final class FileViewerPaneViewController: UIViewController {
             findResult.ranges.indices.contains($0) ? findResult.ranges[$0].location : nil
         }
         let anchor: Int? = switch run {
-        case .typed: previous ?? textView.firstVisibleOffset()
+        case .typed: previous ?? target.firstVisibleFindOffset()
         case .refreshed: previous
         }
-        let text = content.text.string
         // A capped 1.5 MB file costs a scan per keystroke; let a burst of
         // typing settle first. Small files answer on the keystroke.
-        let settles = content.text.length > 200_000
+        let settles = corpus.length > 200_000
         findTask = Task { [weak self] in
             if settles {
                 try? await Task.sleep(for: .milliseconds(120))
                 guard !Task.isCancelled else { return }
             }
             let result = await Task.detached {
-                FileViewerFind.matches(of: query, in: text)
+                corpus.matches(of: query)
             }.value
             guard !Task.isCancelled, let self, generation == self.findGeneration,
-                  textView === self.findTextView
+                  target === self.findTarget
             else { return }
             let current = anchor.flatMap { FileViewerFind.index(atOrAfter: $0, in: result.ranges) }
-            self.showFind(result, current: current, on: textView)
-            if run == .typed, let current { textView.revealFindMatch(current) }
+            self.showFind(result, current: current, on: target)
+            if run == .typed, let current { target.revealFindMatch(current) }
         }
     }
 
     private func showFind(
         _ result: FileViewerFind.Result,
         current: Int?,
-        on textView: FileViewerTextView?
+        on target: FileViewerFindTarget?
     ) {
         findResult = result
         findIndex = current
-        textView?.setFindMatches(result.ranges, current: current)
+        target?.setFindMatches(result.ranges, current: current)
         findBar.apply(
             count: FileViewerFind.countText(current: current, result: result, query: findBar.query),
             hasMatches: !result.ranges.isEmpty
@@ -1645,16 +1635,16 @@ final class FileViewerPaneViewController: UIViewController {
     /// changed under the query), the first step counts from the screen top.
     func stepFind(by delta: Int) {
         let ranges = findResult.ranges
-        guard findActive, let textView = findTextView, !ranges.isEmpty else { return }
+        guard findActive, let target = findTarget, !ranges.isEmpty else { return }
         let next: Int?
         if let findIndex {
             next = FileViewerFind.step(from: findIndex, by: delta, count: ranges.count)
         } else {
-            let below = FileViewerFind.index(atOrAfter: textView.firstVisibleOffset(), in: ranges)
+            let below = FileViewerFind.index(atOrAfter: target.firstVisibleFindOffset(), in: ranges)
             next = delta > 0 ? below : FileViewerFind.step(from: below, by: -1, count: ranges.count)
         }
-        showFind(findResult, current: next, on: textView)
-        if let next { textView.revealFindMatch(next) }
+        showFind(findResult, current: next, on: target)
+        if let next { target.revealFindMatch(next) }
     }
 
     // MARK: Hardware keys
@@ -2966,6 +2956,7 @@ final class FileViewerMarkdownTextView: UITextView, UITextViewDelegate {
             // are not built yet and resolve against the new appearance when
             // they mount.
             view.attributedText = view.attributed.text
+            FileViewerFindWashView.track(on: view)
         }
     }
 
@@ -2990,6 +2981,7 @@ final class FileViewerMarkdownTextView: UITextView, UITextViewDelegate {
         lastMeasuredWidth = -1
         measuredHeight = nil
         invalidateIntrinsicContentSize()
+        FileViewerFindWashView.track(on: self)
     }
 
     /// Measured height per width, because a stack view asks EVERY arranged
@@ -3019,6 +3011,7 @@ final class FileViewerMarkdownTextView: UITextView, UITextViewDelegate {
             measuredHeight = nil
             invalidateIntrinsicContentSize()
         }
+        FileViewerFindWashView.track(on: self)
     }
 
     func textView(
@@ -3307,6 +3300,19 @@ final class FileViewerMarkdownContentView: UIView, UIScrollViewDelegate {
     private var textScale = FileViewerTextScale.default
     private var pinch: FileViewerTextScalePinch?
 
+    // Find: the preview is searched as it reads, not flipped to source.
+    var findCorpusDidChange: (() -> Void)?
+    /// Built on first use and kept until the document or its shown pictures
+    /// change; `findRunBlocks[i]` is run i's top-level block.
+    private var cachedFindCorpus: FileViewerFindCorpus?
+    private var findRunBlocks: [Int] = []
+    /// Each block's first run, plus a trailing `runs.count` sentinel.
+    private var blockFirstRun: [Int] = []
+    private(set) var findMatches: [NSRange] = []
+    private(set) var currentFindMatch: Int?
+    private var pendingFindReveal: Int?
+    private var washedTextViews = NSHashTable<UITextView>.weakObjects()
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = UIKitChassis.screen
@@ -3358,8 +3364,12 @@ final class FileViewerMarkdownContentView: UIView, UIScrollViewDelegate {
     /// blocks pick the same map up as they are built.
     func setImageStates(_ states: [String: FileViewerController.InlineImage]) {
         guard states != imageStates else { return }
+        let captionsChange = Set(states.keys) != Set(imageStates.keys)
         imageStates = states
         applyImageStates()
+        // A picture shown in place re-spells its caption (`⟨image⟩` → `⌄
+        // image`), so an open find re-reads the preview.
+        if captionsChange { invalidateFindCorpus() }
     }
 
     private func applyImageStates() {
@@ -3459,11 +3469,13 @@ final class FileViewerMarkdownContentView: UIView, UIScrollViewDelegate {
         scrollView.setNeedsLayout()
         scrollView.layoutIfNeeded()
         restore(anchor)
+        // A rebuilt fence or table is a fresh text surface with no washes.
+        applyFindWashes()
     }
 
     /// The first mounted block the reader can see, and how far into it they
     /// are — the pair that survives a reflow.
-    private func currentAnchor() -> (index: Int, offsetInBlock: CGFloat)? {
+    fileprivate func currentAnchor() -> (index: Int, offsetInBlock: CGFloat)? {
         let top = scrollView.contentOffset.y
         for index in 0..<mountedCount {
             let frame = mounted[index].view.convert(
@@ -3490,6 +3502,7 @@ final class FileViewerMarkdownContentView: UIView, UIScrollViewDelegate {
     func apply(blocks: [MarkdownBlock]) {
         guard self.blocks != blocks else { return }
         self.blocks = blocks
+        invalidateFindCorpus()
         let oldOffset = scrollView.contentOffset
         for child in blockStack.arrangedSubviews {
             blockStack.removeArrangedSubview(child)
@@ -3512,6 +3525,12 @@ final class FileViewerMarkdownContentView: UIView, UIScrollViewDelegate {
         // view only after `apply(blocks:)` has already run.
         restyleNearViewport()
         mountBlocksIfNeeded()
+        // One main-queue hop after the first real layout pass, the code
+        // screen's rule: inside this pass the stack has not settled yet.
+        if let index = pendingFindReveal, bounds.height > 0, bounds.width > 0 {
+            pendingFindReveal = nil
+            DispatchQueue.main.async { [weak self] in self?.revealFindMatch(index) }
+        }
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
@@ -3538,22 +3557,28 @@ final class FileViewerMarkdownContentView: UIView, UIScrollViewDelegate {
         scrollView.setNeedsLayout()
         scrollView.layoutIfNeeded()
         var passes = 0
+        let before = mountedCount
         while mountedCount < blocks.count, passes < Self.maximumMountPasses {
             passes += 1
             let reach = max(scrollView.contentOffset.y, pendingRestoreOffset ?? 0)
                 + max(scrollView.bounds.height, 1)
                 + Self.mountAhead
             guard scrollView.contentSize.height < reach else { break }
-            let end = min(mountedCount + Self.mountBatch, blocks.count)
-            while mountedCount < end {
-                let block = makeBlock(blocks[mountedCount])
-                mounted.append(block)
-                blockStack.addArrangedSubview(block.view)
-                mountedCount += 1
-            }
+            mount(through: min(mountedCount + Self.mountBatch, blocks.count) - 1)
             // Resolve the new content height before deciding on another batch.
             scrollView.setNeedsLayout()
             scrollView.layoutIfNeeded()
+        }
+        if mountedCount > before { applyFindWashes(from: before) }
+    }
+
+    /// Appends blocks up to and including `last`, in order.
+    private func mount(through last: Int) {
+        while mountedCount <= last, mountedCount < blocks.count {
+            let block = makeBlock(blocks[mountedCount])
+            mounted.append(block)
+            blockStack.addArrangedSubview(block.view)
+            mountedCount += 1
         }
     }
 
@@ -3769,7 +3794,7 @@ final class FileViewerMarkdownContentView: UIView, UIScrollViewDelegate {
 final class FileViewerMarkdownCodeFenceView: UIKitTallyBorderedView {
     private let fixedHeight: CGFloat
     private let fenceText: NSAttributedString
-    private let textView = UITextView()
+    private let textView = FileViewerMarkdownFenceTextView()
 
     init(
         language: CodeLanguage?,
@@ -3819,6 +3844,7 @@ final class FileViewerMarkdownCodeFenceView: UIKitTallyBorderedView {
             // Same rule as the prose blocks: TextKit caches the resolved
             // token colors, so the fence has to be re-fed on a flip.
             view.textView.attributedText = view.fenceText
+            FileViewerFindWashView.track(on: view.textView)
         }
 
         let scroll = UIScrollView()
@@ -3853,6 +3879,147 @@ final class FileViewerMarkdownCodeFenceView: UIKitTallyBorderedView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("unused") }
+}
+
+extension FileViewerMarkdownContentView: FileViewerFindTarget {
+    var findCorpus: FileViewerFindCorpus? {
+        if let cachedFindCorpus { return cachedFindCorpus }
+        let runs = MarkdownFindText.runs(for: blocks, shownImages: Set(imageStates.keys))
+        findRunBlocks = runs.map(\.block)
+        var firsts: [Int] = []
+        firsts.reserveCapacity(blocks.count + 1)
+        var run = 0
+        for block in 0...blocks.count {
+            while run < runs.count, runs[run].block < block { run += 1 }
+            firsts.append(run)
+        }
+        blockFirstRun = firsts
+        let corpus = FileViewerFindCorpus(runs: runs.map(\.text))
+        cachedFindCorpus = corpus
+        return corpus
+    }
+
+    fileprivate func invalidateFindCorpus() {
+        guard cachedFindCorpus != nil || findCorpusDidChange != nil else { return }
+        cachedFindCorpus = nil
+        findMatches = []
+        currentFindMatch = nil
+        applyFindWashes()
+        findCorpusDidChange?()
+    }
+
+    func setFindMatches(_ ranges: [NSRange], current: Int?) {
+        findMatches = ranges
+        currentFindMatch = current.flatMap { ranges.indices.contains($0) ? $0 : nil }
+        applyFindWashes()
+    }
+
+    /// Spreads the hits over the mounted text surfaces. Blocks past the
+    /// mount frontier have no view yet; they wash as they mount.
+    fileprivate func applyFindWashes(from firstBlock: Int = 0) {
+        var hits: [ObjectIdentifier: (view: UITextView, ranges: [NSRange], current: Int?)] = [:]
+        if !findMatches.isEmpty, let corpus = cachedFindCorpus {
+            var surfaces: [Int: [UITextView]] = [:]
+            for (index, range) in findMatches.enumerated() {
+                guard let (run, local) = corpus.locate(range),
+                      findRunBlocks.indices.contains(run)
+                else { continue }
+                let block = findRunBlocks[run]
+                guard block >= firstBlock, block < mountedCount else { continue }
+                let views = surfaces[block] ?? Self.textSurfaces(in: mounted[block].view)
+                surfaces[block] = views
+                let slot = run - blockFirstRun[block]
+                guard views.indices.contains(slot) else { continue }
+                let view = views[slot]
+                var entry = hits[ObjectIdentifier(view)] ?? (view, [], nil)
+                if index == currentFindMatch { entry.current = entry.ranges.count }
+                entry.ranges.append(local)
+                hits[ObjectIdentifier(view)] = entry
+            }
+        }
+        if firstBlock == 0 {
+            for view in washedTextViews.allObjects where hits[ObjectIdentifier(view)] == nil {
+                FileViewerFindWashView.apply([], current: nil, on: view)
+            }
+            washedTextViews.removeAllObjects()
+        }
+        for entry in hits.values {
+            FileViewerFindWashView.apply(entry.ranges, current: entry.current, on: entry.view)
+            washedTextViews.add(entry.view)
+        }
+    }
+
+    /// A block's text surfaces in document order — the order
+    /// `MarkdownFindText.texts` spells its runs in.
+    static func textSurfaces(in view: UIView) -> [UITextView] {
+        if let text = view as? UITextView { return [text] }
+        return view.subviews.flatMap { textSurfaces(in: $0) }
+    }
+
+    func revealFindMatch(_ index: Int) {
+        guard findMatches.indices.contains(index), let corpus = cachedFindCorpus,
+              let (run, local) = corpus.locate(findMatches[index]),
+              findRunBlocks.indices.contains(run)
+        else { return }
+        guard bounds.height > 0, bounds.width > 0 else {
+            pendingFindReveal = index
+            return
+        }
+        let block = findRunBlocks[run]
+        if block >= mountedCount {
+            let before = mountedCount
+            mount(through: block)
+            scrollView.setNeedsLayout()
+            scrollView.layoutIfNeeded()
+            applyFindWashes(from: before)
+        }
+        let views = Self.textSurfaces(in: mounted[block].view)
+        let slot = run - blockFirstRun[block]
+        guard views.indices.contains(slot) else { return }
+        let textView = views[slot]
+        textView.layoutIfNeeded()
+        let rects = FileViewerFindWashView.rects(for: local, in: textView)
+        guard let first = rects.first else { return }
+        let rect = rects.dropFirst().reduce(first) { $0.union($1) }
+        // A wide fence or table scrolls sideways inside the page: bring the
+        // hit into ITS window first.
+        var ancestor = textView.superview
+        while let view = ancestor, view !== scrollView {
+            if let inner = view as? UIScrollView {
+                inner.scrollRectToVisible(
+                    textView.convert(rect, to: inner).insetBy(dx: -24, dy: 0),
+                    animated: false
+                )
+                break
+            }
+            ancestor = view.superview
+        }
+        let onPage = textView.convert(rect, to: scrollView)
+        let visible = CGRect(origin: scrollView.contentOffset, size: scrollView.bounds.size)
+        guard !visible.contains(onPage) else { return }
+        let centered = onPage.midY - scrollView.bounds.height / 2
+        let limit = max(0, scrollView.contentSize.height - scrollView.bounds.height)
+        scrollView.setContentOffset(CGPoint(x: 0, y: min(max(0, centered), limit)), animated: false)
+    }
+
+    func firstVisibleFindOffset() -> Int {
+        guard let corpus = findCorpus,
+              let anchor = currentAnchor(),
+              blockFirstRun.indices.contains(anchor.index)
+        else { return 0 }
+        let run = blockFirstRun[anchor.index]
+        return corpus.runStarts.indices.contains(run) ? corpus.runStarts[run] : corpus.length
+    }
+}
+
+/// A fence's text surface: a plain selectable text view that keeps an open
+/// find's washes fitted to it.
+@MainActor
+final class FileViewerMarkdownFenceTextView: UITextView {
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        FileViewerFindWashView.track(on: self)
+    }
 }
 
 @MainActor
