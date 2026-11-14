@@ -29,23 +29,23 @@ final class ReleaseNotesViewUIKitTests: XCTestCase {
         XCTAssertNotNil(chip(named: "whatsNew.done", in: controller.view))
     }
 
-    /// Keep screen on reaches the phone's card and never Vision Pro's, whose
-    /// fourth row is the deck buttons' pinch fix instead.
-    func testThePhoneCardShowsKeepScreenOnAndTheVisionCardDoesNot() {
+    /// The keyboard lock reaches Vision Pro's card and never the phone's,
+    /// whose device row is the iPhone Duo key row instead.
+    func testTheVisionCardShowsTheKeyboardLockAndThePhoneCardDoesNot() {
         let vision = WhatsNewViewController(platform: .vision)
         render(vision, width: 620, height: 700)
         let renderedVision = renderedText(in: vision.view).joined(separator: "\n")
-        XCTAssertFalse(renderedVision.contains("KEEP THE SCREEN ON"))
-        XCTAssertTrue(renderedVision.contains("FULL SCREEN FOR THE TERMINAL"))
-        XCTAssertTrue(renderedVision.contains("DECK BUTTONS ANSWER EVERY PRESS"))
-        XCTAssertTrue(renderedVision.contains("Toggle Sidebar in the HRDR panel"))
+        XCTAssertTrue(renderedVision.contains("LOCK THE KEYBOARD CLOSED"))
+        XCTAssertTrue(renderedVision.contains("FIND IN THE FILE VIEWER"))
+        XCTAssertFalse(renderedVision.contains("A FULL-WIDTH KEY ROW ON IPHONE DUO"))
 
         let phone = WhatsNewViewController(platform: .phone)
         render(phone, width: 375, height: 700)
         let renderedPhone = renderedText(in: phone.view).joined(separator: "\n")
-        XCTAssertTrue(renderedPhone.contains("KEEP THE SCREEN ON"))
-        XCTAssertTrue(renderedPhone.contains("FULL SCREEN FOR THE TERMINAL"))
-        XCTAssertTrue(renderedPhone.contains("iPhone Duo fixes"))
+        XCTAssertFalse(renderedPhone.contains("LOCK THE KEYBOARD CLOSED"))
+        XCTAssertTrue(renderedPhone.contains("FIND IN THE FILE VIEWER"))
+        XCTAssertTrue(renderedPhone.contains("A FULL-WIDTH KEY ROW ON IPHONE DUO"))
+        XCTAssertTrue(renderedPhone.contains("a key row that keeps its keys when locked"))
     }
 
     func testBothChipsReportThroughTheirOwnCallback() throws {
@@ -92,7 +92,7 @@ final class ReleaseNotesViewUIKitTests: XCTestCase {
     // MARK: The full record
 
     /// Every release's record, each under its own header — a reader updating
-    /// from 1.2 straight to 1.5.1 is owed every intervening release's story too.
+    /// from 1.2 straight to 1.5.2 is owed every intervening release's story too.
     func testTheLogCarriesEveryReleasesChangesForItsPlatform() {
         let controller = ReleaseLogViewController(platform: .pad)
         render(controller, width: 720, height: 4_800)

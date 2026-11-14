@@ -15,7 +15,7 @@ behavior, or App Review flow changes.
 | SKU | `multiplex` |
 | Bundle ID | `app.multiplexterm.multiplex` |
 | Platforms | iOS (iPhone + iPad) and visionOS in one app record — the iPhone joined the universal iOS binary 2026-07-18 (single-window shell) and ships with the next binary |
-| Current version | 1.5.1 in `project.yml` (1.0 was the first submitted version; 1.1.0 remained unpublished during App Review, so its release-note content was carried forward into 1.2.0) |
+| Current version | 1.5.2 in `project.yml` (1.0 was the first submitted version; 1.1.0 remained unpublished during App Review, so its release-note content was carried forward into 1.2.0) |
 | Minimum OS | iOS 17.0; visionOS 1.0 |
 | Target release model | Free download with one non-consumable Pro unlock; confirm the base-app price manually |
 | Primary category | Developer Tools |
@@ -234,7 +234,7 @@ Current product split:
   (plus camera
   on iPad) and drag-and-drop through the same SSH upload path, a read-only
   File Viewer (code, rendered Markdown, images, PDFs, sound files, and git
-  diffs) summoned from
+  diffs; FIND / Command-F marks and steps through matches) summoned from
   + TAB or a confirmed path in terminal output (a percent-decoded,
   local-authority `file:` URI naming that SSH host takes the same road); a
   tree-file long press opens that file in another viewer tab, per-file

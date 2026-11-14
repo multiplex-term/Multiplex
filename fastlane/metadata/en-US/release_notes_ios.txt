@@ -1,11 +1,7 @@
-Multiplex 1.5.1 — give the whole window to the terminal, and select text in herdr panes the way a mouse drag does on your desktop.
+Multiplex 1.5.2 — find text in the file viewer, and give the iPhone Duo key row the full width of the screen.
 
-• Full screen: three-dot menu ▸ Full Screen hands the window to the terminal. The rails, tabs, and keys step aside and the agent bar folds to its dot; one button in the corner brings them back.
-• herdr: on herdr 0.9 and later, Select Text stays inside the pane you pressed. Multi-line copies no longer pick up the sidebar's border or lose the pane's right edge.
-• herdr: long-press text and keep going into a drag to let herdr select it, the way a mouse drag works in iTerm or Ghostty. Lifting copies it to the clipboard.
-• herdr: the HRDR panel can show or hide herdr's sidebar (Toggle Sidebar under Workspaces).
-• Keep screen on: Settings ▸ Screen ▸ Keep screen on keeps the display lit while a terminal or the file viewer is on screen, instead of locking on Auto-Lock. Off by default.
-• Smaller Text and Larger Text leave the three-dot menu open, so you can keep stepping the size.
-• A deck you hid with HIDE stays hidden when you rotate the iPhone or leave the app and come back.
-• iPhone Duo: the file viewer's CLOSE clears the clock on the open display, and the TMUX / HRDR panel gets the full screen on the closed display.
-• A host you add, or bind with mpx, lands at the top of the host list.
+• File viewer: press FIND on the bar, or Command-F with a keyboard, and type. Every match is marked, with a count; Return or the arrows step through them. It works on code, diffs, and rendered markdown, and stays open as you pick other files.
+• iPhone Duo: the key row runs under the side column on both displays, and the keys at its ends stay clear of the rounded corners. A file viewer or web page tab's bottom bar clears the corners too, and the closed display in landscape loses its grey bands.
+• iPhone: locking the keyboard no longer takes keys off the key row. In landscape, ~ and / stay, with RET alongside them.
+• iPad: with Display Zoom set to More Space, the terminal no longer draws magnified, cutting off its top row and landing taps off the rows you see.
+• Tapping a slash command such as /compact in an agent's input bar no longer offers to open it as a file.

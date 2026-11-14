@@ -138,7 +138,7 @@ struct ReleaseNotesRelease: Equatable {
 enum ReleaseNotes {
     /// Newest first. The launch card speaks only for the first; the log
     /// carries them all.
-    static let releases: [ReleaseNotesRelease] = [v151, v15, v142, v141, v14, v131, v13]
+    static let releases: [ReleaseNotesRelease] = [v152, v151, v15, v142, v141, v14, v131, v13]
 
     /// The release the launch card announces.
     static var current: ReleaseNotesRelease { releases[0] }
@@ -176,6 +176,136 @@ enum ReleaseNotes {
     static func alsoLine(for platform: ReleaseNotePlatform) -> String? {
         current.alsoLine(for: platform)
     }
+
+    // MARK: - 1.5.2
+
+    private static let v152 = ReleaseNotesRelease(
+        version: "1.5.2",
+        promise: "Find text in the file viewer, lock the keyboard closed on "
+            + "Vision Pro, and give the iPhone Duo key row the full width.",
+        entries: [
+            ReleaseNoteEntry(
+                id: "viewerfind",
+                bank: .terminal,
+                title: "Find in the file viewer",
+                body: "Press FIND on the file viewer's bar, or Command-F with "
+                    + "a keyboard, and type: every match is marked, with a "
+                    + "count, and Return or the arrows step through them "
+                    + "(Command-G and Shift-Command-G from the keyboard). It "
+                    + "works on code, diffs and rendered markdown, and stays "
+                    + "open as you pick other files from the tree.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: nil
+            ),
+            ReleaseNoteEntry(
+                id: "visionkeylock",
+                bank: .terminal,
+                title: "Lock the keyboard closed",
+                body: "Hold the keyboard key under the window, or use "
+                    + "three-dot menu → Lock Keyboard Closed: the key turns "
+                    + "into a padlock and selecting the terminal no longer "
+                    + "brings up the keyboard. The other keys under the "
+                    + "window keep working.",
+                tag: "Vision Pro",
+                platforms: [.vision],
+                mention: "Lock Keyboard Closed"
+            ),
+            ReleaseNoteEntry(
+                id: "slashcommand",
+                bank: .terminal,
+                title: "Slash commands are not file paths",
+                body: "Tapping a slash command such as /compact in an agent's "
+                    + "input bar or command list no longer offers to open it "
+                    + "as a file. Real paths still open.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: "slash commands no longer taken for paths"
+            ),
+            ReleaseNoteEntry(
+                id: "duokeyrow",
+                bank: .terminal,
+                title: "The iPhone Duo key row takes the full width",
+                body: "On both displays the key row runs under the side "
+                    + "column, so the keys have more room, and the keys at "
+                    + "its ends stay clear of the rounded corners. The bottom "
+                    + "bar of a file viewer or web page tab clears the "
+                    + "corners too, and the closed display in landscape "
+                    + "loses its grey bands.",
+                tag: "iPhone Duo",
+                platforms: [.phone],
+                mention: "a full-width iPhone Duo key row"
+            ),
+            ReleaseNoteEntry(
+                id: "phonelockkeys",
+                bank: .terminal,
+                title: "A locked keyboard keeps the key row",
+                body: "Locking the keyboard no longer takes keys off a roomy "
+                    + "key row: in landscape, ~ and / stay, with RET added "
+                    + "alongside them.",
+                tag: "iPhone",
+                platforms: [.phone],
+                mention: "a key row that keeps its keys when locked"
+            ),
+            ReleaseNoteEntry(
+                id: "displayzoom",
+                bank: .terminal,
+                title: "The terminal fits under More Space",
+                body: "With Display Zoom set to More Space, the terminal no "
+                    + "longer draws magnified, cutting off its top row and "
+                    + "landing taps off the rows you see.",
+                tag: "iPad",
+                platforms: [.pad],
+                mention: "a terminal that fits under More Space"
+            ),
+        ],
+        highlights: [
+            ReleaseNoteHighlight(
+                id: "viewerfind",
+                covers: ["viewerfind"],
+                title: "Find in the file viewer",
+                body: "FIND or Command-F marks every match; Return steps "
+                    + "through them.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all
+            ),
+            ReleaseNoteHighlight(
+                id: "visionkeylock",
+                covers: ["visionkeylock"],
+                title: "Lock the keyboard closed",
+                body: "Hold the keyboard key under the window; the keys "
+                    + "beside it keep working.",
+                tag: nil,
+                platforms: [.vision]
+            ),
+            ReleaseNoteHighlight(
+                id: "duokeyrow",
+                covers: ["duokeyrow"],
+                title: "A full-width key row on iPhone Duo",
+                body: "It runs under the side column and clears the rounded "
+                    + "corners.",
+                tag: nil,
+                platforms: [.phone]
+            ),
+            ReleaseNoteHighlight(
+                id: "displayzoom",
+                covers: ["displayzoom"],
+                title: "The terminal fits under More Space",
+                body: "Display Zoom no longer magnifies the grid or throws "
+                    + "taps off.",
+                tag: nil,
+                platforms: [.pad]
+            ),
+            ReleaseNoteHighlight(
+                id: "slashcommand",
+                covers: ["slashcommand"],
+                title: "Slash commands stay commands",
+                body: "Tapping /compact no longer offers to open a file.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all
+            ),
+        ]
+    )
 
     // MARK: - 1.5.1
 

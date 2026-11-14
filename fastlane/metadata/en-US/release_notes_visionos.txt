@@ -1,9 +1,5 @@
-Multiplex 1.5.1 — give the whole window to the terminal, and select text in herdr panes the way a mouse drag does on your desktop.
+Multiplex 1.5.2 — find text in the file viewer, and lock the keyboard closed.
 
-• Full screen: three-dot menu ▸ Full Screen hands the window to the terminal. The rails, tabs, keys, and ornaments step aside and the agent bar folds to its dot; EXIT in the corner brings them back.
-• herdr: on herdr 0.9 and later, Select Text stays inside the pane you pressed. Multi-line copies no longer pick up the sidebar's border or lose the pane's right edge.
-• herdr: long-press text and keep going into a drag to let herdr select it, the way a mouse drag works in iTerm or Ghostty. Lifting copies it to the clipboard.
-• herdr: the HRDR panel can show or hide herdr's sidebar (Toggle Sidebar under Workspaces).
-• A host's SHELL and three-dot buttons on the deck answer a pinch anywhere on them; one near their top edge used to do nothing.
-• Smaller Text and Larger Text leave the three-dot menu open, so you can keep stepping the size.
-• A host you add, or bind with mpx, lands at the top of the host list.
+• File viewer: press FIND on the bar, or Command-F with a keyboard, and type. Every match is marked, with a count; Return or the arrows step through them. It works on code, diffs, and rendered markdown, and stays open as you pick other files.
+• Lock the keyboard closed: hold the keyboard key under the window, or choose Lock Keyboard Closed in the three-dot menu. Selecting the terminal no longer brings up the keyboard, and the other keys under the window keep working.
+• Tapping a slash command such as /compact in an agent's input bar no longer offers to open it as a file.
