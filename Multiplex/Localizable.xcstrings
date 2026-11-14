@@ -13317,6 +13317,7 @@
       }
     },
     "Show or hide keyboard" : {
+      "extractionState" : "stale",
       "localizations" : {
         "ja" : {
           "stringUnit" : {
@@ -14240,22 +14241,6 @@
         }
       }
     },
-    "Stops the display from dimming and locking while a terminal or the file viewer is on screen. The deck alone still sleeps as usual. Uses more battery." : {
-      "localizations" : {
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ターミナルまたはファイルビューアが表示されている間は、画面が暗くなったり自動ロックされたりしません。Deckだけのときは通常どおりスリープします。バッテリー消費が増えます。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "終端機或檔案檢視器顯示在螢幕上時，螢幕不會變暗或自動鎖定。只顯示 Deck 時仍會照常進入睡眠。會較耗電。"
-          }
-        }
-      }
-    },
     "Stops “%@” on %@ and everything running in it, and deletes its saved state (herdr keeps its default session on disk, stopped)." : {
       "localizations" : {
         "en" : {
@@ -14296,6 +14281,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "停止 %2$@ 上的「%1$@」，在 herdr 允許時刪除其已儲存的狀態，然後關閉標籤頁。"
+          }
+        }
+      }
+    },
+    "Stops the display from dimming and locking while a terminal or the file viewer is on screen. The deck alone still sleeps as usual. Uses more battery." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ターミナルまたはファイルビューアが表示されている間は、画面が暗くなったり自動ロックされたりしません。Deckだけのときは通常どおりスリープします。バッテリー消費が増えます。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "終端機或檔案檢視器顯示在螢幕上時，螢幕不會變暗或自動鎖定。只顯示 Deck 時仍會照常進入睡眠。會較耗電。"
           }
         }
       }

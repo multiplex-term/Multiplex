@@ -2231,6 +2231,8 @@ final class TerminalKeyClusterContext: KeyBarDropSurface {
     var talkbackOpen: Bool { controller?.talkbackOpen == true }
     /// Arrange Keys is on for the active tab.
     var arranging: Bool { controller?.keyBarArranging == true }
+    /// The app-wide keyboard lock: the keyboard key wears the padlock.
+    var keyboardLocked: Bool { KeyboardLock.shared.isLocked }
     var order: KeyBarOrder { orderStore.order }
 
     init(orderStore: KeyBarOrderStore = .shared) {
@@ -2374,6 +2376,7 @@ final class TerminalKeyClusterContext: KeyBarDropSurface {
         withObservationTracking {
             _ = orderStore.order
             _ = controller?.keyBarArranging
+            _ = KeyboardLock.shared.isLocked
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self, generation == self.stateObservationGeneration else { return }
@@ -2459,6 +2462,14 @@ final class TerminalKeyClusterContext: KeyBarDropSurface {
 
     func toggleKeyboard() {
         controller?.toggleKeyboard()
+    }
+
+    /// The keyboard key's hold, as on the iPad rail: input stays live, the
+    /// system keyboard stops rising. Its short press is the unlock
+    /// (`TerminalFocusArbiter.toggle`).
+    func lockKeyboard() {
+        guard let terminal = observedTerminal else { return }
+        TerminalFocusArbiter.lock(terminal)
     }
 
     func toggleTalkback() {
@@ -2591,6 +2602,8 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
     private let metric: TerminalKeyClusterMetric
     private let context: TerminalKeyClusterContext
     private var standaloneVariant: StandaloneVariant?
+    /// The lock state the keyboard key's face was built for.
+    private var renderedKeyboardLocked = false
     private weak var ctrlKey: TerminalTallyKeyControl?
     private weak var talkKey: TerminalTallyKeyControl?
     private weak var comboPopoverController: UIViewController?
@@ -2651,6 +2664,12 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
     }
 
     func applyContextState() {
+        // The padlock is a different face, not a latch on the same one.
+        if renderedKeyboardLocked != context.keyboardLocked {
+            rebuildKeys(variant: standaloneVariant)
+            setNeedsLayout()
+            return
+        }
         ctrlKey?.isLatched = context.ctrlLatched
         talkKey?.isLatched = context.talkbackOpen
         talkKey?.accessibilityLabel = talkbackKeyLabel(open: context.talkbackOpen)
@@ -2835,6 +2854,7 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
         ctrlKey = nil
         talkKey = nil
         standaloneVariant = variant
+        renderedKeyboardLocked = context.keyboardLocked
         let activeMetric: TerminalKeyClusterMetric
         let minimal: Bool
         if role == .standalone {
@@ -2942,12 +2962,21 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
             talkKey = talk
             return talk
         case .keyboard:
+            // The iPad rail's key: hold locks the keyboard closed, and the
+            // padlock's short press releases it.
+            let locked = context.keyboardLocked
             return TerminalTallyKeyControl(
-                face: .symbol("keyboard", pointSize: 12, weight: .semibold),
+                face: .symbol(locked ? "lock.fill" : "keyboard", pointSize: 12, weight: .semibold),
                 width: metric.keyWidth,
                 height: 26,
-                accessibilityLabel: String(localized: "Show or hide keyboard"),
+                accessibilityLabel: locked
+                    ? String(localized: "Unlock keyboard")
+                    : String(localized: """
+                        Show or hide keyboard. Hold to lock the keyboard closed
+                        """),
                 accessibilityIdentifier: "terminal.keyCluster.keyboard",
+                latched: locked,
+                longPressAction: locked ? nil : { [weak context] in context?.lockKeyboard() },
                 action: { [weak context] in context?.toggleKeyboard() }
             )
         default:

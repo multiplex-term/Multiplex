@@ -70,6 +70,17 @@ routing, tab moves, keyboard avoidance, or secret fields.
   is connected (an already-held lock keeps UNLOCK reachable). State is
   app-wide (`KeyboardLock.shared`, arbiter-written, never persisted); `claim`
   re-applies it to whichever terminal takes focus.
+  **visionOS carries the same lock** (2026-11-14): the ornament cluster's
+  keyboard key holds into it and wears the latched padlock (a different
+  face, so the slab rebuilds — `TerminalKeyClusterContext` observes
+  `KeyboardLock`), `⋯` always offers it (no `HardwareKeyboardMonitor`
+  there), and the tip has no mic (no app-owned dictation) but ALWAYS
+  carries the unlock — the padlock key sits in an ornament below the
+  window. The Talkback rules are shared: locking closes the box, opening
+  one releases the lock. ⚠ Proven headlessly only as state and chrome
+  (`debug.kbdlock`, screenshot): the simulator bridges the Mac keyboard as
+  hardware and cannot hold a key, so whether the zero-size `inputView`
+  keeps the spatial keyboard down is device-verified only.
   Narrow tiers drop page keys, then symbols; `SingleWindowShellLayout`'s
   390/420 pt cutoffs must stay in lockstep with the measured `KeyBarRow`
   tiers (375 pt locked floor keeps RET; narrow locked phones move TMUX to

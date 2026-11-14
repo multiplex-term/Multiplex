@@ -668,6 +668,34 @@ final class TerminalKeyClusterUIKitTests: XCTestCase {
         })
     }
 
+    func testKeyboardKeyWearsThePadlockWhileTheKeyboardIsLocked() throws {
+        let context = TerminalKeyClusterContext(orderStore: try isolatedStore())
+        let trailing = TerminalKeyClusterGroupView(role: .trailing, metric: .regular, context: context)
+        func keyboardKey() throws -> TerminalTallyKeyControl {
+            try XCTUnwrap(trailing.keys.first {
+                $0.accessibilityIdentifier == "terminal.keyCluster.keyboard"
+            })
+        }
+        XCTAssertFalse(try keyboardKey().isLatched)
+        XCTAssertNotNil(try keyboardKey().longPressAction, "the hold is the lock")
+
+        // The lock is app-wide state only the arbiter writes; a scratch
+        // terminal engages it and the defer releases it for the next test.
+        let terminal = TerminalView(frame: CGRect(x: 0, y: 0, width: 300, height: 200))
+        TerminalFocusArbiter.lock(terminal)
+        defer { TerminalFocusArbiter.unlock(terminal, summoning: false) }
+        trailing.applyContextState()
+        XCTAssertTrue(try keyboardKey().isLatched)
+        XCTAssertEqual(try keyboardKey().accessibilityLabel, "Unlock keyboard")
+        XCTAssertNil(try keyboardKey().longPressAction, "the padlock's press is the unlock")
+        XCTAssertEqual(trailing.renderedSlots.count, 7, "the face changes; the row does not")
+
+        TerminalFocusArbiter.unlock(terminal, summoning: false)
+        trailing.applyContextState()
+        XCTAssertFalse(try keyboardKey().isLatched)
+        XCTAssertNotNil(try keyboardKey().longPressAction)
+    }
+
     func testClustersFollowTheStoredOrderAcrossSlabsAndArrangeMovesCrossTheUMD() throws {
         let suite = "TerminalKeyClusterUIKitTests-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

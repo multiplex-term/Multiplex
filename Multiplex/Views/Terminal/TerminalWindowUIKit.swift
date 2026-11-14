@@ -396,9 +396,7 @@ final class TerminalWindowViewController: UIViewController,
     /// The open box's height at this render's width, measured once per
     /// render (before the panes are configured) — never per tab.
     private var renderedTalkbackHeight: CGFloat = 0
-    #if !os(visionOS)
     private var lastRenderedKeyboardLocked = false
-    #endif
     /// Mirrors the legacy helper's `.id(activeTab.hostID)`: even when two
     /// hosts expose the same agent kind, their editor drafts and command
     /// configuration must never share controller state.
@@ -1059,8 +1057,8 @@ final class TerminalWindowViewController: UIViewController,
             if talkbackOpen { _ = activeTabAgentState }
             _ = keyPassphraseChallenge
             _ = activeTabKeychainNotice
-            #if !os(visionOS)
             _ = KeyboardLock.shared.isLocked
+            #if !os(visionOS)
             _ = HardwareKeyboardMonitor.shared.isConnected
             #endif
             var showsFileViewer = false
@@ -3103,7 +3101,6 @@ extension TerminalWindowViewController {
     /// closing unfolds it if this window folded it. Runs first in a render:
     /// the panes' bottom inset reads the height it measures.
     private func renderTalkback() {
-        #if !os(visionOS)
         // Locking the keyboard closes every message box in this window: the
         // box exists to type, and the lock says "no keyboard". A box opened
         // while locked is the user's word that they want to type again —
@@ -3116,7 +3113,6 @@ extension TerminalWindowViewController {
             }
         }
         lastRenderedKeyboardLocked = locked
-        #endif
         guard talkbackOpen, let controller = activeController else {
             if let existing = talkbackController {
                 // Hand the keyboard to the pane BEFORE the box goes, so it
@@ -3169,11 +3165,9 @@ extension TerminalWindowViewController {
         if let talkbackController {
             talkbackController.update(configuration: configuration)
         } else {
-            #if !os(visionOS)
             if KeyboardLock.shared.isLocked, let terminal = controller.terminalView {
                 TerminalFocusArbiter.unlock(terminal, summoning: false)
             }
-            #endif
             let composer = TalkbackComposerViewController(configuration: configuration)
             composer.onContentSizeChange = { [weak self] in
                 // Reported from the composer's own layout pass; re-inset the

@@ -270,14 +270,9 @@ final class UMDBarUIKitTests: XCTestCase {
                 UIAction.Identifier("umd.guide.action")
             )
         }
-        #if os(visionOS)
-        // Keyboard lock is an iPad software-keyboard affordance. The
-        // production controller and the SwiftUI surface it replaced both
-        // compile this action out on visionOS, where there is no key rail.
-        XCTAssertFalse(allActions.map(\.title).contains("Lock Keyboard Closed"))
-        #else
+        // The lock is a named action on every platform — the visionOS
+        // cluster key's hold is as unfindable as the rail key's.
         XCTAssertTrue(allActions.map(\.title).contains("Lock Keyboard Closed"))
-        #endif
         XCTAssertTrue(allActions.map(\.title).contains("Smaller Text"))
         XCTAssertTrue(allActions.map(\.title).contains("Larger Text"))
         XCTAssertTrue(allActions.map(\.title).contains("New Session"))
@@ -302,7 +297,6 @@ final class UMDBarUIKitTests: XCTestCase {
         let files = try XCTUnwrap(allActions.first { $0.title == "Files…" })
         XCTAssertTrue(files.attributes.contains(.disabled))
 
-        #if !os(visionOS)
         controller.applyObservedState(UMDBarObservedState(
             status: .connecting,
             contactLost: false,
@@ -334,7 +328,24 @@ final class UMDBarUIKitTests: XCTestCase {
                 .map(\.title)
                 .contains("Unlock Keyboard")
         )
-        #endif
+
+        // No keyboard attached (visionOS always reads so): the lock is on
+        // offer by name.
+        controller.applyObservedState(UMDBarObservedState(
+            status: .connecting,
+            contactLost: false,
+            needsYou: false,
+            keyboardLocked: false,
+            hardwareKeyboardConnected: false
+        ))
+        let offeringOverflow = try XCTUnwrap(
+            control("umd.overflow", in: controller.view) as? UIButton
+        )
+        XCTAssertTrue(
+            actions(in: try XCTUnwrap(offeringOverflow.menu))
+                .map(\.title)
+                .contains("Lock Keyboard Closed")
+        )
     }
 
     func testOverflowCarriesArrangeKeysThatReadsDoneWhileArranging() throws {

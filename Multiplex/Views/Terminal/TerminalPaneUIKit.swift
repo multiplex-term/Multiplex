@@ -40,8 +40,8 @@ struct TerminalPaneObservedState: Equatable {
     #if !os(visionOS)
     var dictation: TerminalSessionController.DictationState?
     var isDictating: Bool
-    var keyboardLocked: Bool
     #endif
+    var keyboardLocked: Bool
 
     @MainActor
     init(controller: TerminalSessionController) {
@@ -55,8 +55,8 @@ struct TerminalPaneObservedState: Equatable {
         #if !os(visionOS)
         dictation = controller.dictation
         isDictating = controller.isDictating
-        keyboardLocked = KeyboardLock.shared.isLocked
         #endif
+        keyboardLocked = KeyboardLock.shared.isLocked
     }
 }
 
@@ -483,22 +483,36 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
             )
             bar.accessibilityIdentifier = "terminalPane.context.dictation"
             topCenterStack.addArrangedSubview(bar)
-        } else if state.keyboardLocked {
-            // Top-center, not top-trailing: the trailing slot carries the
-            // window's own chrome (the backend switch), which the tip covered.
-            // Full screen hides the rail and its keyboard key, so the tip
-            // carries the way back to typing itself.
-            let locked = TerminalKeyboardLockedView(
-                isDictating: state.isDictating,
-                toggleDictation: { [weak controller] in controller?.toggleDictation() },
-                unlock: configuration.keyRailHidden
-                    ? { [weak controller] in controller?.toggleKeyboardLock() }
-                    : nil
-            )
-            locked.accessibilityIdentifier = "terminalPane.keyboardLocked"
-            topCenterStack.addArrangedSubview(locked)
+            return
         }
         #endif
+        guard state.keyboardLocked else { return }
+        // Top-center, not top-trailing: the trailing slot carries the
+        // window's own chrome (the backend switch), which the tip covered.
+        // Full screen hides the rail and its keyboard key, so the tip
+        // carries the way back to typing itself.
+        #if os(visionOS)
+        // No app-owned dictation here, so the tip's one action is the
+        // unlock — always: the padlock key sits in an ornament below the
+        // window, out of the eye line of whoever just pinched the pane and
+        // got no keyboard.
+        let locked = TerminalKeyboardLockedView(
+            dictation: nil,
+            unlock: { [weak controller] in controller?.toggleKeyboardLock() }
+        )
+        #else
+        let locked = TerminalKeyboardLockedView(
+            dictation: (
+                isActive: state.isDictating,
+                toggle: { [weak controller] in controller?.toggleDictation() }
+            ),
+            unlock: configuration.keyRailHidden
+                ? { [weak controller] in controller?.toggleKeyboardLock() }
+                : nil
+        )
+        #endif
+        locked.accessibilityIdentifier = "terminalPane.keyboardLocked"
+        topCenterStack.addArrangedSubview(locked)
     }
 
     private func renderTopTrailing(
@@ -1222,12 +1236,12 @@ extension TerminalContextBarView {
     }
 }
 
-#if !os(visionOS)
 @MainActor
 final class TerminalKeyboardLockedView: UIKitTallyBorderedView {
+    /// `dictation` is the mic action (iPad/iPhone — visionOS has no
+    /// app-owned dictation and passes nil); `unlock` the padlock-open one.
     init(
-        isDictating: Bool,
-        toggleDictation: @escaping () -> Void,
+        dictation: (isActive: Bool, toggle: () -> Void)?,
         unlock: (() -> Void)? = nil
     ) {
         super.init(frame: .zero)
@@ -1278,32 +1292,37 @@ final class TerminalKeyboardLockedView: UIKitTallyBorderedView {
         // SwiftUI's original control used `.buttonStyle(.plain)`. A custom
         // button keeps UIKit from printing its native tinted button ground
         // behind the TALLY lock badge.
-        let mic = UIButton(type: .custom)
-        mic.setImage(UIImage(systemName: isDictating ? "mic.fill" : "mic"), for: .normal)
-        // Type-locked chrome glyph: authored point size, riding `typeScale`
-        // like the padlock beside it. Without a configuration UIKit draws it
-        // at the default body symbol size and never scales it on Mac.
-        mic.setPreferredSymbolConfiguration(
-            UIImage.SymbolConfiguration(
-                pointSize: 12 * Theme.typeScale,
-                weight: .semibold
-            ),
-            forImageIn: .normal
-        )
-        mic.tintColor = isDictating ? UIKitChassis.chassis : UIKitChassis.signal2
-        mic.backgroundColor = isDictating ? UIKitChassis.signal2 : .clear
-        mic.accessibilityLabel = isDictating
-            ? String(localized: "Stop dictation")
-            : String(localized: "Dictate")
-        mic.accessibilityHint = String(localized: """
-            Types what you say into the session as you speak, never pressing Return
-            """)
-        mic.addAction(UIAction { _ in toggleDictation() }, for: .touchUpInside)
-        mic.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            mic.widthAnchor.constraint(equalToConstant: 36),
-            mic.heightAnchor.constraint(equalToConstant: 32),
-        ])
+        var micButton: UIButton?
+        if let dictation {
+            let isDictating = dictation.isActive
+            let mic = UIButton(type: .custom)
+            mic.setImage(UIImage(systemName: isDictating ? "mic.fill" : "mic"), for: .normal)
+            // Type-locked chrome glyph: authored point size, riding `typeScale`
+            // like the padlock beside it. Without a configuration UIKit draws it
+            // at the default body symbol size and never scales it on Mac.
+            mic.setPreferredSymbolConfiguration(
+                UIImage.SymbolConfiguration(
+                    pointSize: 12 * Theme.typeScale,
+                    weight: .semibold
+                ),
+                forImageIn: .normal
+            )
+            mic.tintColor = isDictating ? UIKitChassis.chassis : UIKitChassis.signal2
+            mic.backgroundColor = isDictating ? UIKitChassis.signal2 : .clear
+            mic.accessibilityLabel = isDictating
+                ? String(localized: "Stop dictation")
+                : String(localized: "Dictate")
+            mic.accessibilityHint = String(localized: """
+                Types what you say into the session as you speak, never pressing Return
+                """)
+            mic.addAction(UIAction { _ in dictation.toggle() }, for: .touchUpInside)
+            mic.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                mic.widthAnchor.constraint(equalToConstant: 36),
+                mic.heightAnchor.constraint(equalToConstant: 32),
+            ])
+            micButton = mic
+        }
 
         var unlockButton: UIButton?
         if let unlock {
@@ -1328,8 +1347,9 @@ final class TerminalKeyboardLockedView: UIKitTallyBorderedView {
             unlockButton = button
         }
 
+        let actions = [unlockButton, micButton].compactMap { $0 }
         let row = UIStackView(
-            arrangedSubviews: [labelShell, divider] + [unlockButton, mic].compactMap { $0 }
+            arrangedSubviews: [labelShell] + (actions.isEmpty ? [] : [divider]) + actions
         )
         row.axis = .horizontal
         row.alignment = .center
@@ -1347,7 +1367,6 @@ final class TerminalKeyboardLockedView: UIKitTallyBorderedView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("unused") }
 }
-#endif
 
 @MainActor
 final class TerminalHistoryFindingVeilView: UIView {

@@ -369,13 +369,13 @@ final class TerminalSessionController {
         TerminalFocusArbiter.toggle(terminalView)
     }
 
-    #if !os(visionOS)
-    /// The keyboard lock as a named menu action. The rail key's hold gesture
-    /// stays the fast path, but nothing on screen announced it — a held key
-    /// is unfindable, so the same lock/unlock lives in the terminal's actions
-    /// menu. Lock hides while a hardware keyboard makes it redundant; an
-    /// already-held lock keeps Unlock available. Unlocking asks for the
-    /// keyboard back, exactly like the padlock's short press.
+    /// The keyboard lock as a named menu action. The rail / cluster key's
+    /// hold gesture stays the fast path, but nothing on screen announced it —
+    /// a held key is unfindable, so the same lock/unlock lives in the
+    /// terminal's actions menu. Lock hides while a hardware keyboard makes it
+    /// redundant (iPad/iPhone; visionOS has no monitor and always offers
+    /// it); an already-held lock keeps Unlock available. Unlocking asks for
+    /// the keyboard back, exactly like the padlock's short press.
     func toggleKeyboardLock() {
         guard let terminalView else { return }
         if KeyboardLock.shared.isLocked {
@@ -384,8 +384,6 @@ final class TerminalSessionController {
             TerminalFocusArbiter.lock(terminalView)
         }
     }
-
-    #endif
 
     /// Arrange Keys — the key rail's / cluster's reorder mode, per tab like
     /// the message box and never persisted (the ORDER is, in

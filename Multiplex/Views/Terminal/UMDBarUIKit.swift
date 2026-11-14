@@ -299,9 +299,7 @@ final class UMDBarViewController: UIViewController,
         case .closeSession:
             configuration.closeSession?()
         case .toggleKeyboardLock:
-            #if !os(visionOS)
             configuration.controller?.toggleKeyboardLock()
-            #endif
         case .toggleKeyBarArranging:
             configuration.controller?.toggleKeyBarArranging()
         case .showGuide:
@@ -1053,7 +1051,6 @@ final class UMDBarViewController: UIViewController,
                 action: .toggleFullScreen
             ))
         }
-        #if !os(visionOS)
         let offersKeyboardLock = currentObservedState.keyboardLocked
             || !currentObservedState.hardwareKeyboardConnected
         if configuration.controller != nil, offersKeyboardLock {
@@ -1069,7 +1066,6 @@ final class UMDBarViewController: UIViewController,
                 action: .toggleKeyboardLock
             ))
         }
-        #endif
         // Arrange Keys: a menu row on purpose — every key hold is spoken for
         // and a held key is unfindable. Reads DONE while the mode is on.
         if configuration.controller != nil {
