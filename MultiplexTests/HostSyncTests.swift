@@ -259,11 +259,13 @@ final class HostSyncTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
 
         let seeded = host("enable-test")
-        defer { KeychainStore.deleteHostRecord(for: seeded.id) }
         let hostsURL = directory.appendingPathComponent("hosts.json")
         try JSONEncoder().encode([seeded]).write(to: hostsURL)
 
-        let store = HostStore(directory: directory, knownMirroredIDs: [])
+        // A mirror of the test's own: the write must reach the mirror, and
+        // must not reach the simulator's real Keychain.
+        let mirror = HostRecordMirror.inMemory()
+        let store = HostStore(directory: directory, knownMirroredIDs: [], mirror: mirror)
         store.setEnabled(false, for: seeded.id)
 
         XCTAssertEqual(store.hosts.map(\.isEnabled), [false])
@@ -274,7 +276,7 @@ final class HostSyncTests: XCTestCase {
         )
         XCTAssertFalse(localHosts[0].isEnabled)
 
-        let mirrored = KeychainStore.hostRecords()
+        let mirrored = mirror.records()
             .compactMap { try? JSONDecoder().decode(Host.self, from: $0) }
             .first { $0.id == seeded.id }
         let mirroredHost = try XCTUnwrap(mirrored)
@@ -299,5 +301,69 @@ final class HostSyncTests: XCTestCase {
         XCTAssertTrue(decoded.useMosh)
         XCTAssertEqual(decoded.moshServerPath, "/opt/homebrew/bin/mosh-server")
         XCTAssertEqual(decoded.moshPorts, "60000:61000")
+    }
+
+    // MARK: The mirror is inside the test boundary
+
+    /// A store with an injected directory used to isolate `hosts.json` and
+    /// still mirror every host into the simulator's real Keychain — which
+    /// the app then adopted, a few more hosts per test run.
+    @MainActor
+    func testAStoreWithItsOwnDirectoryNeverWritesTheRealKeychain() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("HostSyncTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let store = HostStore(directory: directory, knownMirroredIDs: [])
+        let added = host("isolated")
+        store.add(added)
+        store.setEnabled(false, for: added.id)
+
+        let leaked = KeychainStore.hostRecords()
+            .compactMap { try? JSONDecoder().decode(Host.self, from: $0) }
+            .contains { $0.id == added.id }
+        XCTAssertFalse(leaked, "an isolated store reached the real Keychain mirror")
+    }
+
+    @MainActor
+    func testTwoIsolatedStoresDoNotShareAMirror() async throws {
+        func makeStore() -> (HostStore, URL) {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("HostSyncTests-\(UUID().uuidString)", isDirectory: true)
+            return (HostStore(directory: directory, knownMirroredIDs: []), directory)
+        }
+        let (first, firstDirectory) = makeStore()
+        let (second, secondDirectory) = makeStore()
+        defer {
+            try? FileManager.default.removeItem(at: firstDirectory)
+            try? FileManager.default.removeItem(at: secondDirectory)
+        }
+        first.add(host("only-here"))
+        // The second store's refresh reads ITS mirror: nothing to adopt.
+        await second.refreshFromCloud()
+        XCTAssertTrue(second.hosts.isEmpty)
+        // And the first reads its own write back.
+        await first.refreshFromCloud()
+        XCTAssertEqual(first.hosts.map(\.name), ["only-here"])
+    }
+
+    /// The one test that touches the real Keychain, so the mirror's SecItem
+    /// queries stay covered. Its payload is deliberately NOT a host record:
+    /// the app decodes mirror records as `Host` and skips what does not
+    /// parse, so even a run killed before the cleanup cannot add a host.
+    @MainActor
+    func testTheKeychainMirrorRoundTripsARecord() throws {
+        let id = UUID()
+        let payload = Data("multiplex-test-not-a-host-\(id.uuidString)".utf8)
+        let mirror = HostRecordMirror.keychain
+        defer { mirror.delete(id) }
+
+        try XCTSkipUnless(
+            mirror.set(payload, id), "this runner has no usable Keychain")
+        XCTAssertTrue(mirror.records().contains(payload))
+        XCTAssertThrowsError(try JSONDecoder().decode(Host.self, from: payload))
+
+        mirror.delete(id)
+        XCTAssertFalse(mirror.records().contains(payload))
     }
 }
