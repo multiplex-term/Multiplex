@@ -1507,13 +1507,11 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback, KeyBarDropSurface 
                 key: .showShortcutPanel,
                 slot: .shortcuts,
                 face: .text(
-                    backend == .herdr ? "HRDR" : "TMUX",
+                    backend.shortcutKeyCaption,
                     font: UIKitChassis.monoFont(9, weight: .semibold),
                     kerning: 0.7
                 ),
-                accessibility: backend == .herdr
-                    ? String(localized: "Show herdr shortcuts")
-                    : String(localized: "Show tmux shortcuts"),
+                accessibility: backend.shortcutKeyAccessibilityLabel,
                 identifier: "tmux"
             ))
         }

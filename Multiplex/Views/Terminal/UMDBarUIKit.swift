@@ -483,12 +483,10 @@ final class UMDBarViewController: UIViewController,
         case .shortcut:
             guard let backend = configuration.shortcutBackend else { return nil }
             let chip = UMDColumnChip(
-                caption: backend == .herdr ? "HRDR" : "TMUX",
+                caption: backend.shortcutKeyCaption,
                 systemImage: "command",
                 prominent: false,
-                accessibilityLabel: backend == .herdr
-                    ? String(localized: "Show herdr shortcuts")
-                    : String(localized: "Show tmux shortcuts")
+                accessibilityLabel: backend.shortcutKeyAccessibilityLabel
             )
             chip.accessibilityIdentifier = "umd.tmux"
             chip.isEnabled = state.status == .live
@@ -860,12 +858,10 @@ final class UMDBarViewController: UIViewController,
     /// hooks address "umd.tmux" for either backend's shortcut chip.
     private func shortcutButton(_ backend: Host.SessionBackend) -> UMDBarButton {
         let button = UMDBarButton(
-            caption: backend == .herdr ? "HRDR" : "TMUX",
+            caption: backend.shortcutKeyCaption,
             systemImage: "command",
             prominent: false,
-            accessibilityLabel: backend == .herdr
-                ? String(localized: "Show herdr shortcuts")
-                : String(localized: "Show tmux shortcuts")
+            accessibilityLabel: backend.shortcutKeyAccessibilityLabel
         )
         button.accessibilityIdentifier = "umd.tmux"
         button.isEnabled = currentObservedState.status == .live

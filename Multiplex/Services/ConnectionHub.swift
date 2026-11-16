@@ -226,6 +226,20 @@ final class HostConnectionModel {
         /// The backend's binary isn't on the host's PATH — proved by the
         /// mint's own first exec, not guessed from an empty answer.
         case backendMissing(Host.SessionBackend)
+        /// The backend is installed and its server is not running, and
+        /// Multiplex does not start it — Rex (`RexProbe`). tmux and herdr
+        /// never report this: their mint brings the server up.
+        case serverNotRunning(Host.SessionBackend)
+
+        /// The sentence every surface shows for this failure.
+        func message(hostName: String) -> String {
+            switch self {
+            case .backendMissing(let backend):
+                HostGuide.backendMissingMessage(backend, hostName: hostName)
+            case .serverNotRunning(let backend):
+                HostGuide.serverNotRunningMessage(backend, hostName: hostName)
+            }
+        }
     }
     @ObservationIgnored private var lastRefreshed: Date?
     /// Observation-friendly summaries: views that only need liveness or a
@@ -327,6 +341,10 @@ final class HostConnectionModel {
     /// attribute an aggregate busy → idle edge to the front pane without
     /// borrowing its agent name when a background pane actually finished.
     @ObservationIgnored private var previousHerdrPaneStatuses: [SessionKey: [String: HerdrProbe.AgentStatus]] = [:]
+    /// Rex: session → the statuses its programs reported (OSC 7501) in the
+    /// last probe — the attention authority wherever a program reports one.
+    /// Never persisted; NEEDS YOU is re-earned live.
+    @ObservationIgnored private var rexSignals: [SessionKey: RexProbe.SessionSignals] = [:]
     /// Last keychain check answer + when it landed. `.notMacOS` is
     /// structural and never re-asked on this connection; other verdicts
     /// refresh after `keychainVerdictTTL` while the symptom persists.
@@ -416,6 +434,12 @@ final class HostConnectionModel {
               phase == .connected,
               let connection
         else { return nil }
+
+        // A Rex tab has no one-exec "which pane is in front" query to make
+        // — its block was chosen at attach — and without this the tmux
+        // query below would run against a Rex session's name. nil means the
+        // fast path is unavailable; the wall probe's record still answers.
+        guard backend != .rex else { return nil }
 
         activePaneProbeInFlight = true
         defer { activePaneProbeInFlight = false }
@@ -783,6 +807,29 @@ final class HostConnectionModel {
                 ),
                 outputBytes: output.utf8.count
             )
+        case .rex:
+            let output = try await deadlined {
+                try await connection.exec(
+                    RexProbe.probeCommand(discovering: discovering))
+            }
+            try Task.checkCancellation()
+            let rexParsed = await Task.detached(priority: .userInitiated) {
+                RexProbe.parseProbe(output)
+            }.value
+            // Same rule as herdr's bake state: a pass a backend switch or
+            // suspension invalidated must not replace the attention inputs.
+            guard refreshGeneration == generation else { throw CancellationError() }
+            rexSignals = rexParsed.signals.keyed(backend: .rex)
+            return BackendProbe(
+                backend: .rex,
+                parsed: TmuxProbe.ParsedProbe(
+                    state: rexParsed.state.tmuxState,
+                    tails: rexParsed.tails,
+                    miniatures: rexParsed.miniatures,
+                    discovery: rexParsed.discovery
+                ),
+                outputBytes: output.utf8.count
+            )
         }
     }
 
@@ -1099,6 +1146,40 @@ final class HostConnectionModel {
                 hasBell: false,
                 offersDialogSummary: false
             )
+        case .rex:
+            let pane = session.activeWindow?.activePane
+            let title = pane?.title ?? session.activeWindow?.paneTitle ?? ""
+            let signals = rexSignals[session.id] ?? RexProbe.SessionSignals()
+            // A program that reports its own status is the authority, and
+            // the fold covers every block in the session — a blocked agent
+            // in a background window still needs you.
+            if let state = RexProbe.sessionAgentState(signals.reported) {
+                // Alert metadata speaks for the fronted block only when its
+                // own records produced the verdict (herdr's rule): the tail
+                // the summary reads is that block's screen and no other's.
+                let front = RexProbe.frontProducedSessionState(
+                    state, front: signals.front)
+                return AttentionVerdict(
+                    state: state,
+                    agent: front ? pane?.agent : nil,
+                    paneTitle: front ? title : "",
+                    hasBell: false,
+                    offersDialogSummary: front
+                )
+            }
+            // Nothing reported: read the fronted block the way a tmux tile
+            // is read, from its title and screen. Rex latches no bell.
+            return AttentionVerdict(
+                state: AgentAttention.classifyVerified(
+                    title: title,
+                    tail: attentionTails[session.id] ?? [],
+                    agent: pane?.agent
+                ),
+                agent: pane?.agent,
+                paneTitle: title,
+                hasBell: false,
+                offersDialogSummary: true
+            )
         }
     }
 
@@ -1219,11 +1300,20 @@ final class HostConnectionModel {
         sessionCreateFailure = nil
         do {
             let connection = try await ensureConnection()
-            if backend == .herdr {
+            switch backend {
+            case .tmux:
+                break
+            case .herdr:
                 // The tmux conf rider applies to the tmux path only; the
                 // two directory riders resolve inside the herdr mint (the
                 // session server inherits the spawn's cwd).
                 return await createHerdrSession(
+                    base: base, inDirectoryOf: sourceSession,
+                    startingIn: directory, running: script, typing: launch,
+                    over: connection
+                )
+            case .rex:
+                return try await createRexSession(
                     base: base, inDirectoryOf: sourceSession,
                     startingIn: directory, running: script, typing: launch,
                     over: connection
@@ -1251,6 +1341,55 @@ final class HostConnectionModel {
             markFailed(error, registerConnectFailure: !reusedLink)
             return nil
         }
+    }
+
+    /// The Rex mint: one exec that creates a session holding one shell
+    /// terminal, with the setup lines handed to the server as the
+    /// terminal's `initial_input` — so they are typed before any client is
+    /// attached, the tmux mint's own ordering, with nothing left to poll
+    /// for. The route carries the new session's ID (a label is not one).
+    ///
+    /// The directory riders follow the tmux mint: a source session's
+    /// fronted-terminal cwd wins, an explicit directory is consulted only
+    /// without one, and every miss is $HOME. The source is resolved to its
+    /// id against the latest probe — a name the probe no longer lists has
+    /// no directory to offer, and the mint starts in $HOME rather than
+    /// guess. The tmux conf rider does not apply.
+    ///
+    /// Throws what the exec throws, so a dead control link is reported as
+    /// one by the caller. A healthy link that could not create the session
+    /// states why in `sessionCreateFailure` — no `rex` on the host, or no
+    /// server running, which Multiplex does not start (`RexProbe`).
+    private func createRexSession(
+        base: String, inDirectoryOf sourceSession: String?,
+        startingIn directory: String?, running script: String?,
+        typing launch: String?, over connection: SSHConnection
+    ) async throws -> TerminalRoute.Mode? {
+        let existing = sessions(on: .rex)
+        let sourceID = sourceSession
+            .flatMap { name in existing.first { $0.name == name }?.tmuxID }
+            .flatMap { RexProbe.bakeableSessionID($0) ? $0 : nil }
+        let command = RexProbe.mintCommand(
+            label: RexProbe.uniqueSessionLabel(
+                base: base, existing: existing.map(\.name)),
+            inDirectoryOf: sourceID,
+            startingIn: directory,
+            typing: [script, launch].compactMap { $0 }
+        )
+        let outcome = RexProbe.parseMint(
+            try await deadlined { try await connection.exec(command) })
+        switch outcome {
+        case .created(let name, let id):
+            refresh()
+            return .rexAttach(sessionName: name, sessionID: id)
+        case .rexMissing:
+            sessionCreateFailure = .backendMissing(.rex)
+        case .noServer:
+            sessionCreateFailure = .serverNotRunning(.rex)
+        case .failed:
+            break
+        }
+        return nil
     }
 
     /// The herdr mint: a session is created by attaching to it, so the
@@ -1437,6 +1576,10 @@ final class HostConnectionModel {
         running script: String? = nil,
         typing launch: String?
     ) async -> TerminalRoute.Mode? {
+        // Multiplex opens no new window or tab inside a Rex session — a
+        // launch lands in a fresh one (`createSession`) — and the tmux
+        // verbs below must not aim at its name.
+        guard backend != .rex else { return nil }
         resetConnectRetryBackoff()
         let reusedLink = connection != nil && phase == .connected
         do {
@@ -1623,6 +1766,10 @@ final class HostConnectionModel {
             // parks as stopped. Session names are herdr's own unique
             // identity, so the name is the target.
             command = HerdrProbe.closeSessionCommand(for: session)
+        case .rex:
+            // By id — a Rex label is not unique, and killing by a shared
+            // one is refused by the CLI. nil when the record names no id.
+            command = RexProbe.killCommand(for: session)
         }
         if let command {
             _ = try? await deadlined { try await connection.exec(command) }
@@ -1668,6 +1815,7 @@ final class HostConnectionModel {
         herdrTailTargets = []
         herdrPaneStatuses = [:]
         previousHerdrPaneStatuses = [:]
+        rexSignals = [:]
         herdrPresent = false
         discovery = [:]
         keychainNotice = nil

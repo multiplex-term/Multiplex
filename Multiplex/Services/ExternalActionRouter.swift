@@ -212,8 +212,7 @@ enum ExternalActionPerformer {
         // every monitored backend's sessions are candidates and the record
         // that matches carries the backend the attach must use.
         // `host.sessionBackend` is the tie-break, never the assumption.
-        let sessions = backend.map { scopedSessions(model, to: $0) }
-            ?? model.allSessions
+        let sessions = openableSessions(model, backend: backend)
         // A widget tile names the exact session it showed; a session that
         // died since that snapshot falls back to the last one opened here,
         // then the most recent — the widgets' own order.
@@ -230,11 +229,11 @@ enum ExternalActionPerformer {
                 sessionName: target.name,
                 backend: target.backend
             ) { return }
-            open(
-                mode: .attach(host: host, session: target),
-                on: host,
-                context: context
-            )
+            // nil only for a Rex record that names no usable id — nothing
+            // to attach, and nothing else it would be right to open instead.
+            guard let mode = TerminalRoute.Mode.attach(host: host, session: target)
+            else { return }
+            open(mode: mode, on: host, context: context)
         } else {
             // Headless creation inherits the New Session sheet's remembered
             // setup script (nil unless its REMEMBER opt-in is on) — a widget
@@ -262,6 +261,14 @@ enum ExternalActionPerformer {
         _ model: HostConnectionModel, to backend: Host.SessionBackend
     ) -> [TmuxSession] {
         model.host.monitors(backend) ? model.sessions(on: backend) : []
+    }
+
+    /// The sessions an external action may open: a named backend's when
+    /// one is named, every monitored backend's otherwise.
+    private static func openableSessions(
+        _ model: HostConnectionModel, backend: Host.SessionBackend?
+    ) -> [TmuxSession] {
+        backend.map { scopedSessions(model, to: $0) } ?? model.allSessions
     }
 
     private static func openAgent(
@@ -293,8 +300,13 @@ enum ExternalActionPerformer {
         // (fail-soft, openShell's rule). An in-session create that FAILS
         // stays a visible failure instead — a fallback mint there would
         // hide it behind a surprise second session.
-        let candidates = backend.map { scopedSessions(model, to: $0) }
-            ?? model.allSessions
+        // Launching INTO a session types a command in a fresh window or tab
+        // of it. Multiplex opens no window inside a Rex session
+        // (`HostConnectionModel.launchInSession`), so one named as the
+        // target resolves to nothing and the launch falls through to a
+        // fresh session — on Rex when the action named Rex.
+        let candidates = openableSessions(model, backend: backend)
+            .filter { $0.backend != .rex }
         if case .existingSession(let name, let placement) = target,
            let session = candidates.first(where: { $0.name == name }) {
             guard let mode = await model.launchInSession(
@@ -332,7 +344,7 @@ enum ExternalActionPerformer {
         guard let created = await model.createSession(
             base: agent.launchCommand,
             // A named backend mints there; nil is the host's default. One
-            // the host no longer monitors falls back rather than failing —
+            // the host no longer monitors falls back rather than failing:
             // minting is not the ambiguous case, attaching is.
             backend: backend.flatMap { host.monitors($0) ? $0 : nil },
             inDirectoryOf: nil,
@@ -417,7 +429,8 @@ enum ExternalActionPerformer {
         // The RESOLVED session's backend names the thing that didn't
         // happen, not the host's primary.
         switch (backend, placement) {
-        case (.tmux, _): noun = String(localized: "window")
+        // `.rex` never resolves as a launch target (see `openAgent`).
+        case (.tmux, _), (.rex, _): noun = String(localized: "window")
         case (.herdr, .tab): noun = String(localized: "tab")
         case (.herdr, .workspace): noun = String(localized: "workspace")
         }
@@ -441,15 +454,12 @@ enum ExternalActionPerformer {
         // createSession marks the host failed when the control link IS the
         // problem; reuse that reason when it exists.
         let message: String
-        switch model.sessionCreateFailure {
-        case .backendMissing(let backend):
-            message = HostGuide.backendMissingMessage(backend, hostName: host.name)
-        case nil:
-            if case .failed(let reason) = model.phase {
-                message = reason
-            } else {
-                message = String(localized: "Couldn't create the session on \(host.name).")
-            }
+        if let failure = model.sessionCreateFailure {
+            message = failure.message(hostName: host.name)
+        } else if case .failed(let reason) = model.phase {
+            message = reason
+        } else {
+            message = String(localized: "Couldn't create the session on \(host.name).")
         }
         context.presentFailure(ExternalActionFailure(hostName: host.name, message: message))
     }

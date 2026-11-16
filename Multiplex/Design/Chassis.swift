@@ -17,11 +17,20 @@ enum UIKitChassis {
     }
     /// `bezel` for a session tile, tinted when the tile has to say which
     /// multiplexer it came from. Only a MIXED host reaches the tinted branch
-    /// — see `TallyPalette.herdrBezel`.
+    /// — see `TallyPalette.herdrBezel`. tmux keeps the plain bezel: it is
+    /// the tile every other backend is told apart from.
     static func tileBezel(backend: Host.SessionBackend, tinted: Bool) -> UIColor {
-        guard tinted, backend == .herdr else { return bezel }
-        return GlassPrototype.enabled
-            ? GlassPrototype.herdrStrata : TallyPalette.herdrBezel
+        guard tinted else { return bezel }
+        switch backend {
+        case .tmux:
+            return bezel
+        case .herdr:
+            return GlassPrototype.enabled
+                ? GlassPrototype.herdrStrata : TallyPalette.herdrBezel
+        case .rex:
+            return GlassPrototype.enabled
+                ? GlassPrototype.rexStrata : TallyPalette.rexBezel
+        }
     }
     static var bezelHi: UIColor {
         GlassPrototype.enabled ? GlassPrototype.line : TallyPalette.bezelHi

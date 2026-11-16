@@ -816,6 +816,95 @@ actor SSHConnection {
         try await stdinWriter.write(ByteBuffer(bytes: data))
     }
 
+    // MARK: Raw byte pipe
+
+    /// Opens a binary-safe, bidirectional byte pipe to `command` on the
+    /// host — its stdin and stdout, nothing in between. Several can be open
+    /// on one connection, each on a channel of its own beside the PTY.
+    ///
+    /// Exec cannot do this: Citadel 0.12.0's exec API returns output only
+    /// and keeps the channel to itself, so nothing can write stdin. What it
+    /// does expose is a SHELL channel without a PTY (`withTTY`): the login
+    /// shell runs on plain pipes — no line discipline, so bytes pass
+    /// untouched — and is handed over with one line, the PTY handoff's own
+    /// cross-shell `exec sh -c '…'` form.
+    ///
+    /// The command echoes a per-pipe marker first. Everything a login
+    /// script printed before it is dropped, and — the part that matters —
+    /// the caller writes nothing until the marker has arrived: a shell
+    /// reading its script from a pipe may read ahead, and bytes sent before
+    /// the `exec` could be swallowed as shell input instead of reaching the
+    /// command. Returns once the marker is seen; a channel that ends first
+    /// throws with the head of what it wrote to stderr.
+    func openPipe(running command: String) async throws -> RemotePipe {
+        guard let client else { throw SSHConnectionError.notConnected }
+        let marker = "MPXPIPE-" + UUID().uuidString.prefix(8)
+        let handoff = RemoteShellEnvelope.handoff("echo \(marker); \(command)") + "\n"
+        let markerLine = Data((marker + "\n").utf8)
+        let (incoming, feed) = AsyncThrowingStream<Data, Error>.makeStream()
+        let writer = PipeWriter()
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let gate = OneShotGate(continuation)
+            let run = Task {
+                var stderrHead = Data()
+                do {
+                    try await client.withTTY { inbound, outbound in
+                        try await outbound.write(ByteBuffer(string: handoff))
+                        var head = Data()
+                        var ready = false
+                        for try await chunk in inbound {
+                            switch chunk {
+                            case .stdout(let buffer):
+                                let data = Data(buffer.readableBytesView)
+                                guard !ready else {
+                                    feed.yield(data)
+                                    continue
+                                }
+                                head.append(data)
+                                if let found = head.range(of: markerLine) {
+                                    ready = true
+                                    writer.set(outbound)
+                                    let rest = Data(head[found.upperBound...])
+                                    head = Data()
+                                    gate.open()
+                                    if !rest.isEmpty { feed.yield(rest) }
+                                } else if head.count > 64 * 1024 {
+                                    throw SSHConnectionError.connectFailed(
+                                        "the remote shell never ran the handoff")
+                                }
+                            case .stderr(let buffer):
+                                if stderrHead.count < 2048 {
+                                    stderrHead.append(
+                                        Data(buffer.readableBytesView.prefix(2048 - stderrHead.count)))
+                                }
+                            }
+                        }
+                    }
+                    writer.clear()
+                    let detail = String(decoding: stderrHead, as: UTF8.self)
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !gate.fail(SSHConnectionError.connectFailed(
+                        detail.isEmpty ? "the remote command ended before it started" : detail)) {
+                        feed.finish()
+                    }
+                } catch {
+                    writer.clear()
+                    let detail = String(decoding: stderrHead, as: UTF8.self)
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    let failure = SSHConnectionError.connectFailed(
+                        detail.isEmpty ? self.shortDescription(of: error) : detail)
+                    if !gate.fail(failure) {
+                        feed.finish(throwing: failure)
+                    }
+                }
+            }
+            feed.onTermination = { _ in run.cancel() }
+            writer.onClose = { run.cancel() }
+        }
+        return RemotePipe(incoming: incoming, writer: writer)
+    }
+
     func resize(cols: Int, rows: Int) async throws {
         guard let stdinWriter else { return }
         try await stdinWriter.changeSize(cols: cols, rows: rows, pixelWidth: 0, pixelHeight: 0)
@@ -828,6 +917,80 @@ actor SSHConnection {
     private nonisolated func shortDescription(of error: Error) -> String {
         let text = String(describing: error)
         return text.count > 160 ? String(text.prefix(160)) + "…" : text
+    }
+}
+
+/// One end of `SSHConnection.openPipe`: the remote command's stdout as a
+/// stream of chunks, and its stdin. Closing — or dropping the stream —
+/// closes the channel, which ends the command.
+struct RemotePipe: Sendable {
+    let incoming: AsyncThrowingStream<Data, Error>
+    fileprivate let writer: PipeWriter
+
+    fileprivate init(incoming: AsyncThrowingStream<Data, Error>, writer: PipeWriter) {
+        self.incoming = incoming
+        self.writer = writer
+    }
+
+    /// A pipe over closures — what a test stands in for a channel with.
+    init(
+        incoming: AsyncThrowingStream<Data, Error>,
+        write: @escaping @Sendable (Data) async throws -> Void,
+        close: @escaping @Sendable () -> Void
+    ) {
+        self.incoming = incoming
+        writer = PipeWriter(write: write, close: close)
+    }
+
+    func write(_ data: Data) async throws {
+        try await writer.write(data)
+    }
+
+    func close() {
+        writer.close()
+    }
+}
+
+/// Holds the channel's stdin writer from the moment the handoff completes
+/// to the moment the channel ends. Written from the channel's task and read
+/// from whoever holds the pipe, hence the lock.
+private final class PipeWriter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var channelWriter: TTYStdinWriter?
+    private var customWrite: (@Sendable (Data) async throws -> Void)?
+    var onClose: (@Sendable () -> Void)?
+
+    init() {}
+
+    init(
+        write: @escaping @Sendable (Data) async throws -> Void,
+        close: @escaping @Sendable () -> Void
+    ) {
+        customWrite = write
+        onClose = close
+    }
+
+    func set(_ writer: TTYStdinWriter) {
+        lock.withLock { channelWriter = writer }
+    }
+
+    func clear() {
+        lock.withLock { channelWriter = nil }
+    }
+
+    func write(_ data: Data) async throws {
+        if let customWrite {
+            try await customWrite(data)
+            return
+        }
+        guard let writer = lock.withLock({ channelWriter }) else {
+            throw SSHConnectionError.notConnected
+        }
+        try await writer.write(ByteBuffer(bytes: data))
+    }
+
+    func close() {
+        onClose?()
     }
 }
 

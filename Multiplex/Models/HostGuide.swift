@@ -38,6 +38,10 @@ enum HostGuide {
         switch backend {
         case .tmux: tmuxInstall
         case .herdr: herdrInstall
+        // Rex is never the primary: no dead tile and no failed mint speaks
+        // for it, so there is no install road to hand over. (Its packages
+        // also come from a per-distribution repository, not one line.)
+        case .rex: []
         }
     }
 
@@ -64,6 +68,22 @@ enum HostGuide {
             localized: "or change this host’s backend in Host Settings.")
     }
 
+    /// A mint that failed because the backend's server isn't running and
+    /// Multiplex won't start it — Rex, whose server belongs to the Rex app
+    /// on the host (`RexProbe`). Says what to do there instead of sending
+    /// the user after the connection, which is fine.
+    static func serverNotRunningMessage(
+        _ backend: Host.SessionBackend, hostName: String
+    ) -> String {
+        // The product's name, not the binary's: this is about an app the
+        // user opens, where `backendMissingMessage` is about a command.
+        let name = backend == .rex ? "Rex" : backend.rawValue
+        return String(localized: """
+            No \(name) server is running on \(hostName), and Multiplex doesn’t \
+            start one. Start \(name) there, then try again.
+            """)
+    }
+
     /// Why a default install needs no further host setup: both probes
     /// prepend these directories (`TmuxProbe.pathPrefix`,
     /// `HerdrProbe.pathPrefix`). Shared so the tile's INSTALL GUIDE and the
@@ -78,8 +98,24 @@ enum HostGuide {
                 Homebrew, ~/.local/bin, and ~/.cargo/bin installs are already on \
                 the probe's PATH.
                 """)
+        case .rex:
+            String(localized: """
+                Package installs, ~/.local/bin, and the Rex app on a Mac are \
+                already on the probe's PATH.
+                """)
         }
     }
+
+    /// What showing Rex sessions means, said wherever they can be switched
+    /// on — the rail's offer confirmation and Host Settings' Backend detail
+    /// — so neither promises more than the app does: one terminal per tab,
+    /// and new sessions only where a Rex server is already running, which
+    /// is also why it is missing from the default's choices right below.
+    static let rexSessionsNote = String(localized: """
+        A Rex tile opens one terminal: the one its session is showing. \
+        New Rex sessions need Rex already running on the host, so Rex is \
+        never the default.
+        """)
 
     /// What opting a host into a SECOND backend costs — the measured fact
     /// behind asking at all rather than escalating silently (a full second

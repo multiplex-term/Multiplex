@@ -516,6 +516,12 @@ final class FileViewerController: AuxiliaryPaneController {
             TmuxProbe.pathAnchorCommand(sessionName: session.name)
         case .herdr:
             HerdrProbe.snapshotCommand(sessionName: session.name)
+        case .rex:
+            // A Rex tab has no exec to ask where its block's program is
+            // (the answer lives behind the server's API, not a command). A
+            // no-op's empty answer parses to "no anchor": the $HOME
+            // fallback, the same posture as a pane that will not answer.
+            ":"
         }
     }
 
@@ -532,6 +538,8 @@ final class FileViewerController: AuxiliaryPaneController {
             HerdrProbe.parsePaneWorkingDirectory(
                 output, atScreenCell: cell, screenSize: screenSize
             )
+        case .rex:
+            nil
         }
     }
 

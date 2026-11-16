@@ -1,7 +1,7 @@
-# Backends & the probe (tmux facts, mixed hosts, herdr, session creation, drops)
+# Backends & the probe (tmux facts, mixed hosts, herdr, Rex, session creation, drops)
 
 Load-bearing decisions split from AGENTS.md — read before touching TmuxProbe,
-HerdrProbe, session creation/targeting, or file attach/drop.
+HerdrProbe, RexProbe, session creation/targeting, or file attach/drop.
 
 - **Every SSH exec rides `RemoteShellEnvelope`: `printf '<escaped>' | <command shell>`.**
   sshd runs exec requests through the account's login shell, and fish (exit
@@ -271,6 +271,324 @@ HerdrProbe, session creation/targeting, or file attach/drop.
   so the new tab lands on screen, never where nobody is attached; an
   in-session create that fails alerts ("Couldn't Create Tab"), never a
   fallback mint.
+- **Rex is shown, attached, and minted — never a host's default**
+  (`Host.SessionBackend.rex`;
+  `RexProbe` for the deck and the mint, `RexSession` for a tab; Rex 0.1.0-preview.19 /
+  API revision 14, measured 2026-11-16 against a throwaway server),
+  adapted as session→tile, window (a tab)→window, terminal block→pane.
+  - **Rex has no terminal client, so Multiplex is one.** No `rex attach`
+    exists and `rex block stream` answers `not implemented`: Rex sessions
+    are drawn by a native app over the server's WebSocket API
+    (`/api/control` `rex.control.v1` JSON; `/api/data`
+    `rex.data.terminal.v1` binary). A Rex tab therefore has no remote
+    command at all — it is the third `TerminalTransport`, beside the SSH
+    PTY and mosh. ⚠ The wire spec is NOT in the website docs — the server
+    serves its own (`GET /llms.txt` and `/api/help` on its socket; `rex api
+    list --json`).
+  - **`canBeDefault` is the one switch, and the record enforces it.**
+    ⚠ **Multiplex never starts a Rex server**, so a Rex session can be
+    created only while one is running. The default backend answers every
+    request that names no backend (New Session, the Signal check, external
+    actions) and must answer on an idle host — tmux and herdr bring their
+    server up with the first session — so Rex is never the primary:
+    `Host.sessionBackend`'s `didSet`, `init(from:)`, and `BackendSelection`
+    all demote it to a secondary, and the surfaces that choose a host's
+    DEFAULT leave it out (Host Settings' "New sessions run on", Add Host ▸
+    BIND, the FAQ install bar — `defaultCases` / `defaultChoices`).
+    Everything else treats it as a backend like the others: the New Session
+    "Runs on" bar and the widget/Shortcut backend pick list offer it
+    (`monitoredBackends`), a Rex tab's `+ TAB` mints a Rex sibling, and
+    `multiplex://…&action=agent&backend=rex` mints on it. One gap: an
+    external `in=tab` launch aimed at a Rex session resolves to nothing and
+    mints fresh instead (`launchInSession` opens no window inside a Rex
+    session). What would change the rule is a decision to autostart, which
+    needs the unmeasured fact below.
+    ⚠ In that `didSet`, restore the primary BEFORE inserting the secondary:
+    `secondaryBackends`' own observer strips whatever the primary is at
+    that moment, and stripped the newcomer straight back out (caught by
+    `testRexIsNeverTheHostsPrimary`).
+  - **The mint is one exec** (`RexProbe.mintCommand` → `HostConnectionModel
+    .createRexSession`): `rex do -e <lua> --args <json> --json` creates a
+    session holding one shell terminal (`session.create` with
+    `initial_windows`) and prints its id and stored label; the route is
+    `.rexAttach(name, id)`.
+    - **No autostart, by choice, not by measurement.** `rex new` would
+      start a server; the mint refuses and says so ("No Rex server is
+      running on …, and Multiplex doesn't start one" —
+      `SessionCreateFailure.serverNotRunning`). A server started from an
+      SSH login would be the one the host's Rex app then adopts, and how it
+      differs from one the app starts in the desktop session (keychain,
+      pasteboard, lifetime under systemd) was NOT measured. Do not flip
+      this without measuring it on a Mac and on Linux.
+    - ⚠ **What the user typed travels as `--args` JSON, never as script
+      text or `KEY=VALUE`.** Pairs are typed by spelling — `label=1e3`
+      arrived as the number 1000 — and anything spliced into the Lua would
+      be code. The script is a constant.
+    - **The script settles the label against the live list** (`api` taken →
+      `api-2`, compared without case, tmux's scheme): Rex itself creates a
+      second `api` without complaint, and both would then be shown with an
+      id tail (`sessionNames`) — the fresh tab's name would not match its
+      own tile. The label is cleaned the way a probed one is read
+      (`sessionLabel`), never empty (an empty one makes the server invent
+      `quiet-meadow`), and the stored label is read back after the create.
+    - **Setup script and launch line ride `initial_input`**, each followed
+      by a carriage return (Enter): the server types them into the fresh
+      shell before any client attaches — tmux's ordering, with nothing to
+      poll for. (This is what the earlier "Rex's model does not take a
+      setup script in one step" note got wrong.)
+    - ⚠ **`cwd` is taken literally.** `~` is not expanded and a directory
+      that does not exist silently starts in $HOME. So the exec's SHELL
+      resolves the Working Directory (`cd` + `pwd`, absolute or empty) and
+      hands it over in `MULTIPLEX_REX_CWD` — the Lua runs in the CLI
+      process, so `os.getenv` reads the exec's environment. A `+ TAB`
+      sibling starts where the source session's fronted terminal is
+      (`foreground.cwd`), which wins over an explicit directory; every miss
+      is $HOME. The tmux conf rider does not apply.
+  - **A backend set encodes sorted** (`KeyedEncodingContainer` overload in
+    `Host.swift`). With three backends `secondaryBackends` can hold two,
+    and `Set` iteration order is seeded per process — unsorted, every
+    launch rewrote `hosts.json` and the mirrored Keychain record.
+  - **The probe is one exec, one connection: `rex do -e <lua> --json`.** A
+    script is the only way to make many API calls on a single control
+    connection and get one document back — sessions, layouts, titles,
+    foreground processes, reported statuses, the fronted screen. Measured
+    30 ms and 3 KB for three sessions (10 KB when a fronted block has deep
+    scrollback), which is tmux's weight, so `HostGuide.secondBackendCost`
+    holds.
+    - `session.view` and every block method answer `conflict` until the
+      connection is attached. **The probe uses `session.attach_all`, never
+      `session.attach`**: it does not join a session, so the probe is not
+      listed among its clients and no `client_connected` event fires every
+      five seconds. (A tab DOES join — `data.connect` and `own_block`
+      require it.)
+    - ⚠ **Every invocation carries `REX_AUTOSTART=0`** (`RexProbe
+      .rexCommand`; the bridge exports it). The CLI starts a personal
+      server when none is running; a probe, rider, or attach that did so
+      would leave a server on every host that merely has the binary. With
+      it off, no server exits 4 (the CLI's documented "unreachable") →
+      `.noServer`; any other nonzero exit is a failure that names the
+      status. The env switch, not `--autostart=false`, so a build predating
+      the flag still answers.
+    - `--json` is pretty-printed even when piped, and an empty Lua table
+      encodes as `{}` not `[]` (`LuaArray`). The exit line is the last the
+      command prints; JSON above it is indented and quoted, so a screen
+      cannot start a line with the marker.
+    - **The tail is read from the END, uncapped.** `format` returns screen
+      AND scrollback oldest-first, and its `max_bytes` counts JSON-encoded
+      bytes: a capped read of "the last 6144 bytes" stopped three lines
+      short on multibyte output. So `format(max_bytes: 1)` for the id and
+      total, then `blob_read(offset: total - 6144)` with no cap; a read
+      that started mid-screen drops its partial first line.
+  - **A label is not an identity.** Two sessions may share one and an
+    unnamed session gets a generated one (`floral-river`). The id
+    (`session:<uuid>`) rides `TmuxSession.tmuxID` and is the only attach
+    and kill target — `rex kill work` with two `work`s refuses both
+    (exit 3), and `Mode.attach` is nil for a Rex record with no usable id.
+    Displayed names are made unique by `RexProbe.sessionNames`: a shared or
+    empty label is spelled with the id's tail (`work …8d7863`, the CLI's
+    own short form), for EVERY holder of the label — keeping the bare name
+    on the oldest would hand that name and its attention baseline to a
+    different session the day the oldest closes, and announce a turn that
+    never ended. An unnamed window's generated `Window <id tail>` label
+    gives way to its focused block's label (`shell`, `agent`) — Rex's
+    nearest analog of tmux naming a window after what runs in it — and to
+    `window N` only when that is empty too: the spine already leads with
+    N, and the first headless run read `1 WINDOW 1`. Only the exact
+    generated shape is replaced. A session whose programs all exited stays
+    listed with no windows (`0 WIN`, no spine) until someone closes it.
+  - **`rex` is not on an SSH exec's PATH on a Mac.** Rex adds it only for
+    terminals it opens itself. `RemoteCommandEnvironment.rexPathPrefix`
+    names the server copy the app installs (`~/Library/Application
+    Support/com.superlogical.rex/RexServer/Versions/Current/…`, which
+    leads because it does not depend on the bundle's name or location) and
+    the helper inside the app bundle; Linux/FreeBSD packages land in
+    `/usr/bin` and the unprivileged install in `~/.local/bin`.
+  - **Attention: reported status first, the tmux heuristics otherwise.**
+    Programs report idle / working / done / blocked / error through OSC
+    7501, kept per block (`program_status`). Where any block reports, the
+    fold across EVERY block is the authority (blocked → NEEDS YOU with the
+    reported kind, `auth` read as a question; working → busy; `done` and
+    `error` → idle, the busy → idle edge that announces a turn once). Where
+    nothing reports, the fronted block is classified from its title and
+    screen exactly as a tmux tile is — and the tile's own background-pane
+    title pass applies too. Alert metadata borrows the fronted block's
+    agent and screen only when that block's records produced the verdict.
+  - The LIVE lamp is attached APP clients (`client.list` scoped to the
+    session, `kinds: ["app"]` — a Rex window showing it) OR this app's own
+    open tab. ⚠ **Multiplex says hello as kind `other`, never `app`**
+    (`RexWire.hello`): Rex's CLI and agent skill aim client actions (`rex
+    do pane.split`) at "the app client when exactly one is connected", and
+    a second self-declared app made every one of them ambiguous for as
+    long as a tab was attached.
+  - Discovery rides every primary probe (`rex ls -q`, one id per line) and
+    offers `+ REX · N` on the rail like herdr. The tile takes a cool-blue
+    wash at `bezel`'s lightness (`TallyPalette.rexBezel` — Rex publishes no
+    palette, so the hue is chosen to differ from herdr's mauve). Its menu
+    has no Copy Command for Handoff (no command opens a Rex session in a
+    host shell) and, on a session with more than one terminal, an **Open
+    Terminal** submenu.
+  - **A tab is ONE terminal block.** Rex's window is a split tree the
+    client draws; Multiplex does not draw it. A tile press attaches the
+    block the session is fronting (active window, focused block —
+    `RexWire.attachTarget`, decided at attach time); Open Terminal names
+    one (`.rexAttach(…, block:)`, label `session · window`), and a named
+    block that has since closed falls back to the fronted one. Tab
+    identity stays `(rex, session name)`, so the deck finds either kind.
+  - **The REX key's panel switches the tab's terminal** (`ShortcutPanel
+    Content.rex`; rows from `RexWire.terminalChoices`, `window — terminal`
+    in window order, the shown one marked ACTIVE). Rex has no prefix keys
+    to list, so the panel is the one thing a Rex tab needs it for: reaching
+    the session's other terminals without leaving the tab.
+    `RexSession.switchBlock` takes the new block, opens its stream, redraws
+    from `format`, then `disown_block`s the old one — which hands that
+    terminal's size back to the Rex app instead of leaving it at this
+    tab's. Each data stream carries a generation (`dataGeneration`): the
+    old stream's end must not read as the tab ending, and input typed
+    during the switch is dropped rather than sent to whichever block wins.
+    The choice survives a reconnect (`rexBlockOverride`). The rail key's
+    face comes from `SessionBackend.shortcutKeyCaption` — the three
+    `herdr ? "HRDR" : "TMUX"` sites it replaced drew a TMUX key on a Rex
+    tab.
+  - **A Rex tab has a working directory**: `com.superlogical.terminal
+    .process` → `foreground.cwd`, else the shell's (`RexWire
+    .workingDirectory`, asked over the tab's own control connection). FILE
+    drops land there and the file viewer opens there, as on tmux. (Unit
+    tested; not yet driven end to end.)
+  - **The link is two byte pipes on the tab's own SSH connection**
+    (`SSHConnection.openPipe`), each running `rex __internal dial-stdio` —
+    the stdin/stdout ↔ socket bridge Rex's own `ssh://` transport runs
+    remotely, which is why it finds the server unaided. ⚠ It is hidden
+    and unversioned; a rename surfaces as the CLI's "unknown command" on
+    the tab's ended line. (OpenSSH socket forwarding would be the
+    documented road; the vendored swift-nio-ssh has only `directTCPIP`.)
+    - **A pipe is a SHELL channel with no PTY, not an exec.** Citadel
+      0.12.0's exec returns output only and keeps the channel, so nothing
+      can write stdin; its `withTTY` opens a login shell on plain pipes
+      (no line discipline — binary-safe), handed over with the PTY
+      handoff's own cross-shell `exec sh -c '…'` line.
+    - ⚠ **Nothing is written until the per-pipe marker comes back.** The
+      command echoes one first: it drops whatever a login script printed,
+      and it proves the `exec` happened — a shell reading its script from
+      a pipe may read ahead, and bytes sent early would be eaten as shell
+      input. A channel that ends before or after it throws the head of
+      the command's stderr, which is how "no Rex server is running" and
+      "rex: command not found" reach the tab. Verified against zsh and
+      sh; fish as a login shell is unverified.
+  - **`WebSocketCodec` + `RexWire` are the whole protocol, pure.** No
+    extension is offered (a data connection is never compressed, and the
+    control connection works without), revision 14 is pinned in the hello
+    (a newer server translates down to it), pings are answered in
+    `RexSocket`, and requests are matched by id with a 10 s timeout.
+  - **Attach order is load-bearing** (`RexSession.attach`): hello →
+    `session.attach` → **`own_block(take)` + `resize` first** → `data
+    .connect` → data HELLO/WELCOME → wait for the first server message →
+    `modes` + `format(vt)` → RIS + rendering → flush the held stream.
+    - ⚠ **The stream opens with a Ghostty binary snapshot
+      (`GHOSTSNP…`) SwiftTerm cannot read.** `RexTerminalStream` DROPS
+      it: its length is stated nowhere, but a `resize` message "comes
+      right after the snapshot", so everything before the first `ESC _
+      rex1;<nonce>;` is snapshot (the nonce is 64 random bits per stream,
+      which is what makes scanning binary for it sound; the same nonce is
+      why a program printing a look-alike is drawn as output). The screen
+      comes from `format`'s `vt` rendering instead — colors, cursor,
+      modes, scrollback, verified on a shell and on vim.
+    - Claim-and-size precedes both so the rendering and the stream
+      describe the terminal at THIS tab's size.
+    - **The two are not atomic and the gap errs toward repeating.** The
+      stream is opened first and held while `format` is fetched; output in
+      between is drawn twice rather than lost (lost bytes can leave a mode
+      wrong for the session; a repeated line is one line). An idle prompt
+      — the common attach — has nothing in the window.
+    - `extra_palette` is NOT requested (it repaints the tab in Rex's
+      theme); cursor, modes, scrolling region, style, charsets, keyboard,
+      kitty keyboard, and tab stops are.
+    - A rendering over 3 MB (a terminal keeps up to 64 MiB) is not
+      fetched: the attach draws a plain-text tail instead.
+  - ⚠ **Attached during a full-screen program, the tab redraws when it
+    exits.** While one is up `format` renders ONLY its screen — the shell
+    history underneath cannot be asked for — so the emulator's primary
+    screen starts empty, and quitting vim showed a bare prompt.
+    `AlternateScreenExitWatch` notices `CSI ? 1049/1047/47 l` and the
+    screen is fetched again. It waits for the terminal to go quiet first
+    (120 ms, capped at 800 ms): a shell prints its prompt within
+    milliseconds of the exit, and a rendering fetched during that burst
+    drew it twice (`$ $`).
+  - **Typing is `com.superlogical.terminal.write`, one call in flight.**
+    The server runs block methods concurrently, so two calls could land
+    out of order; whatever is typed meanwhile rides the next call as one
+    string. Its argument is JSON text, so `RexInputEncoder` holds a
+    split multi-byte character and replaces bytes that are not UTF-8.
+  - **The last client to type owns the size** (tmux's latest-client
+    rule): the Rex app can claim the block back (`block_owner_changed`);
+    the next keystroke here claims and re-sizes it. Until then the tab
+    shows another client's size — Multiplex does not letterbox.
+  - ⚠ **Say goodbye before cancelling the readers** (`teardown`).
+    Cancelling a reader tears its pipe down, and a connection that just
+    drops is kept by the server for 60 s — its client listed "connection
+    lost", its stream parked for a resume. The data connection closes
+    first with status 1000 (ends the stream), then the control connection
+    (ends the client at once). A data close of 4000 (`block closed`) or
+    1000 is a clean end, like a shell exiting; resume is a fresh attach,
+    never the protocol's RESUME.
+  - **A link that breaks ends the tab like any transport's**, and
+    `SessionResumePolicy` treats it the same: suspension damage re-attaches
+    by itself when the app returns (verified on the iPad simulator —
+    backgrounded, both SSH connections killed, returned: a new client,
+    LIVE, output flowing); a drop in the foreground parks on RECONNECT. The
+    ended line says "The connection to the Rex server was lost." — a
+    broken pipe's own error under a LIVE tab is the transport's shorthand
+    (`Already closed` on the first headless run), which read as a second,
+    unrelated failure. During the attach the detail IS the reason and is
+    kept. The server lists the dropped client as "connection lost" for its
+    60 s resume window; the fresh attach is a new client beside it.
+  - What a Rex tab does not have: a prefix-key list (the REX panel only
+    switches terminals), Copy Mode, HISTORY, the one-second helper-chip
+    probe (`detectActiveAgent` answers nil; the wall probe's record still
+    does), and mosh (no PTY for mosh-server to run — a Rex tab rides SSH
+    whatever the host prefers).
+  - Deliberately NOT built, with the reason each would need new facts to
+    reopen:
+    - **Drawing a window's splits.** Every terminal in a split needs its
+      own data stream — its own SSH channel and `dial-stdio` process, so
+      sshd's `MaxSessions` (10) caps a window near nine — and its own
+      emulator, and the terminal window assumes exactly one per tab
+      (`TerminalFocusArbiter`, the key rail, Copy Mode, the viewers,
+      keyboard avoidance). It would also claim the size of EVERY block in
+      the window from the Rex app at once. tmux and herdr tabs are not
+      drawn natively either — their multiplexer draws its own panes — so
+      this would be a layout engine for one backend. The app's own shape
+      already covers it: Switch Terminal inside a tab, Open Terminal for a
+      second tab or window.
+    - **The stream's RESUME.** A fresh attach restores screen, scrollback
+      and modes from `format`; RESUME would save one rendering fetch and
+      add a replay-window state machine.
+    - **Starting a Rex server**, and with it Rex as a default backend (see
+      the mint above).
+    - **A new window inside an existing Rex session** (`launchInSession`):
+      an external `in=tab` launch mints a fresh session instead.
+    - Polling `format` as a fake terminal was rejected outright.
+  - Headless: seed key `secondaryBackends: ["rex"]`, then
+    `MULTIPLEX_AUTO_ACTION_URL='multiplex://open?host=devbox&action=shell&session=<name>&backend=rex'`
+    attaches (the `AUTO_ATTACH` env resolves names on the primary only).
+    Proof host-side: two `shell` sessions on one connection in the sshd
+    log, `rex client ls --all` listing `Multiplex … other`, `terminal
+    .size` naming it the owner; `debug.talkbacktype` + `debug
+    .talkbacksend` prove input, `rex send` proves output.
+    `MULTIPLEX_AUTO_REX_SWITCH=<n>` presses row n of the REX panel once the
+    tab is live; `debug.tmuxshortcuts` opens the panel itself. `debug
+    .newtab` from a Rex tab mints a sibling (`rex ls` gains `<name>-2`,
+    its `process` cwd is the source's). A link drop: kill the tab's
+    `sshd-session` (the newer of the app's two connections in `lsof -iTCP:
+    <port>`). "No server": point the wrapper below at a socket path nothing
+    listens on and open `…&action=agent&backend=rex` — the mint fails
+    before anything is typed. To run without
+    touching real sessions: a throwaway server (`rex server run --listen
+    unix://<abs path> --state-dir <dir> --restore=false --config <empty
+    file>`, the path under macOS's 104-byte socket limit) and a second
+    user-mode sshd whose `SetEnv PATH=` leads with a `rex` wrapper that
+    adds `-S unix://<that path>`. ⚠ `REX_SERVER` does not isolate: a
+    socket path that does not exist is skipped and the CLI falls through
+    to the local default server.
 - **tmux attach needs a PTY**: the shell opens with ECHO off and `exec
   tmux attach-session …` is injected as the first stdin line; detach =
   close the channel. oh-my-zsh's update check steals queued stdin, so

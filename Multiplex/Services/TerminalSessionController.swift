@@ -131,6 +131,9 @@ final class TerminalSessionController {
     private(set) var terminalView: TerminalView?
     /// The byte pipe under this tab — SSH PTY or mosh session.
     private var transport: (any TerminalTransport)?
+    /// The terminal a Rex tab was last switched to from its REX panel —
+    /// preferred over the route's own block on the next transport run.
+    private var rexBlockOverride: String?
     /// SSH path only: the exec/SFTP surface (pane cwd, file drops). nil on
     /// mosh tabs — their bootstrap SSH connection is transient by design.
     private var connection: SSHConnection?
@@ -435,10 +438,99 @@ final class TerminalSessionController {
         generation: Int,
         output: TerminalOutputCoalescer
     ) async {
-        if host.useMosh {
+        if let target = route.rexTarget {
+            // Before the mosh question: a Rex tab has no PTY for
+            // mosh-server to run, so it rides SSH whatever the host prefers.
+            await runRex(
+                sessionID: target.sessionID,
+                blockID: rexBlockOverride ?? target.blockID,
+                generation: generation, output: output)
+        } else if host.useMosh {
             await runMosh(generation: generation, output: output)
         } else {
             await runSSH(generation: generation, output: output)
+        }
+    }
+
+    /// Rex: the tab's SSH connection carries no PTY at all — two byte pipes
+    /// to the Rex server instead, and `RexSession` speaking its protocol
+    /// over them. The connection stays this tab's exec surface, exactly as
+    /// on an SSH tab.
+    private func runRex(
+        sessionID: String,
+        blockID: String?,
+        generation: Int,
+        output: TerminalOutputCoalescer
+    ) async {
+        let secrets = await HostSecrets.loadOffMain(for: host)
+        guard transportGeneration == generation, !Task.isCancelled else { return }
+        let connection = SSHConnection(host: host, secrets: secrets)
+        guard transportGeneration == generation else {
+            await connection.close()
+            return
+        }
+        let session = RexSession(
+            connection: connection,
+            sessionID: sessionID,
+            blockID: blockID,
+            clientVersion: Bundle.main.object(
+                forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+        )
+        self.connection = connection
+        transport = session
+        do {
+            try await connection.connect()
+            try Task.checkCancellation()
+            guard transportGeneration == generation,
+                  self.connection === connection
+            else {
+                await session.close()
+                return
+            }
+            let openedSize = TerminalSize(cols: lastCols, rows: lastRows)
+            try await session.open(
+                cols: openedSize.cols,
+                rows: openedSize.rows,
+                onData: { data in
+                    output.append(data)
+                },
+                onClose: { [weak self] reason in
+                    Task { @MainActor [weak self] in
+                        self?.handleClose(
+                            reason: reason,
+                            generation: generation,
+                            output: output
+                        )
+                    }
+                }
+            )
+            try Task.checkCancellation()
+            guard transportGeneration == generation,
+                  self.connection === connection
+            else {
+                await session.close()
+                return
+            }
+            startTransportPumps(for: session, openedAt: openedSize)
+            markLive()
+            #if DEBUG
+            debugAutoSwitchRexTerminal()
+            #endif
+        } catch {
+            // Closes the SSH connection too — the session owns that link.
+            await session.close()
+            guard transportGeneration == generation,
+                  self.connection === connection
+            else { return }
+            captureKeyPassphraseChallenge(from: error)
+            let message = (error as? RexSession.Failure)?.message
+                ?? (error as? SSHConnectionError)?.userMessage(host: host)
+                ?? String(localized: "Couldn't reach \(host.name). \(error.localizedDescription)")
+            status = .ended(message)
+            self.connection = nil
+            transport = nil
+            outputCoalescer = nil
+            considerAutomaticResume()
         }
     }
 
@@ -1008,9 +1100,14 @@ final class TerminalSessionController {
         else { return }
         selectTextClampGeneration &+= 1
         let generation = selectTextClampGeneration
+        // A Rex tab shows exactly one terminal block, so there are no
+        // sibling panes to clamp a selection to, and no pane-rect query to
+        // make. The `.rex` arms below keep these switches total.
+        guard backend != .rex else { return }
         let command = switch backend {
         case .tmux: TmuxProbe.paneRectsCommand(sessionName: sessionName)
         case .herdr: HerdrProbe.snapshotCommand(sessionName: sessionName)
+        case .rex: ":"
         }
         // Cancellation ends a superseded fetch at its next sleep — resize
         // re-enters here on every keyboard show/hide, and the generation
@@ -1038,6 +1135,7 @@ final class TerminalSessionController {
                     let round = switch backend {
                     case .tmux: TmuxProbe.parsePaneRects(output)
                     case .herdr: HerdrProbe.parsePaneScreenRects(output, screenSize: screenSize)
+                    case .rex: [PaneScreenRectEntry]()
                     }
                     // No answer keeps the current no-clamp behavior;
                     // retrying could not distinguish a host without the
@@ -1069,6 +1167,8 @@ final class TerminalSessionController {
                 await executeControlCommand(HerdrProbe.focusPaneDirectionCommand(
                     sessionName: sessionName, direction: direction
                 ))
+            case .rex:
+                return
             }
         }
     }
@@ -1149,6 +1249,7 @@ final class TerminalSessionController {
         switch route.sessionBackend {
         case .tmux: await loadTmuxWindowList()
         case .herdr: await loadHerdrWorkspaceList()
+        case .rex: await loadRexTerminalList()
         case nil: nil
         }
     }
@@ -1157,8 +1258,51 @@ final class TerminalSessionController {
         switch route.sessionBackend {
         case .tmux: selectTmuxWindow(choice)
         case .herdr: selectHerdrWorkspace(choice)
+        case .rex: selectRexTerminal(choice)
         case nil: break
         }
+    }
+
+    #if DEBUG
+    private static var debugRexSwitchFired = false
+
+    /// `MULTIPLEX_AUTO_REX_SWITCH=<n>` — the headless stand-in for pressing
+    /// the REX panel's nth Switch Terminal row (simctl has no tap). It goes
+    /// through the same two entry points the panel uses, six seconds after
+    /// the first Rex tab goes live, once per process.
+    private func debugAutoSwitchRexTerminal() {
+        guard !Self.debugRexSwitchFired,
+              let raw = ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_REX_SWITCH"],
+              let position = Int(raw), position > 0
+        else { return }
+        Self.debugRexSwitchFired = true
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(6))
+            guard let self, let choices = await self.loadRexTerminalList(),
+                  choices.indices.contains(position - 1)
+            else { return }
+            self.selectRexTerminal(choices[position - 1])
+        }
+    }
+    #endif
+
+    /// The REX panel's Switch Terminal rows: every terminal of this tab's
+    /// session, asked of the server over the tab's own control connection.
+    func loadRexTerminalList() async -> [TmuxWindowChoice]? {
+        guard status == .live, let session = transport as? RexSession else { return nil }
+        return await session.terminalChoices()
+    }
+
+    /// Point this tab at another terminal of its session, in place. Unlike
+    /// tmux and herdr, where the remote client redraws itself, the tab's
+    /// own transport does the switching (`RexSession.switchBlock`). The
+    /// choice is remembered for this controller's life so a reconnect comes
+    /// back to the terminal the user was on, not the one the tab opened
+    /// with.
+    func selectRexTerminal(_ choice: TmuxWindowChoice) {
+        guard status == .live, let session = transport as? RexSession else { return }
+        rexBlockOverride = choice.tmuxID
+        Task { await session.switchBlock(to: choice.tmuxID) }
     }
 
     /// The shortcut panel's window list, read through the control path so
@@ -1911,6 +2055,16 @@ final class TerminalSessionController {
                 TmuxProbe.gitWorktreeCheckCommand(directory: cwd)
             )) ?? ""
             return (cwd, TmuxProbe.parseDropDestination(check).insideGitWorktree)
+        case .rex:
+            // Rex answers over the tab's own control connection rather than
+            // an exec, and — like herdr — hands the path home as data, so
+            // the corral check is its own exec with it respliced.
+            guard let cwd = await (transport as? RexSession)?.workingDirectory()
+            else { return (nil, false) }
+            let check = (try? await connection.exec(
+                TmuxProbe.gitWorktreeCheckCommand(directory: cwd)
+            )) ?? ""
+            return (cwd, TmuxProbe.parseDropDestination(check).insideGitWorktree)
         case nil:
             return (nil, false)
         }
@@ -2238,6 +2392,9 @@ final class TerminalSessionController {
             return HerdrProbe.parsePaneWorkingDirectory(
                 output, atScreenCell: cell, screenSize: screenSize
             )
+        case .rex:
+            // One tab is one terminal, so the pressed cell is always its.
+            return await (transport as? RexSession)?.workingDirectory()
         case nil:
             return nil
         }

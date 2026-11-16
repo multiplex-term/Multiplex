@@ -73,6 +73,16 @@ enum BackendDiscovery {
                 + "{ echo \(presentMarker); "
                 + "\(TmuxProbe.tmuxCommand) list-sessions -F 'D #{session_name}'"
                 + " 2>/dev/null || true; }; "
+        case .rex:
+            // On macOS the CLI lives inside the app bundle, which only the
+            // Rex PATH names. `RexProbe.sessionListVerb` carries the
+            // autostart refusal: a rider that started a Rex server on every
+            // host that merely has the binary would be this feature's worst
+            // possible side effect.
+            command += RemoteCommandEnvironment.rexPathPrefix
+                + "command -v rex >/dev/null 2>&1 && "
+                + "{ echo \(presentMarker); "
+                + RexProbe.sessionListVerb + "; }; "
         }
         return command + "echo \(endMarker); "
     }
@@ -244,6 +254,10 @@ enum BackendDiscovery {
                 let name = String(line.dropFirst(2))
                 return name.isEmpty ? nil : name
             }
+        case .rex:
+            // One id per line. The offer states a count, and a Rex label is
+            // not unique anyway, so the ids ARE the list.
+            return RexProbe.parseSessionIDs(lines)
         }
     }
 

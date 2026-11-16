@@ -25,6 +25,31 @@ struct Host: Identifiable, Codable, Hashable {
     enum SessionBackend: String, Codable, CaseIterable {
         case tmux
         case herdr
+        /// Rex (superlogical.com/rex). Rex ships no terminal client — no
+        /// `rex attach`; its sessions are rendered by a native app speaking
+        /// the server's WebSocket API — so Multiplex is that client: the
+        /// deck shows a Rex session's tile (`RexProbe`), a tile attaches
+        /// one of its terminals as a tab (`RexSession`), and New Session
+        /// creates one (`RexProbe.mintCommand`). The one thing Rex cannot be
+        /// is a host's default — `canBeDefault`.
+        case rex
+
+        /// Whether this backend can be a host's default
+        /// (`Host.sessionBackend`). The default answers every request that
+        /// names no backend — New Session, the Signal check, an external
+        /// action — and it has to answer on a host with nothing running:
+        /// tmux and herdr bring their own server up with the first
+        /// session. Multiplex never starts a Rex server (`RexProbe`), so a
+        /// Rex session can be created only while one is already running.
+        /// That is fine for a backend the user picks and wrong for the one
+        /// everything falls back to, so Rex is only ever a secondary
+        /// (`Host.sessionBackend`'s `didSet` enforces it). Its sessions are
+        /// still shown, attached, created and closed like any other's.
+        var canBeDefault: Bool { self != .rex }
+
+        /// The backends a host's default can be — what the "New sessions
+        /// run on" bars and the Bind pane offer.
+        static let defaultCases = allCases.filter(\.canBeDefault)
 
         /// Whether the probe can state how many clients a session has.
         /// tmux answers `#{session_attached}`; herdr 0.7.5 / protocol 17
@@ -33,8 +58,10 @@ struct Host: Identifiable, Codable, Hashable {
         /// and the bundled API schema — only the socket-only
         /// `client.window_title` reply leaks a `no_foreground_client`
         /// reason, and no CLI verb reaches it), so its records carry
-        /// `clientCount == 0` whatever is really attached.
-        var reportsClientCount: Bool { self == .tmux }
+        /// `clientCount == 0` whatever is really attached. Rex answers
+        /// `client.list` per session; the probe counts the attached APP
+        /// clients (a Rex window showing the session), never its own CLI.
+        var reportsClientCount: Bool { self != .herdr }
 
         /// Whether a session is live right now — said only where it can be
         /// verified. tmux counts every client on the host. herdr can answer
@@ -42,9 +69,15 @@ struct Host: Identifiable, Codable, Hashable {
         /// open terminal tab means. A shell on the host attached to the same
         /// herdr session therefore stays invisible; the tile understates
         /// rather than guesses, the same choice its missing client count and
-        /// session age already make.
+        /// session age already make. Rex counts its APP clients, and this
+        /// app attaches as kind `other` on purpose (`RexWire.hello`), so its
+        /// own open tab is counted separately.
         func isSessionLive(clientCount: Int, hasOpenTab: Bool) -> Bool {
-            reportsClientCount ? clientCount > 0 : hasOpenTab
+            switch self {
+            case .tmux: clientCount > 0
+            case .herdr: hasOpenTab
+            case .rex: clientCount > 0 || hasOpenTab
+            }
         }
 
         /// The one reader of a backend written by a human or an automation —
@@ -103,8 +136,27 @@ struct Host: Identifiable, Codable, Hashable {
     /// Promoting a backend to primary retires it as a secondary in the same
     /// write, so the record can never point at a backend it also lists as an
     /// extra — see `secondaryBackends`.
+    ///
+    /// The primary can always create a session. It is where New Session
+    /// lands, what the Signal check asks, and what every external action
+    /// defaults to — none of which a backend that needs its server started
+    /// by someone else (`SessionBackend.canBeDefault`) can promise. So a
+    /// write naming one keeps the old primary and shows the newcomer as a
+    /// secondary instead. Enforced here, like the rule above, so no mint
+    /// path has to ask whether its default can answer on an idle host.
     var sessionBackend: SessionBackend = .tmux {
-        didSet { secondaryBackends.remove(sessionBackend) }
+        didSet {
+            if !sessionBackend.canBeDefault {
+                let watched = sessionBackend
+                // Restore the primary FIRST: `secondaryBackends`' own
+                // observer strips whatever the primary is at that moment,
+                // and would strip the newcomer straight back out. Assigning
+                // inside this observer does not re-enter it.
+                sessionBackend = oldValue
+                secondaryBackends.insert(watched)
+            }
+            secondaryBackends.remove(sessionBackend)
+        }
     }
     /// Backends beyond `sessionBackend` whose sessions ALSO appear on this
     /// host's deck. Empty is the shipping default and the only state that
@@ -124,12 +176,12 @@ struct Host: Identifiable, Codable, Hashable {
     /// probe, because the probe command itself is backend-shaped — the same
     /// reasoning that already puts `sessionBackend` there.
     ///
-    /// ⚠ A `Set` encodes in iteration order, which Swift seeds per process.
-    /// That is stable today only because two backends exist, so this holds
-    /// at most one element and has exactly one encoding — and `hosts.json`
-    /// is written with `.sortedKeys` precisely to stay byte-stable. Adding a
-    /// third backend must therefore also sort this on the way out, or every
-    /// launch will rewrite the file and the mirrored Keychain record.
+    /// ⚠ A `Set` encodes in iteration order, which Swift seeds per process,
+    /// and with three backends this can hold two — so it is sorted on the
+    /// way out (the `KeyedEncodingContainer` overload at the foot of this
+    /// file). `hosts.json` is written with `.sortedKeys` precisely to stay
+    /// byte-stable; an unsorted set would rewrite the file and the mirrored
+    /// Keychain record on every launch.
     ///
     /// The primary is never also a secondary — `monitoredBackends` would
     /// list it twice, and a stray copy makes `connectionModelConfiguration`
@@ -221,27 +273,42 @@ struct Host: Identifiable, Codable, Hashable {
         private(set) var enabled: Set<SessionBackend>
 
         init(preferred: SessionBackend = .tmux, also secondaries: Set<SessionBackend> = []) {
-            self.preferred = preferred
-            enabled = secondaries.union([preferred])
+            // The default can always be one (`Host.sessionBackend`'s rule): a
+            // backend that cannot, handed in as the default, stays checked
+            // and the first that can leads instead.
+            self.preferred = preferred.canBeDefault
+                ? preferred
+                : SessionBackend.defaultCases.first(where: secondaries.contains) ?? .tmux
+            enabled = secondaries.union([preferred, self.preferred])
         }
 
         var secondaries: Set<SessionBackend> { enabled.subtracting([preferred]) }
         var isMixed: Bool { enabled.count > 1 }
+        /// The checked backends the default can be, in canonical order —
+        /// the "New sessions run on" bar's choices. Rex is checked without
+        /// ever appearing here.
+        var defaultChoices: [SessionBackend] {
+            SessionBackend.defaultCases.filter(enabled.contains)
+        }
 
         /// Check or uncheck backends. Unchecking the current default promotes
-        /// whatever remains, so the record can never point at a backend it no
-        /// longer shows; an empty set is refused rather than stored.
+        /// whatever remains that can be one, so the record can never point at a
+        /// backend it no longer shows. Refused rather than stored: an empty
+        /// set, and a set with nothing that can be the default — a host
+        /// showing only Rex would have none at all.
         mutating func setEnabled(_ backends: Set<SessionBackend>) {
-            guard !backends.isEmpty else { return }
+            guard backends.contains(where: \.canBeDefault) else { return }
             enabled = backends
             guard !backends.contains(preferred) else { return }
-            preferred = SessionBackend.allCases.first(where: backends.contains) ?? preferred
+            preferred = SessionBackend.defaultCases.first(where: backends.contains) ?? preferred
         }
 
         /// Move the default without changing what is checked — the old
         /// default stays on as a secondary. A backend that is not checked is
-        /// checked by being chosen.
+        /// checked by being chosen. Naming a backend that cannot be the
+        /// default changes nothing.
         mutating func setPreferred(_ backend: SessionBackend) {
+            guard backend.canBeDefault else { return }
             preferred = backend
             enabled.insert(backend)
         }
@@ -341,16 +408,21 @@ extension Host {
         // Decode via the raw string so an unknown value — a record written
         // by a newer schema that grew a third backend — degrades to tmux
         // instead of throwing this host (and with it the whole list) away.
-        sessionBackend = (try container.decodeIfPresent(String.self, forKey: .sessionBackend))
+        let primary = (try container.decodeIfPresent(String.self, forKey: .sessionBackend))
             .flatMap(SessionBackend.init(rawValue:)) ?? .tmux
+        // Observers don't run during initialization, so the two record rules
+        // are repeated here: a primary that cannot be one degrades to tmux and
+        // stays on as a secondary, and the primary is never also a secondary.
+        sessionBackend = primary.canBeDefault ? primary : .tmux
         // Same rule, applied per element: a record from a schema with a
-        // third backend degrades by dropping that entry instead of throwing
+        // newer backend degrades by dropping that entry instead of throwing
         // the host away. An older build simply ignores the key and behaves
         // as it always did — the safe direction.
         secondaryBackends = Set(
             (try container.decodeIfPresent([String].self, forKey: .secondaryBackends) ?? [])
                 .compactMap(SessionBackend.init(rawValue:))
-        ).subtracting([sessionBackend])
+        ).union(primary.canBeDefault ? [] : [primary])
+            .subtracting([sessionBackend])
         moshServerPath = try container.decodeIfPresent(String.self, forKey: .moshServerPath)
         moshPorts = try container.decodeIfPresent(String.self, forKey: .moshPorts)
         workingDirs = try container.decodeIfPresent([String].self, forKey: .workingDirs) ?? []
@@ -395,5 +467,18 @@ extension Host {
 
     func hasSameConnectionModelConfiguration(as other: Host) -> Bool {
         connectionModelConfiguration == other.connectionModelConfiguration
+    }
+}
+
+extension KeyedEncodingContainer {
+    /// A backend set always encodes sorted by raw value. `Set` iterates in
+    /// an order Swift seeds per process, so the synthesized encoder would
+    /// write `["herdr","rex"]` on one launch and `["rex","herdr"]` on the
+    /// next — rewriting `hosts.json` and the mirrored Keychain record for a
+    /// host nobody touched. Synthesized `encode(to:)` bodies resolve their
+    /// `encode(_:forKey:)` calls like any other code, so this more specific
+    /// overload is what `Host` picks up; decoding needs no counterpart.
+    mutating func encode(_ value: Set<Host.SessionBackend>, forKey key: Key) throws {
+        try encode(value.map(\.rawValue).sorted(), forKey: key)
     }
 }

@@ -1476,8 +1476,9 @@ final class TerminalWindowViewController: UIViewController,
         creatingTab = true
         // + TAB means "another one like this": the sibling session is minted
         // on THIS tab's backend, not the host's default, so a herdr tab on a
-        // tmux-default mixed host keeps producing herdr siblings. A backend
-        // the host no longer monitors falls back to the default.
+        // tmux-default mixed host keeps producing herdr siblings, and a Rex
+        // tab Rex ones. A backend the host no longer monitors falls back
+        // to the default.
         let backend = activeTab.sessionBackend
             .flatMap { host.monitors($0) ? $0 : nil }
             ?? host.sessionBackend
@@ -1506,13 +1507,7 @@ final class TerminalWindowViewController: UIViewController,
             ) else {
                 presentNewTabFailure(
                     hostName: host.name, target: .session,
-                    reason: model.sessionCreateFailure.map {
-                        switch $0 {
-                        case .backendMissing(let backend):
-                            HostGuide.backendMissingMessage(
-                                backend, hostName: host.name)
-                        }
-                    })
+                    reason: model.sessionCreateFailure?.message(hostName: host.name))
                 return
             }
             let tab = TerminalRoute(hostID: host.id, mode: created)
@@ -2934,7 +2929,7 @@ extension TerminalWindowViewController {
                 } : nil,
             fullScreenActive: fullScreenColumn,
             extraNewTabTarget: extraNewTabTarget,
-            shortcutBackend: activeTab?.sessionBackend,
+            shortcutBackend: activeTab?.shortcutBackend,
             style: vertical ? .verticalColumn : profile.style,
             deckControl: shell?.deckControl ?? .back,
             availableWidth: vertical ? column.width : umdAvailableWidth,

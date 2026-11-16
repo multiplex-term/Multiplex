@@ -17,6 +17,19 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
         /// presses too. A real terminal like `.attach`: restores across
         /// launches, resumes per `SessionResumePolicy`.
         case herdrAttach(sessionName: String)
+        /// Attach one terminal block of a Rex session. Unlike tmux and herdr
+        /// there is no client to run in a PTY: the tab speaks Rex's own
+        /// protocol (`RexSession`), so this mode has no remote command at
+        /// all. `sessionName` is the tile's display name — the identity the
+        /// deck and the tab strip match on — while `sessionID` is the only
+        /// thing the server can be asked for (a Rex label is not unique).
+        /// `block` names one terminal of the session (the tile menu's Open
+        /// Terminal rows); nil means the one the session is fronting,
+        /// decided at attach time, which is what a tile press opens. A real
+        /// terminal like `.attach`: restores across launches, resumes per
+        /// `SessionResumePolicy` — a named block that has since closed falls
+        /// back to the fronted one.
+        case rexAttach(sessionName: String, sessionID: String, block: RexBlockRef? = nil)
         /// The viewport — an inline browser tab, docked beside the sessions
         /// that produced its URL and moved with the same merge/split
         /// machinery. Not a terminal: no remote command, no tmux session, no
@@ -37,15 +50,25 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
             .create(sessionName: sessionName, directory: nil)
         }
 
-        /// The attach mode for one session — the tmux attach or the herdr
-        /// client. THE single place the app decides tmux-vs-herdr for a
-        /// tab, so no mint site can disagree.
+        /// The attach mode for one session — the tmux attach, the herdr
+        /// client, or a Rex terminal. THE single place the app decides
+        /// which, so no mint site can disagree.
+        ///
+        /// `sessionID` is the backend's own id for the session, where it has
+        /// one the attach needs. Rex does: a label is not unique, so a Rex
+        /// session can only be attached by id, and this is nil for a record
+        /// that carries no usable one (a caller holding only a name).
         static func attach(
-            backend: Host.SessionBackend, sessionName: String
-        ) -> Mode {
+            backend: Host.SessionBackend, sessionName: String, sessionID: String? = nil
+        ) -> Mode? {
             switch backend {
-            case .tmux: .attach(sessionName: sessionName)
-            case .herdr: .herdrAttach(sessionName: sessionName)
+            case .tmux:
+                return .attach(sessionName: sessionName)
+            case .herdr:
+                return .herdrAttach(sessionName: sessionName)
+            case .rex:
+                guard let sessionID, RexProbe.bakeableSessionID(sessionID) else { return nil }
+                return .rexAttach(sessionName: sessionName, sessionID: sessionID)
             }
         }
 
@@ -55,14 +78,20 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
         /// on a mixed host a bare name is ambiguous, and this is the
         /// documented tie-break, not a guess about which the user meant.
         static func attach(host: Host, sessionName: String) -> Mode {
+            // The primary is always tmux or herdr (`Host.sessionBackend`'s
+            // record rule), both of which attach by name, so the fallback is
+            // unreachable for a stored host; it exists so this stays total.
             attach(backend: host.sessionBackend, sessionName: sessionName)
+                ?? .attach(sessionName: sessionName)
         }
 
         /// A session RECORD knows its own backend. On a mixed host the tmux
         /// `main` and the herdr `main` are two tiles that attach two
         /// different ways, so this must never consult `host.sessionBackend`.
-        static func attach(host: Host, session: TmuxSession) -> Mode {
-            attach(backend: session.backend, sessionName: session.name)
+        static func attach(host: Host, session: TmuxSession) -> Mode? {
+            attach(
+                backend: session.backend, sessionName: session.name,
+                sessionID: session.tmuxID)
         }
     }
 
@@ -82,7 +111,7 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
             )
         case .herdrAttach(let sessionName):
             return HerdrSessionLaunch.attachCommand(sessionName: sessionName, universalArguments: true)
-        case .shell, .viewport, .fileViewer:
+        case .shell, .rexAttach, .viewport, .fileViewer:
             return nil
         }
     }
@@ -109,7 +138,8 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
             // The attach line needs a shell (PATH export before the exec);
             // execvp gets that shell as its argv.
             return "sh -c \(HerdrSessionLaunch.attachCommand(sessionName: sessionName).shellQuoted)"
-        case .shell, .viewport, .fileViewer:
+        // A Rex tab never rides mosh: it has no PTY for mosh-server to run.
+        case .shell, .rexAttach, .viewport, .fileViewer:
             return nil
         }
     }
@@ -118,6 +148,10 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
         switch mode {
         case .attach(let name), .create(let name, _): name
         case .herdrAttach(let sessionName): sessionName
+        // A tab on a named terminal says which: two tabs of one session
+        // would otherwise wear the same label.
+        case .rexAttach(let sessionName, _, let block):
+            block.map { "\(sessionName) · \($0.label)" } ?? sessionName
         case .shell: "shell"
         case .viewport(let urlString): Self.viewportLabel(urlString)
         case .fileViewer(let path): Self.fileViewerLabel(path)
@@ -132,9 +166,17 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
     var sessionName: String? {
         switch mode {
         case .attach(let name), .create(let name, _): name
-        case .herdrAttach(let sessionName): sessionName
+        case .herdrAttach(let sessionName), .rexAttach(let sessionName, _, _): sessionName
         case .shell, .viewport, .fileViewer: nil
         }
+    }
+
+    /// The Rex session this tab attaches, by the id the server knows it by,
+    /// and the terminal in it when one was named; nil for every other kind
+    /// of tab. Its presence is what selects the Rex transport over the PTY.
+    var rexTarget: (sessionID: String, blockID: String?)? {
+        guard case .rexAttach(_, let sessionID, let block) = mode else { return nil }
+        return (sessionID, block?.id)
     }
 
     /// The remote session namespace this route belongs to. Unlike
@@ -145,9 +187,18 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
         switch mode {
         case .attach, .create: .tmux
         case .herdrAttach: .herdr
+        case .rexAttach: .rex
         case .shell, .viewport, .fileViewer: nil
         }
     }
+
+    /// The backend whose panel this tab carries — the rail's TMUX / HRDR /
+    /// REX key and the panel behind it (`ShortcutPanelContent.content`).
+    /// One accessor so the window bar and the pane rail cannot disagree;
+    /// the key's face is `SessionBackend.shortcutKeyCaption`, because a
+    /// two-way `herdr ? "HRDR" : "TMUX"` at each site once drew a TMUX key
+    /// on a Rex tab.
+    var shortcutBackend: Host.SessionBackend? { sessionBackend }
 
     /// Complete multiplexer identity for control-plane work that outlives or
     /// sits beside this tab's interactive transport (for example a mosh tab
@@ -217,7 +268,7 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
     var usesTmux: Bool {
         switch mode {
         case .attach, .create: true
-        case .herdrAttach, .shell, .viewport, .fileViewer: false
+        case .herdrAttach, .rexAttach, .shell, .viewport, .fileViewer: false
         }
     }
 
@@ -275,6 +326,32 @@ enum RemoteCommandEnvironment {
         "PATH=\"$PATH:/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin\"; export PATH; "
     static let herdrPathPrefix =
         pathPrefix + "PATH=\"$PATH:$HOME/.cargo/bin\"; export PATH; "
+    /// Rex installs `rex` at `/usr/bin` (Linux/FreeBSD packages) or
+    /// `~/.local/bin` (its unprivileged install, already on `pathPrefix`).
+    /// On macOS the CLI is put on PATH only for terminals Rex itself opens —
+    /// an SSH exec never sees it — so its homes are named outright, read off
+    /// a live install (Rex Beta 0.1.0-preview.19, 2026-11-16):
+    /// - the server copy the app installs and runs, under Application
+    ///   Support with a `Current` link — independent of where the app
+    ///   bundle sits or what it is called, so it leads;
+    /// - the helper inside the app bundle, for a Mac where Rex is installed
+    ///   but has not run yet. The Beta name was observed; the release name
+    ///   is assumed to keep the layout.
+    /// A directory that does not exist costs a PATH lookup nothing.
+    static let rexPathPrefix = pathPrefix
+        + "PATH=\"$PATH"
+        + ":$HOME/Library/Application Support/com.superlogical.rex/RexServer"
+        + "/Versions/Current/Rex Server.app/Contents/MacOS"
+        + ":/Applications/Rex.app/Contents/Helpers/Rex Server.rex/Contents/MacOS"
+        + ":/Applications/Rex Beta.app/Contents/Helpers/Rex Server.rex/Contents/MacOS"
+        + "\"; export PATH; "
+}
+
+/// One terminal block of a Rex session, as a tab remembers it: the id the
+/// server is asked for, and the label the tab wears.
+struct RexBlockRef: Codable, Hashable {
+    var id: String
+    var label: String
 }
 
 /// The PTY handoff for a full herdr client. Session actions that don't belong
@@ -296,7 +373,10 @@ enum HerdrSessionLaunch {
 /// itself. A paste target is an interactive desktop shell, so no ssh wrapper,
 /// no PATH scaffolding, no `-u`: the user's own shell already has all three.
 enum SessionHandoff {
-    static func command(session: TmuxSession) -> String {
+    /// nil when the backend has no attach line to hand over: Rex has no
+    /// terminal client, so there is no command that opens its session in a
+    /// shell on the host.
+    static func command(session: TmuxSession) -> String? {
         switch session.backend {
         case .tmux:
             return "tmux attach-session -t \(plainWordOrQuoted(session.name))"
@@ -304,6 +384,8 @@ enum SessionHandoff {
             let name = session.name.isEmpty
                 ? HerdrSessionLaunch.primarySessionName : session.name
             return "herdr session attach \(plainWordOrQuoted(name))"
+        case .rex:
+            return nil
         }
     }
 

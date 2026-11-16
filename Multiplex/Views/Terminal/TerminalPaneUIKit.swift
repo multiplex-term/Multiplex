@@ -239,7 +239,7 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
             bareChrome: configuration.bareChrome,
             keyRailHidden: configuration.keyRailHidden,
             isActive: configuration.isActive && configuration.focusAllowed,
-            shortcutBackend: configuration.controller?.route.sessionBackend,
+            shortcutBackend: configuration.controller?.route.shortcutBackend,
             keyCommandPlan: configuration.keyCommandPlan
         )
     }

@@ -1,5 +1,6 @@
 Multiplex — a spatial SSH terminal built around remote **tmux** (with herdr
-as an optional second backend); visionOS-first, iPadOS alongside. The deck is
+as an optional second backend, and Rex sessions shown, attached and created);
+visionOS-first, iPadOS alongside. The deck is
 a fleet-wide monitor wall: every host probes concurrently, every session
 renders as a live capture-pane tile, and each attach opens its own terminal
 window (a scene on visionOS / Stage Manager on iPad). Product tour:
@@ -89,8 +90,8 @@ approaches. Don't re-litigate a recorded decision without new facts.
   and tab moves, keyboard avoidance, secret fields, held-backspace filler.
 - `links-and-viewers.md` — link/path confirmation, ⌗ viewport, ▤ file viewer.
 - `backends-and-probe.md` — tmux invocation facts, mixed tmux+herdr hosts,
-  the herdr adaptation, session creation (setup scripts, per-host tmux conf,
-  systemd-run), file attach/drop.
+  the herdr adaptation, the Rex adaptation (probe, attach, mint), session creation
+  (setup scripts, per-host tmux conf, systemd-run), file attach/drop.
 - `agent-helpers.md` — CLI-agent detection, helper chips, launch model
   override, keychain-locked tip, HISTORY/jump.
 - `lifecycle-and-attention.md` — disabled hosts, session resume, keep screen on, background
