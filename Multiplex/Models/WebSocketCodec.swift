@@ -137,8 +137,9 @@ enum WebSocketCodec {
         maskKey: [UInt8] = (0..<4).map { _ in UInt8.random(in: .min ... .max) }
     ) -> Data {
         precondition(maskKey.count == 4)
-        var frame = Data([0x80 | opcode.rawValue])
         let count = payload.count
+        var frame = Data(capacity: count + 14)
+        frame.append(0x80 | opcode.rawValue)
         switch count {
         case ..<126:
             frame.append(0x80 | UInt8(count))
@@ -152,7 +153,13 @@ enum WebSocketCodec {
             }
         }
         frame.append(contentsOf: maskKey)
-        frame.append(contentsOf: payload.enumerated().map { $0.element ^ maskKey[$0.offset % 4] })
+        // Masked where it lands: a paste is megabytes, and a mapped copy
+        // of it is a second buffer and a closure call per byte.
+        let start = frame.count
+        frame.append(payload)
+        frame.withUnsafeMutableBytes { bytes in
+            for index in 0..<count { bytes[start + index] ^= maskKey[index % 4] }
+        }
         return frame
     }
 
@@ -167,10 +174,19 @@ enum WebSocketCodec {
     /// and nil when it needs more.
     struct Decoder {
         private var buffer = Data()
+        /// How much of `buffer` has already been handed out as frames. The
+        /// spent front is dropped once per `append`, not once per frame: a
+        /// chunk of a hundred small frames would otherwise be copied a
+        /// hundred times over on the terminal's hot path.
+        private var consumed = 0
         /// The data message being assembled across fragments.
         private var partial: (opcode: Opcode, payload: Data)?
 
         mutating func append(_ bytes: Data) {
+            if consumed > 0 {
+                buffer.removeSubrange(buffer.startIndex..<(buffer.startIndex + consumed))
+                consumed = 0
+            }
             buffer.append(bytes)
         }
 
@@ -231,10 +247,10 @@ enum WebSocketCodec {
 
         /// Pops one whole frame off the buffer, or nil if it is not all here.
         private mutating func nextFrame() throws -> Frame? {
-            let bytes = buffer
-            guard bytes.count >= 2 else { return nil }
-            let base = bytes.startIndex
-            let first = bytes[base], second = bytes[base + 1]
+            let base = buffer.startIndex + consumed
+            let available = buffer.count - consumed
+            guard available >= 2 else { return nil }
+            let first = buffer[base], second = buffer[base + 1]
             guard first & 0x70 == 0 else {
                 throw Failure.protocolViolation("reserved bits set with no extension negotiated")
             }
@@ -244,13 +260,13 @@ enum WebSocketCodec {
             var offset = 2
             var length = Int(second & 0x7F)
             if length == 126 {
-                guard bytes.count >= offset + 2 else { return nil }
-                length = Int(bytes[base + 2]) << 8 | Int(bytes[base + 3])
+                guard available >= offset + 2 else { return nil }
+                length = Int(buffer[base + 2]) << 8 | Int(buffer[base + 3])
                 offset += 2
             } else if length == 127 {
-                guard bytes.count >= offset + 8 else { return nil }
+                guard available >= offset + 8 else { return nil }
                 var wide: UInt64 = 0
-                for index in 0..<8 { wide = wide << 8 | UInt64(bytes[base + 2 + index]) }
+                for index in 0..<8 { wide = wide << 8 | UInt64(buffer[base + 2 + index]) }
                 guard wide <= UInt64(WebSocketCodec.maxMessageBytes) else {
                     throw Failure.messageTooLarge(Int(clamping: wide))
                 }
@@ -265,16 +281,16 @@ enum WebSocketCodec {
             let masked = second & 0x80 != 0
             var key: [UInt8] = []
             if masked {
-                guard bytes.count >= offset + 4 else { return nil }
-                key = [UInt8](bytes[(base + offset)..<(base + offset + 4)])
+                guard available >= offset + 4 else { return nil }
+                key = [UInt8](buffer[(base + offset)..<(base + offset + 4)])
                 offset += 4
             }
-            guard bytes.count >= offset + length else { return nil }
-            var payload = Data(bytes[(base + offset)..<(base + offset + length)])
+            guard available >= offset + length else { return nil }
+            var payload = Data(buffer[(base + offset)..<(base + offset + length)])
             if masked {
                 payload = Data(payload.enumerated().map { $0.element ^ key[$0.offset % 4] })
             }
-            buffer = Data(bytes[(base + offset + length)...])
+            consumed += offset + length
             return Frame(fin: first & 0x80 != 0, opcode: opcode, payload: payload)
         }
     }

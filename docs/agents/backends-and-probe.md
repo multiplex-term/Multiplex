@@ -482,7 +482,8 @@ HerdrProbe, RexProbe, session creation/targeting, or file attach/drop.
   - **Attach order is load-bearing** (`RexSession.attach`): hello →
     `session.attach` → **`own_block(take)` + `resize` first** → `data
     .connect` → data HELLO/WELCOME → wait for the first server message →
-    `modes` + `format(vt)` → RIS + rendering → flush the held stream.
+    `modes` + `format(vt)` (two reads, asked together) → RIS + rendering →
+    flush the held stream.
     - ⚠ **The stream opens with a Ghostty binary snapshot
       (`GHOSTSNP…`) SwiftTerm cannot read.** `RexTerminalStream` DROPS
       it: its length is stated nowhere, but a `resize` message "comes
@@ -518,6 +519,12 @@ HerdrProbe, RexProbe, session creation/targeting, or file attach/drop.
     out of order; whatever is typed meanwhile rides the next call as one
     string. Its argument is JSON text, so `RexInputEncoder` holds a
     split multi-byte character and replaces bytes that are not UTF-8.
+    ⚠ `RexSession.write` QUEUES AND RETURNS; a drain task makes the calls.
+    The tab's input pump awaits each `transport.write`, so a write that
+    waited for the server's answer (the first shape) made every keystroke
+    its own round trip, queued behind the last, and the "rides the next
+    call" batching never happened — an SSH PTY write only enqueues bytes,
+    which is why the pump never had to care.
   - **The last client to type owns the size** (tmux's latest-client
     rule): the Rex app can claim the block back (`block_owner_changed`);
     the next keystroke here claims and re-sizes it. Until then the tab
@@ -543,9 +550,13 @@ HerdrProbe, RexProbe, session creation/targeting, or file attach/drop.
     60 s resume window; the fresh attach is a new client beside it.
   - What a Rex tab does not have: a prefix-key list (the REX panel only
     switches terminals), Copy Mode, HISTORY, the one-second helper-chip
-    probe (`detectActiveAgent` answers nil; the wall probe's record still
-    does), and mosh (no PTY for mosh-server to run — a Rex tab rides SSH
-    whatever the host prefers).
+    probe (`SessionBackend.hasFocusedPaneProbe` is false, so the chips
+    follow the wall probe's record instead of polling for an answer that
+    is always nil), and mosh (no PTY for mosh-server to run — a Rex tab
+    rides SSH whatever the host prefers). ⚠ `TerminalSessionController
+    .ridesMosh` is the one statement of that last rule: scrollback, FILE
+    and the bar's MOSH badge read it, where reading `host.useMosh` raw
+    gave a Rex tab on a mosh host no scrollback, no FILE and a MOSH badge.
   - Deliberately NOT built, with the reason each would need new facts to
     reopen:
     - **Drawing a window's splits.** Every terminal in a split needs its

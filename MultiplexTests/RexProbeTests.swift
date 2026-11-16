@@ -284,7 +284,6 @@ final class RexProbeTests: XCTestCase {
             """))
         let session = try XCTUnwrap(try sessions(probe).first)
         XCTAssertEqual(session.clientCount, 2)
-        XCTAssertTrue(Host.SessionBackend.rex.reportsClientCount)
         XCTAssertTrue(Host.SessionBackend.rex.isSessionLive(
             clientCount: session.clientCount, hasOpenTab: false))
         // This app attaches as kind `other`, so its own tab is not in that
@@ -329,8 +328,8 @@ final class RexProbeTests: XCTestCase {
         XCTAssertNil(RexProbe.killCommand(for: session))
         session.tmuxID = "session:x; rm -rf ~"
         XCTAssertNil(RexProbe.killCommand(for: session))
-        XCTAssertFalse(RexProbe.bakeableSessionID("work"))
-        XCTAssertFalse(RexProbe.bakeableSessionID("session:"))
+        XCTAssertFalse(RexWire.bakeableSessionID("work"))
+        XCTAssertFalse(RexWire.bakeableSessionID("session:"))
     }
 
     // MARK: Discovery
@@ -452,13 +451,13 @@ final class RexProbeTests: XCTestCase {
         XCTAssertNil(route.moshRemoteCommand)
         XCTAssertFalse(route.usesTmux)
         // Its rail key opens the REX panel — never a TMUX one.
-        XCTAssertEqual(route.shortcutBackend, .rex)
+        XCTAssertEqual(route.sessionBackend, .rex)
         XCTAssertEqual(Host.SessionBackend.rex.shortcutKeyCaption, "REX")
         XCTAssertEqual(Host.SessionBackend.tmux.shortcutKeyCaption, "TMUX")
         XCTAssertEqual(Host.SessionBackend.herdr.shortcutKeyCaption, "HRDR")
         // The panel has no shortcut rows (Rex has no prefix-key client),
         // only the list that switches the tab's terminal.
-        let panel = ShortcutPanelContent.content(for: route.shortcutBackend)
+        let panel = ShortcutPanelContent.content(for: route.sessionBackend)
         XCTAssertEqual(panel, .rex)
         XCTAssertEqual(panel?.sections, [])
         XCTAssertEqual(panel?.switchSectionTitle, "Switch Terminal")
@@ -504,7 +503,7 @@ final class RexProbeTests: XCTestCase {
         let window = session.windows[0]
         let pane = try XCTUnwrap(window.panes?.last)
         let mode = try XCTUnwrap(
-            RexProbe.attachMode(session: session, window: window, pane: pane))
+            TerminalRoute.Mode.attach(session: session, window: window, pane: pane))
         let route = TerminalRoute(hostID: UUID(), mode: mode)
         XCTAssertEqual(route.rexTarget?.sessionID, session.tmuxID)
         XCTAssertEqual(route.rexTarget?.blockID, "block:01a1e1e3-4810-7831-92b7-22087aff9bc8")

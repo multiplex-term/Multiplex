@@ -241,6 +241,17 @@ final class HostConnectionModel {
             }
         }
     }
+
+    /// Why the last `createSession` returned nothing, as the one sentence
+    /// every surface shows: the mint's own reason when the link was
+    /// healthy, else the dead link's, else a generic one.
+    func sessionCreateFailureMessage(hostName: String) -> String {
+        if let failure = sessionCreateFailure {
+            return failure.message(hostName: hostName)
+        }
+        if case .failed(let reason) = phase { return reason }
+        return String(localized: "Couldn't create the session on \(hostName).")
+    }
     @ObservationIgnored private var lastRefreshed: Date?
     /// Observation-friendly summaries: views that only need liveness or a
     /// badge count should not subscribe to the full pane/process tree.
@@ -435,11 +446,11 @@ final class HostConnectionModel {
               let connection
         else { return nil }
 
-        // A Rex tab has no one-exec "which pane is in front" query to make
-        // — its block was chosen at attach — and without this the tmux
-        // query below would run against a Rex session's name. nil means the
-        // fast path is unavailable; the wall probe's record still answers.
-        guard backend != .rex else { return nil }
+        // nil means the fast path is unavailable and the wall probe's
+        // record answers alone. Checked before anything below runs: what
+        // is not herdr there is tmux, and a tmux query must not be aimed at
+        // another backend's session name.
+        guard backend.hasFocusedPaneProbe else { return nil }
 
         activePaneProbeInFlight = true
         defer { activePaneProbeInFlight = false }
@@ -1102,22 +1113,7 @@ final class HostConnectionModel {
         // the classifier that applies is the one that produced the record.
         switch session.backend {
         case .tmux:
-            let window = session.activeWindow
-            let agent = window?.activeAgent
-            let title = window?.activePane?.title ?? window?.paneTitle ?? ""
-            return AttentionVerdict(
-                // No detected agent, or an agent without verified attention
-                // signals, means no state (bells are still tracked).
-                state: AgentAttention.classifyVerified(
-                    title: title,
-                    tail: attentionTails[session.id] ?? [],
-                    agent: agent
-                ),
-                agent: agent,
-                paneTitle: title,
-                hasBell: session.windows.contains(where: \.hasBell),
-                offersDialogSummary: true
-            )
+            return titleAndScreenVerdict(for: session)
         case .herdr:
             let statuses = herdrPaneStatuses[session.id] ?? [:]
             let state = HerdrProbe.sessionAgentState(statuses.values)
@@ -1167,20 +1163,32 @@ final class HostConnectionModel {
                     offersDialogSummary: front
                 )
             }
-            // Nothing reported: read the fronted block the way a tmux tile
-            // is read, from its title and screen. Rex latches no bell.
-            return AttentionVerdict(
-                state: AgentAttention.classifyVerified(
-                    title: title,
-                    tail: attentionTails[session.id] ?? [],
-                    agent: pane?.agent
-                ),
-                agent: pane?.agent,
-                paneTitle: title,
-                hasBell: false,
-                offersDialogSummary: true
-            )
+            // Nothing reported: the fronted block is read exactly as a
+            // tmux tile is. (Rex latches no bell, so that term is false.)
+            return titleAndScreenVerdict(for: session)
         }
+    }
+
+    /// The verdict for a session nothing reports on: its fronted pane's
+    /// title and screen, through the needle heuristics. tmux's only reading,
+    /// and Rex's when the program in front reports no status of its own.
+    private func titleAndScreenVerdict(for session: TmuxSession) -> AttentionVerdict {
+        let window = session.activeWindow
+        let agent = window?.activeAgent
+        let title = window?.activePane?.title ?? window?.paneTitle ?? ""
+        return AttentionVerdict(
+            // No detected agent, or an agent without verified attention
+            // signals, means no state (bells are still tracked).
+            state: AgentAttention.classifyVerified(
+                title: title,
+                tail: attentionTails[session.id] ?? [],
+                agent: agent
+            ),
+            agent: agent,
+            paneTitle: title,
+            hasBell: session.windows.contains(where: \.hasBell),
+            offersDialogSummary: true
+        )
     }
 
     /// Re-derive the wall's KEYCHAIN LOCKED tip after a settled probe.
@@ -1354,7 +1362,9 @@ final class HostConnectionModel {
     /// without one, and every miss is $HOME. The source is resolved to its
     /// id against the latest probe — a name the probe no longer lists has
     /// no directory to offer, and the mint starts in $HOME rather than
-    /// guess. The tmux conf rider does not apply.
+    /// guess. The tmux conf rider does not apply. The label goes as asked:
+    /// the mint script settles it against the server's LIVE list, which a
+    /// pass over the last probe's names here could only second-guess.
     ///
     /// Throws what the exec throws, so a dead control link is reported as
     /// one by the caller. A healthy link that could not create the session
@@ -1365,13 +1375,11 @@ final class HostConnectionModel {
         startingIn directory: String?, running script: String?,
         typing launch: String?, over connection: SSHConnection
     ) async throws -> TerminalRoute.Mode? {
-        let existing = sessions(on: .rex)
         let sourceID = sourceSession
-            .flatMap { name in existing.first { $0.name == name }?.tmuxID }
-            .flatMap { RexProbe.bakeableSessionID($0) ? $0 : nil }
+            .flatMap { name in sessions(on: .rex).first { $0.name == name }?.tmuxID }
+            .flatMap { RexWire.bakeableSessionID($0) ? $0 : nil }
         let command = RexProbe.mintCommand(
-            label: RexProbe.uniqueSessionLabel(
-                base: base, existing: existing.map(\.name)),
+            label: RexProbe.sessionLabel(base: base),
             inDirectoryOf: sourceID,
             startingIn: directory,
             typing: [script, launch].compactMap { $0 }
@@ -1576,10 +1584,10 @@ final class HostConnectionModel {
         running script: String? = nil,
         typing launch: String?
     ) async -> TerminalRoute.Mode? {
-        // Multiplex opens no new window or tab inside a Rex session — a
-        // launch lands in a fresh one (`createSession`) — and the tmux
-        // verbs below must not aim at its name.
-        guard backend != .rex else { return nil }
+        // A backend with no window to open inside a session gets its
+        // launch in a fresh one (`createSession`); what is not herdr below
+        // is tmux, and tmux verbs must not aim at another backend's name.
+        guard backend.opensWindowsInSession else { return nil }
         resetConnectRetryBackoff()
         let reusedLink = connection != nil && phase == .connected
         do {

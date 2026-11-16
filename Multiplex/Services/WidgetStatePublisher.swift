@@ -105,10 +105,7 @@ enum WidgetStateBuilder {
         lastAttached: SessionKey?,
         miniatureLines: (TmuxSession) -> [String]
     ) -> WidgetHostState {
-        // A widget row is a session to OPEN and a pick list is where a NEW
-        // session can run; both are every monitored backend's.
-        let qualifiesBackend = host.showsBackendIdentity
-        return WidgetHostState(
+        WidgetHostState(
             id: host.id,
             name: host.name,
             address: host.address,
@@ -119,7 +116,7 @@ enum WidgetStateBuilder {
                     // Rows carry a backend only where it disambiguates. On
                     // a single-backend host nil keeps every row — and every
                     // link built from one — byte-identical to before.
-                    qualifiesBackend: qualifiesBackend
+                    qualifiesBackend: host.showsBackendIdentity
                 )
             },
             probedAt: probedAt,
@@ -133,7 +130,7 @@ enum WidgetStateBuilder {
             lastAttached: lastAttached.map {
                 WidgetSessionRef(
                     name: $0.name,
-                    backendRaw: qualifiesBackend ? $0.backend.rawValue : nil
+                    backendRaw: host.showsBackendIdentity ? $0.backend.rawValue : nil
                 )
             }
         )

@@ -85,12 +85,20 @@ enum RexProbe {
     private static let serverUnreachableExit = 4
 
     /// How much of the fronted screen each probe reads, from the end. Sized
-    /// to cover the tmux probe's 30 captured rows at a wide terminal; the
-    /// parser keeps `tailLines` of them.
+    /// to cover the tmux probe's captured rows at a wide terminal; the
+    /// parser keeps as many lines as that probe captures.
     private static let tailBytes = 6144
-    private static let tailLines = 30
+    private static let tailLines = TmuxProbe.captureDepth
 
     // MARK: - Probe command
+
+    /// A script without its source indentation: the same Lua, and a third
+    /// fewer bytes on an exec that runs every few seconds.
+    private static func compactLua(_ script: String) -> String {
+        script.split(separator: "\n")
+            .map { $0.drop(while: { $0 == " " }) }
+            .joined(separator: "\n")
+    }
 
     /// The probe script. Lua, because `rex do` is the one way to make many
     /// API calls over a single connection and get one JSON document back.
@@ -101,7 +109,7 @@ enum RexProbe {
     /// a herdr session without a snapshot is.
     ///
     /// Contains no single quote, so shell-quoting it is one pair of quotes.
-    private static let probeScript: String = """
+    private static let probeScript: String = compactLua("""
         local T = "com.superlogical.terminal."
         local out = { sessions = {} }
         rex.call("session.attach_all", { event_scope = "session" })
@@ -168,10 +176,7 @@ enum RexProbe {
           out.sessions[#out.sessions + 1] = item
         end
         return out
-        """
-        .split(separator: "\n")
-        .map { $0.drop(while: { $0 == " " }) }
-        .joined(separator: "\n")
+        """)
 
     /// One exec round trip: presence, then the script's JSON, then the CLI's
     /// exit status — which is how "no server running" (4) is told apart from
@@ -430,7 +435,7 @@ enum RexProbe {
     /// different session the day the older one is closed, and announce a
     /// turn that never ended.
     static func sessionNames(for entries: [(id: String, label: String)]) -> [String] {
-        let labels = entries.map { displayLabel($0.label) }
+        let labels = entries.map { RexWire.displayLabel($0.label) }
         var counts: [String: Int] = [:]
         for label in labels { counts[label.lowercased(), default: 0] += 1 }
         var seen = Set<String>()
@@ -451,14 +456,6 @@ enum RexProbe {
         }
     }
 
-    /// A label as a tile can show it: control characters removed (a label
-    /// is user text and lands in a single-line chassis row), ends trimmed.
-    private static func displayLabel(_ label: String) -> String {
-        String(String.UnicodeScalarView(label.unicodeScalars.filter {
-            !CharacterSet.controlCharacters.contains($0)
-        })).trimmingCharacters(in: .whitespaces)
-    }
-
     /// The id's last six characters — the short form Rex's own listings
     /// print and accept as a target.
     private static func shortID(_ id: String) -> String {
@@ -473,10 +470,10 @@ enum RexProbe {
             windows: windows(of: entry),
             clientCount: max(0, entry.clients ?? 0),
             // Rex states no creation time. The list is in creation order,
-            // so the position stands in — `HerdrProbe.isSyntheticCreated`
-            // is how a tile knows not to render it as an age, while "most
-            // recent" still sorts by it.
-            created: Date(timeIntervalSince1970: TimeInterval(index)),
+            // so the position stands in (`HerdrProbe.syntheticCreated`): a
+            // tile does not render it as an age, while "most recent" still
+            // sorts by it.
+            created: HerdrProbe.syntheticCreated(position: index),
             tmuxID: entry.id,
             serverHost: "",
             backend: .rex
@@ -522,24 +519,19 @@ enum RexProbe {
         }
     }
 
-    /// A window nobody named carries a generated label built from its own
-    /// id (`Window 262b0b23`, observed on preview.19) — noise on a spine
-    /// line. Only that exact shape is replaced, so a label someone chose is
-    /// never second-guessed, and a server that generates labels differently
-    /// simply shows its own.
-    ///
-    /// The stand-in is the focused block's label (`shell`, or whatever the
-    /// block was named — `agent`, `logs`): the nearest thing Rex has to
-    /// tmux naming a window after what runs in it. `window N` is the last
-    /// resort only, because the spine already leads each line with N and
-    /// the first headless run read `1 WINDOW 1`.
+    /// A window's line on the spine. For one nobody named
+    /// (`RexWire.chosenWindowLabel`) the stand-in is the focused block's
+    /// label (`shell`, or whatever the block was named — `agent`, `logs`):
+    /// the nearest thing Rex has to tmux naming a window after what runs in
+    /// it. `window N` is the last resort only, because the spine already
+    /// leads each line with N and the first headless run read `1 WINDOW 1`.
     private static func windowName(
         _ window: WindowEntry, position: Int, focusedBlockLabel: String?
     ) -> String {
-        let label = displayLabel(window.label ?? "")
-        let generated = "Window " + window.id.suffix(8)
-        guard label.isEmpty || label == generated else { return label }
-        let blockLabel = displayLabel(focusedBlockLabel ?? "")
+        if let chosen = RexWire.chosenWindowLabel(window.label ?? "", windowID: window.id) {
+            return chosen
+        }
+        let blockLabel = RexWire.displayLabel(focusedBlockLabel ?? "")
         return blockLabel.isEmpty ? String(localized: "window \(position)") : blockLabel
     }
 
@@ -611,35 +603,7 @@ enum RexProbe {
         return "\(window.name) — \(what)"
     }
 
-    /// The tab mode for one named terminal of a session — the menu row's
-    /// press. nil when the record carries no usable session id.
-    static func attachMode(
-        session: TmuxSession, window: TmuxWindow, pane: TmuxPane
-    ) -> TerminalRoute.Mode? {
-        guard bakeableSessionID(session.tmuxID), !pane.tmuxID.isEmpty else { return nil }
-        return .rexAttach(
-            sessionName: session.name,
-            sessionID: session.tmuxID,
-            block: RexBlockRef(id: pane.tmuxID, label: window.name)
-        )
-    }
-
     // MARK: - Session actions
-
-    /// A session id the app may splice into a command: `session:` and a
-    /// UUID's characters, nothing a shell could reinterpret. What the parser
-    /// reports is truth; what reaches a shell line is vetted here.
-    static func bakeableSessionID(_ id: String) -> Bool {
-        let prefix = "session:"
-        guard id.hasPrefix(prefix), id.utf8.count <= 64 else { return false }
-        let rest = id.dropFirst(prefix.count)
-        return !rest.isEmpty && rest.unicodeScalars.allSatisfy { scalar in
-            (scalar >= "0" && scalar <= "9")
-                || (scalar >= "a" && scalar <= "f")
-                || (scalar >= "A" && scalar <= "F")
-                || scalar == "-"
-        }
-    }
 
     /// The deck tile's destructive close. Aimed at the session's ID, never
     /// its label: labels are shared, and `rex kill work` on a server with
@@ -647,7 +611,7 @@ enum RexProbe {
     /// a tile restored from a snapshot always has one, so this is only a
     /// response that never named it.
     static func killCommand(for session: TmuxSession) -> String? {
-        guard bakeableSessionID(session.tmuxID) else { return nil }
+        guard RexWire.bakeableSessionID(session.tmuxID) else { return nil }
         return pathPrefix
             + "\(rexCommand) kill \(session.tmuxID.shellQuoted) >/dev/null 2>&1; true"
     }
@@ -661,7 +625,7 @@ enum RexProbe {
     /// login-shell noise, a warning — is not a session.
     static func parseSessionIDs(_ lines: [some StringProtocol]) -> [String] {
         lines.map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter(bakeableSessionID)
+            .filter(RexWire.bakeableSessionID)
     }
 
     // MARK: - New session
@@ -678,7 +642,7 @@ enum RexProbe {
     /// label makes the server invent one (`quiet-meadow`), which nothing
     /// here could have predicted.
     static func sessionLabel(base: String) -> String {
-        let label = String(displayLabel(base).prefix(maxLabelLength))
+        let label = String(RexWire.displayLabel(base).prefix(maxLabelLength))
             .trimmingCharacters(in: .whitespaces)
         return label.isEmpty ? "session" : label
     }
@@ -706,7 +670,7 @@ enum RexProbe {
     /// miss is $HOME — `TmuxProbe.newSessionCommand`'s own precedence.
     ///
     /// Contains no single quote, so shell-quoting it is one pair of quotes.
-    private static let mintScript: String = """
+    private static let mintScript: String = compactLua("""
         local T = "com.superlogical.terminal."
         local a = rex.args or {}
         local function text(v) if type(v) == "string" then return v end return "" end
@@ -748,10 +712,7 @@ enum RexProbe {
           if s.session_id == made.session_id then label = text(s.label) end
         end
         return { ok = true, id = made.session_id, label = label }
-        """
-        .split(separator: "\n")
-        .map { $0.drop(while: { $0 == " " }) }
-        .joined(separator: "\n")
+        """)
 
     /// Create a session with one shell terminal, over the control
     /// connection — the Rex arm of `HostConnectionModel.createSession`.
@@ -828,11 +789,11 @@ enum RexProbe {
             return exitCode == serverUnreachableExit ? .noServer : .failed
         case .json(let json):
             guard let reply = try? JSONDecoder().decode(MintReply.self, from: Data(json.utf8)),
-                  reply.ok == true, let id = reply.id, bakeableSessionID(id)
+                  reply.ok == true, let id = reply.id, RexWire.bakeableSessionID(id)
             else { return .failed }
             // Spelled as `sessionNames` would spell a session that is alone
             // under its label — which the script just made true.
-            let label = displayLabel(reply.label ?? "")
+            let label = RexWire.displayLabel(reply.label ?? "")
             return .created(name: label.isEmpty ? "…" + shortID(id) : label, id: id)
         }
     }
@@ -895,18 +856,13 @@ extension RexProbe.State {
 
 extension AgentKind {
     /// The `app` a program names itself with in an OSC 7501 report. The
-    /// protocol's own example is `claude-code`; every other spelling here
-    /// is the agent's command name, the only thing it can plausibly report.
-    /// Unrecognized apps (`cargo`, `terraform`) are programs, not agents.
+    /// protocol's own example is `claude-code`; any other spelling is the
+    /// agent's command name, the only thing it can plausibly report — the
+    /// names herdr reports too, so the two share one map and a new agent is
+    /// added once. Unrecognized apps (`cargo`, `terraform`) are programs,
+    /// not agents.
     init?(programStatusApp app: String) {
-        switch app.lowercased() {
-        case "claude-code", "claude": self = .claudeCode
-        case "codex": self = .codex
-        case "pi": self = .pi
-        case "grok": self = .grok
-        case "antigravity", "agy": self = .antigravity
-        case "hermes", "hermes-agent": self = .hermes
-        default: return nil
-        }
+        let name = app.lowercased()
+        self.init(herdrAgent: name == "claude-code" ? "claude" : name)
     }
 }

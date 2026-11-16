@@ -38,9 +38,9 @@ enum HostGuide {
         switch backend {
         case .tmux: tmuxInstall
         case .herdr: herdrInstall
-        // Rex is never the primary: no dead tile and no failed mint speaks
-        // for it, so there is no install road to hand over. (Its packages
-        // also come from a per-distribution repository, not one line.)
+        // Rex is never the primary, so no dead tile speaks for it, and its
+        // packages come from a per-distribution repository rather than one
+        // line: a mint that finds no `rex` says so without an install road.
         case .rex: []
         }
     }
@@ -77,7 +77,7 @@ enum HostGuide {
     ) -> String {
         // The product's name, not the binary's: this is about an app the
         // user opens, where `backendMissingMessage` is about a command.
-        let name = backend == .rex ? "Rex" : backend.rawValue
+        let name = backend.displayName
         return String(localized: """
             No \(name) server is running on \(hostName), and Multiplex doesn’t \
             start one. Start \(name) there, then try again.

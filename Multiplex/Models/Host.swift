@@ -51,27 +51,53 @@ struct Host: Identifiable, Codable, Hashable {
         /// run on" bars and the Bind pane offer.
         static let defaultCases = allCases.filter(\.canBeDefault)
 
-        /// Whether the probe can state how many clients a session has.
-        /// tmux answers `#{session_attached}`; herdr 0.7.5 / protocol 17
-        /// exposes no attached-client surface at all (verified 2026-08-02
-        /// across `session list --json`, `api snapshot`, `status --json`,
-        /// and the bundled API schema — only the socket-only
-        /// `client.window_title` reply leaks a `no_foreground_client`
-        /// reason, and no CLI verb reaches it), so its records carry
-        /// `clientCount == 0` whatever is really attached. Rex answers
-        /// `client.list` per session; the probe counts the attached APP
-        /// clients (a Rex window showing the session), never its own CLI.
-        var reportsClientCount: Bool { self != .herdr }
+        /// The product's name as prose spells it — tmux and herdr write
+        /// theirs lowercase, Rex does not. `rawValue` is the command.
+        var displayName: String {
+            switch self {
+            case .tmux, .herdr: rawValue
+            case .rex: "Rex"
+            }
+        }
+
+        /// Whether a launch can land INSIDE an existing session, as a new
+        /// window or tab of it. Multiplex opens none inside a Rex session:
+        /// a launch aimed at one gets a fresh session instead.
+        var opensWindowsInSession: Bool {
+            switch self {
+            case .tmux, .herdr: true
+            case .rex: false
+            }
+        }
+
+        /// Whether one exec can say which pane of a session is in front
+        /// and what runs in it — the helper chips' fast path between wall
+        /// probes. A Rex tab's terminal was chosen at attach and there is
+        /// no such query to make; the wall probe's record answers alone.
+        var hasFocusedPaneProbe: Bool {
+            switch self {
+            case .tmux, .herdr: true
+            case .rex: false
+            }
+        }
 
         /// Whether a session is live right now — said only where it can be
-        /// verified. tmux counts every client on the host. herdr can answer
-        /// for exactly one client: the one this app is, which is what an
-        /// open terminal tab means. A shell on the host attached to the same
-        /// herdr session therefore stays invisible; the tile understates
-        /// rather than guesses, the same choice its missing client count and
-        /// session age already make. Rex counts its APP clients, and this
-        /// app attaches as kind `other` on purpose (`RexWire.hello`), so its
-        /// own open tab is counted separately.
+        /// verified. tmux counts every client on the host
+        /// (`#{session_attached}`). herdr 0.7.5 / protocol 17 exposes no
+        /// attached-client surface at all (verified 2026-08-02 across
+        /// `session list --json`, `api snapshot`, `status --json`, and the
+        /// bundled API schema — only the socket-only `client.window_title`
+        /// reply leaks a `no_foreground_client` reason, and no CLI verb
+        /// reaches it), so its records carry `clientCount == 0` whatever is
+        /// really attached and it can answer for exactly one client: the
+        /// one this app is, which is what an open terminal tab means. A
+        /// shell on the host attached to the same herdr session therefore
+        /// stays invisible; the tile understates rather than guesses, the
+        /// same choice its missing session age already makes. Rex answers
+        /// `client.list` per session and the probe counts the attached APP
+        /// clients (a Rex window showing the session), never its own CLI;
+        /// this app attaches as kind `other` on purpose (`RexWire.hello`),
+        /// so its own open tab is counted separately.
         func isSessionLive(clientCount: Int, hasOpenTab: Bool) -> Bool {
             switch self {
             case .tmux: clientCount > 0

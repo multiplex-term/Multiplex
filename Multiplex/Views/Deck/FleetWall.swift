@@ -678,21 +678,14 @@ final class FleetWallViewController: UIViewController {
                 self?.focusOrAttach(host, session: session)
             },
             openDuplicateSession: { [weak self] session in
-                guard let mode = TerminalRoute.Mode.attach(host: host, session: session)
-                else {
-                    self?.presentCannotOpen(session, on: host)
-                    return
-                }
-                self?.open(TerminalRoute(hostID: host.id, mode: mode))
+                self?.open(
+                    TerminalRoute.Mode.attach(host: host, session: session),
+                    of: session, on: host)
             },
             openSessionPane: { [weak self] session, window, pane in
-                guard let mode = RexProbe.attachMode(
-                    session: session, window: window, pane: pane)
-                else {
-                    self?.presentCannotOpen(session, on: host)
-                    return
-                }
-                self?.open(TerminalRoute(hostID: host.id, mode: mode))
+                self?.open(
+                    TerminalRoute.Mode.attach(session: session, window: window, pane: pane),
+                    of: session, on: host)
             },
             requestNewSession: { [weak self] in self?.presentNewSession(on: host) },
             requestNewHerdrTab: { [weak self] session in
@@ -755,8 +748,8 @@ final class FleetWallViewController: UIViewController {
     /// press that changes what a host COSTS to monitor, and the copy states
     /// that plainly rather than letting the deck quietly get more expensive.
     private func confirmBackendOffer(_ backend: Host.SessionBackend, for host: Host) {
-        let name = backend.rawValue
-        let primary = host.sessionBackend.rawValue
+        let name = backend.displayName
+        let primary = host.sessionBackend.displayName
         var message = String(localized: """
             \(host.name) is running \(name) as well as \(primary). \
             Showing both \(HostGuide.secondBackendCost).
@@ -909,7 +902,13 @@ final class FleetWallViewController: UIViewController {
         ) {
             return
         }
-        guard let mode = TerminalRoute.Mode.attach(host: host, session: session) else {
+        open(TerminalRoute.Mode.attach(host: host, session: session), of: session, on: host)
+    }
+
+    /// Opens `session` in `mode`, or says why it cannot be opened when the
+    /// record had no mode to offer.
+    private func open(_ mode: TerminalRoute.Mode?, of session: TmuxSession, on host: Host) {
+        guard let mode else {
             presentCannotOpen(session, on: host)
             return
         }
@@ -993,15 +992,7 @@ final class FleetWallViewController: UIViewController {
     private func presentCreateSessionFailure(
         on host: Host, model: HostConnectionModel
     ) {
-        let message: String
-        if let failure = model.sessionCreateFailure {
-            message = failure.message(hostName: host.name)
-        } else if case .failed(let reason) = model.phase {
-            message = reason
-        } else {
-            message = String(
-                localized: "Couldn't create the session on \(host.name).")
-        }
+        let message = model.sessionCreateFailureMessage(hostName: host.name)
         let alert = UIAlertController(
             title: String(localized: "Couldn't Create Session"),
             message: message,

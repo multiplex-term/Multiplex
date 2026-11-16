@@ -133,6 +133,45 @@ enum RexWire {
         return .event(type: type, fields: fields)
     }
 
+    // MARK: - Ids and labels
+
+    /// A session id the app may splice into a command or bake into a
+    /// route: `session:` and a UUID's characters, nothing a shell could
+    /// reinterpret. What a parser reports is truth; what reaches a shell
+    /// line is vetted here.
+    static func bakeableSessionID(_ id: String) -> Bool {
+        let prefix = "session:"
+        guard id.hasPrefix(prefix), id.utf8.count <= 64 else { return false }
+        let rest = id.dropFirst(prefix.count)
+        return !rest.isEmpty && rest.unicodeScalars.allSatisfy { scalar in
+            (scalar >= "0" && scalar <= "9")
+                || (scalar >= "a" && scalar <= "f")
+                || (scalar >= "A" && scalar <= "F")
+                || scalar == "-"
+        }
+    }
+
+    /// A label as the app can show it: control characters removed (a label
+    /// is user text and lands in a single-line row), ends trimmed.
+    static func displayLabel(_ label: String) -> String {
+        String(String.UnicodeScalarView(label.unicodeScalars.filter {
+            !CharacterSet.controlCharacters.contains($0)
+        })).trimmingCharacters(in: .whitespaces)
+    }
+
+    /// A window's label if somebody chose it, nil if nobody did.
+    ///
+    /// A window nobody named carries a label generated from its own id
+    /// (`Window 262b0b23`, observed on preview.19) — noise wherever it is
+    /// shown. Only that exact shape counts as unnamed, so a label someone
+    /// chose is never second-guessed, and a server that generates labels
+    /// differently simply shows its own. The one statement of that shape:
+    /// the deck's spine and a tab's Switch Terminal list both ask here.
+    static func chosenWindowLabel(_ label: String, windowID: String) -> String? {
+        let label = displayLabel(label)
+        return label.isEmpty || label == "Window " + windowID.suffix(8) ? nil : label
+    }
+
     // MARK: - Session view → the block to attach
 
     /// One terminal block a session shows, in window (tab) order.
@@ -213,20 +252,17 @@ enum RexWire {
 
     /// The rows of a Rex tab's Switch Terminal list — every terminal of the
     /// session, in window order, as the shortcut panel's shared choice
-    /// record. A row reads `window — terminal`; a window nobody named (an
-    /// empty label, or Rex's generated `Window <id tail>`) is `window N`,
-    /// and a terminal whose label says nothing more than its window is the
-    /// window alone. `isActive` marks the one this tab is showing.
+    /// record. A row reads `window — terminal`; a window nobody named
+    /// (`chosenWindowLabel`) is `window N`, and a terminal whose label says
+    /// nothing more than its window is the window alone. `isActive` marks
+    /// the one this tab is showing.
     static func terminalChoices(
         in blocks: [Block], showing blockID: String?
     ) -> [TmuxWindowChoice] {
         blocks.enumerated().map { offset, block in
-            let label = block.windowLabel.trimmingCharacters(in: .whitespaces)
-            let generated = "Window " + block.windowID.suffix(8)
-            let window = label.isEmpty || label == generated
-                ? String(localized: "window \(block.windowPosition)")
-                : label
-            let terminal = block.label.trimmingCharacters(in: .whitespaces)
+            let window = chosenWindowLabel(block.windowLabel, windowID: block.windowID)
+                ?? String(localized: "window \(block.windowPosition)")
+            let terminal = displayLabel(block.label)
             let name = terminal.isEmpty || terminal.caseInsensitiveCompare(window) == .orderedSame
                 ? window
                 : "\(window) — \(terminal)"
@@ -241,11 +277,7 @@ enum RexWire {
     /// HELLO: `0x01`, then the ticket's 16 bytes. nil for a ticket that is
     /// not 16 bytes of base64url — never send a guess.
     static func dataHello(ticket: String) -> Data? {
-        var base64 = ticket
-            .replacingOccurrences(of: "-", with: "+")
-            .replacingOccurrences(of: "_", with: "/")
-        base64 += String(repeating: "=", count: (4 - base64.count % 4) % 4)
-        guard let bytes = Data(base64Encoded: base64), bytes.count == 16 else { return nil }
+        guard let bytes = Data(base64URLNoPad: ticket), bytes.count == 16 else { return nil }
         return Data([0x01]) + bytes
     }
 
@@ -333,6 +365,12 @@ struct RexTerminalStream {
     var isLive: Bool { pastSnapshot }
 
     mutating func consume(_ chunk: Data) -> [Event] {
+        // The steady state — nothing held, and no message in or straddling
+        // this chunk: it is output exactly as it came, with no copy made.
+        if pastSnapshot, pending.isEmpty, chunk.range(of: marker) == nil,
+           Self.partialMarkerSuffix(of: chunk, marker: marker) == 0 {
+            return chunk.isEmpty ? [] : [.output(chunk)]
+        }
         pending.append(chunk)
         var events: [Event] = []
         var output = Data()
@@ -438,7 +476,7 @@ struct AlternateScreenExitWatch {
     /// True if `chunk` (continuing whatever came before) contains an
     /// alternate-screen exit.
     mutating func sawExit(in chunk: Data) -> Bool {
-        let bytes = [UInt8](carry + chunk)
+        let bytes = carry.isEmpty ? [UInt8](chunk) : [UInt8](carry) + [UInt8](chunk)
         carry = Data()
         var found = false
         var index = 0
@@ -447,16 +485,19 @@ struct AlternateScreenExitWatch {
                 index += 1
                 continue
             }
-            // `ESC [ ?` then parameters, then a final byte.
-            let prefix: [UInt8] = [0x1B, 0x5B, 0x3F]
+            // `ESC [ ?` then parameters, then a final byte. Compared byte
+            // by byte: a redrawing full-screen program sends thousands of
+            // ESCs a second, each of which passes through here.
             let available = bytes.count - index
-            guard available >= prefix.count else {
-                if Array(bytes[index...]) == Array(prefix.prefix(available)) {
+            guard available >= 3 else {
+                // Cut short by the chunk's end: keep it if it could still
+                // become one.
+                if available == 1 || bytes[index + 1] == 0x5B {
                     carry = Data(bytes[index...])
                 }
                 break
             }
-            guard Array(bytes[index..<(index + 3)]) == prefix else {
+            guard bytes[index + 1] == 0x5B, bytes[index + 2] == 0x3F else {
                 index += 1
                 continue
             }

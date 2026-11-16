@@ -18,7 +18,7 @@ struct RexSocket: Sendable {
         try await pipe.write(WebSocketCodec.upgradeRequest(
             path: path, host: "rex", subprotocol: subprotocol, key: key))
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            let upgraded = RexOneShot(continuation)
+            let upgraded = OneShotGate(continuation)
             let reader = Task {
                 var head = Data()
                 var isUpgraded = false
@@ -36,7 +36,7 @@ struct RexSocket: Sendable {
                             isUpgraded = true
                             head = Data()
                             decoder.append(remainder)
-                            upgraded.succeed()
+                            upgraded.open()
                         }
                         while let message = try decoder.next() {
                             switch message {
@@ -79,36 +79,6 @@ struct RexSocket: Sendable {
     func close() async {
         try? await pipe.write(WebSocketCodec.closeFrame(code: 1000))
         pipe.close()
-    }
-}
-
-/// Resumes a continuation exactly once — the upgrade completing vs. the
-/// pipe ending first.
-private final class RexOneShot: @unchecked Sendable {
-    private let lock = NSLock()
-    private var continuation: CheckedContinuation<Void, Error>?
-
-    init(_ continuation: CheckedContinuation<Void, Error>) {
-        self.continuation = continuation
-    }
-
-    private func take() -> CheckedContinuation<Void, Error>? {
-        lock.withLock {
-            let taken = continuation
-            continuation = nil
-            return taken
-        }
-    }
-
-    func succeed() {
-        take()?.resume()
-    }
-
-    /// False when the continuation had already been resumed.
-    func fail(_ error: Error) -> Bool {
-        guard let continuation = take() else { return false }
-        continuation.resume(throwing: error)
-        return true
     }
 }
 
@@ -200,15 +170,18 @@ actor RexSession: TerminalTransport {
     private(set) var blockID: String?
     private var owner: String?
     private var stream: RexTerminalStream?
-    /// Stream output that arrived before the bootstrap was drawn.
-    private var held = Data()
-    private var isBootstrapped = false
+    /// Stream output that arrived before the screen was drawn, kept to be
+    /// drawn after it. nil once the screen is up: output goes straight
+    /// through.
+    private var held: Data? = Data()
     /// Set while the emulator's primary screen is known to be incomplete —
     /// the bootstrap was rendered during a full-screen program.
     private var exitWatch: AlternateScreenExitWatch?
     private var lastOutput = ContinuousClock.now
-    private var isOpen = false
-    private var isClosed = false
+    /// `attaching` until `open` returns; `closed` is final, whichever side
+    /// ended it.
+    private enum Phase { case attaching, live, closed }
+    private var phase = Phase.attaching
     private var size: (cols: Int, rows: Int) = (80, 24)
     private var input = RexInputEncoder()
     private var pendingInput = ""
@@ -262,7 +235,7 @@ actor RexSession: TerminalTransport {
         size = (cols, rows)
         do {
             try await attach()
-            isOpen = true
+            if phase == .attaching { phase = .live }
         } catch {
             let failure = Self.failure(from: error)
             await teardown(failing: failure)
@@ -325,10 +298,8 @@ actor RexSession: TerminalTransport {
     /// lands in and a file viewer opens at. nil when the tab is not live or
     /// the server cannot say.
     func workingDirectory() async -> String? {
-        guard isOpen, !isClosed, let blockID,
-              let process = try? await call(
-                  RexWire.terminalCreator + ".process",
-                  RexWire.blockPayload(sessionID: sessionID, blockID: blockID))
+        guard phase == .live, let blockID,
+              let process = try? await terminalCall("process", block: blockID)
         else { return nil }
         return RexWire.workingDirectory(inProcess: process)
     }
@@ -339,7 +310,7 @@ actor RexSession: TerminalTransport {
     /// rows, with the one this tab shows marked. Read fresh each time the
     /// panel opens: windows come and go in Rex without telling the tab.
     func terminalChoices() async -> [TmuxWindowChoice]? {
-        guard isOpen, !isClosed,
+        guard phase == .live,
               let view = try? await call("session.view", ["session_id": sessionID])
         else { return nil }
         return RexWire.terminalChoices(
@@ -357,7 +328,7 @@ actor RexSession: TerminalTransport {
     /// ends the tab with the reason rather than leaving it on a dead
     /// stream; RECONNECT then attaches afresh.
     func switchBlock(to newID: String) async {
-        guard isOpen, !isClosed, !isSwitching, newID != blockID else { return }
+        guard phase == .live, !isSwitching, newID != blockID else { return }
         isSwitching = true
         defer { isSwitching = false }
         let previous = blockID
@@ -373,7 +344,6 @@ actor RexSession: TerminalTransport {
         stream = nil
         reached.subtract([.dataWelcome, .live])
         held = Data()
-        isBootstrapped = false
         exitWatch = nil
         pendingInput = ""
         input = RexInputEncoder()
@@ -396,19 +366,19 @@ actor RexSession: TerminalTransport {
     /// rendering has been drawn, so nothing is drawn UNDER a rendering that
     /// was taken later, and nothing that arrived meanwhile is dropped.
     private func drawScreen(blockID: String) async {
-        isBootstrapped = false
-        let onAlternateScreen = await isOnAlternateScreen(blockID: blockID)
-        let screen = await bootstrapScreen(blockID: blockID)
-        guard !isClosed else { return }
+        held = held ?? Data()
+        // Two reads that depend on nothing of each other's, so they share
+        // one round trip.
+        async let alternate = isOnAlternateScreen(blockID: blockID)
+        async let rendering = bootstrapScreen(blockID: blockID)
+        let (onAlternateScreen, screen) = await (alternate, rendering)
+        guard phase != .closed else { return }
         // RIS first: a resumed tab still shows what the last run drew.
         onData?(Data([0x1B, 0x63]) + screen)
         exitWatch = onAlternateScreen ? AlternateScreenExitWatch() : nil
-        isBootstrapped = true
-        if !held.isEmpty {
-            let pending = held
-            held = Data()
-            deliver(pending)
-        }
+        let pending = held
+        held = nil
+        if let pending, !pending.isEmpty { deliver(pending) }
     }
 
     /// Stream output on its way to the emulator. The one place that also
@@ -434,14 +404,14 @@ actor RexSession: TerminalTransport {
     /// terminal that never goes quiet is redrawn anyway after the cap.
     private func redrawOnceQuiet(blockID: String) async {
         let started = ContinuousClock.now
-        while !isClosed {
+        while phase != .closed {
             try? await Task.sleep(for: .milliseconds(60))
             let now = ContinuousClock.now
             if now - lastOutput >= .milliseconds(120) || now - started >= .milliseconds(800) {
                 break
             }
         }
-        guard !isClosed else { return }
+        guard phase != .closed else { return }
         await drawScreen(blockID: blockID)
     }
 
@@ -449,9 +419,7 @@ actor RexSession: TerminalTransport {
     /// the server rather than read out of the rendering: `modes` states it
     /// outright. An answer that cannot be had reads as "no".
     private func isOnAlternateScreen(blockID: String) async -> Bool {
-        let modes = try? await call(
-            RexWire.terminalCreator + ".modes",
-            RexWire.blockPayload(sessionID: sessionID, blockID: blockID))
+        let modes = try? await terminalCall("modes", block: blockID)
         return modes?["screen"] as? String == "alternate"
     }
 
@@ -467,11 +435,14 @@ actor RexSession: TerminalTransport {
                 .first { $0["block_id"] as? String == blockID }
             owner = mine?["owner"] as? String ?? clientID
         }
-        _ = try? await call(
-            RexWire.terminalCreator + ".resize",
-            RexWire.blockPayload(
-                sessionID: sessionID, blockID: blockID,
-                args: ["columns": size.cols, "rows": size.rows]))
+        await sendSize(to: blockID)
+    }
+
+    /// Applies at once while this client owns the block, and otherwise
+    /// waits server-side until it does — never a failure worth raising.
+    private func sendSize(to blockID: String) async {
+        _ = try? await terminalCall(
+            "resize", block: blockID, ["columns": size.cols, "rows": size.rows])
     }
 
     /// The terminal's screen and scrollback as escape sequences SwiftTerm
@@ -479,58 +450,50 @@ actor RexSession: TerminalTransport {
     /// rendering is too large to wait for, and to nothing at all — the
     /// stream alone — if the server will not render.
     private func bootstrapScreen(blockID: String) async -> Data {
-        let method = RexWire.terminalCreator + ".format"
-        guard let first = try? await call(method, RexWire.blockPayload(
-            sessionID: sessionID, blockID: blockID,
-            args: [
-                "format": "vt",
-                "extra_cursor": true,
-                "extra_modes": true,
-                "extra_scrolling_region": true,
-                "extra_style": true,
-                "extra_charsets": true,
-                "extra_keyboard": true,
-                "extra_kitty_keyboard": true,
-                "extra_tabstops": true,
-                "max_bytes": Self.bootstrapChunk,
-            ]))
+        guard let first = try? await terminalCall("format", block: blockID, [
+            "format": "vt",
+            "extra_cursor": true,
+            "extra_modes": true,
+            "extra_scrolling_region": true,
+            "extra_style": true,
+            "extra_charsets": true,
+            "extra_keyboard": true,
+            "extra_kitty_keyboard": true,
+            "extra_tabstops": true,
+            "max_bytes": Self.bootstrapChunk,
+        ])
         else { return Data() }
-        var text = first["content"] as? String ?? ""
-        guard let id = first["id"] as? Int else { return Data(text.utf8) }
+        var screen = Data((first["content"] as? String ?? "").utf8)
+        guard let id = first["id"] as? Int else { return screen }
         let total = first["total"] as? Int ?? .max
         guard total <= Self.bootstrapLimit else {
             return await plainTail(blockID: blockID)
         }
-        var offset = text.utf8.count
-        while offset < total {
-            guard let more = try? await call(
-                RexWire.terminalCreator + ".blob_read",
-                RexWire.blockPayload(
-                    sessionID: sessionID, blockID: blockID,
-                    args: ["id": id, "offset": offset, "max_bytes": Self.bootstrapChunk])),
-                let piece = more["data"] as? String, !piece.isEmpty
+        // Offsets count the rendering's UTF-8 bytes, which is what `screen`
+        // holds.
+        while screen.count < total {
+            guard let more = try? await terminalCall("blob_read", block: blockID, [
+                "id": id, "offset": screen.count, "max_bytes": Self.bootstrapChunk,
+            ]), let piece = more["data"] as? String, !piece.isEmpty
             else { break }
-            text += piece
-            offset += piece.utf8.count
+            screen.append(contentsOf: piece.utf8)
             if more["eof"] as? Bool == true { break }
         }
-        return Data(text.utf8)
+        return screen
     }
 
     /// The last screenful or so as plain text — no colors, but the user
     /// lands on what the terminal was showing rather than on nothing. Read
     /// from the END (`RexProbe` explains why a capped read stops short).
     private func plainTail(blockID: String) async -> Data {
-        let creator = RexWire.terminalCreator
-        guard let first = try? await call(creator + ".format", RexWire.blockPayload(
-            sessionID: sessionID, blockID: blockID,
-            args: ["format": "text", "trim": true, "max_bytes": 1])),
-            let id = first["id"] as? Int, let total = first["total"] as? Int
+        guard let first = try? await terminalCall(
+                  "format", block: blockID, ["format": "text", "trim": true, "max_bytes": 1]),
+              let id = first["id"] as? Int, let total = first["total"] as? Int
         else { return Data() }
         let offset = max(0, total - Self.plainTailBytes)
-        guard let rest = try? await call(creator + ".blob_read", RexWire.blockPayload(
-            sessionID: sessionID, blockID: blockID, args: ["id": id, "offset": offset])),
-            let tail = rest["data"] as? String
+        guard let rest = try? await terminalCall(
+                  "blob_read", block: blockID, ["id": id, "offset": offset]),
+              let tail = rest["data"] as? String
         else { return Data() }
         var lines = tail.split(separator: "\n", omittingEmptySubsequences: false)
         // A read that started mid-screen starts mid-line.
@@ -540,28 +503,34 @@ actor RexSession: TerminalTransport {
 
     // MARK: - TerminalTransport
 
+    /// Queues the input and returns; it does not wait for the server.
+    ///
+    /// One write is in flight at a time — the server runs block methods
+    /// concurrently, so two calls could land out of order — and whatever is
+    /// typed meanwhile rides the next call as one string. Returning at once
+    /// is what lets that happen: the tab's input pump awaits each write, so
+    /// a write that waited for its answer would turn every keystroke into a
+    /// round trip of its own, queued behind the last.
     func write(_ data: Data) async throws {
-        guard isOpen, !isClosed else { throw Failure("not attached") }
+        guard phase == .live else { throw Failure("not attached") }
         // Mid-switch the screen on show is the terminal being left; a key
         // pressed then is dropped rather than typed into one not yet drawn.
         guard !isSwitching else { return }
         pendingInput += input.encode(data)
-        // One write in flight at a time: the server runs block methods
-        // concurrently, so two calls could land out of order. Whatever is
-        // typed meanwhile rides the next call as one string.
-        guard !isWriting else { return }
+        guard !isWriting, !pendingInput.isEmpty else { return }
         isWriting = true
+        Task { await self.drainInput() }
+    }
+
+    private func drainInput() async {
         defer { isWriting = false }
-        while !pendingInput.isEmpty, !isClosed, let blockID {
+        while !pendingInput.isEmpty, phase == .live, let blockID {
             let text = pendingInput
             pendingInput = ""
             // Typing is what claims the size back from another client.
             if owner != clientID { await claimAndSize() }
             do {
-                _ = try await call(
-                    RexWire.terminalCreator + ".write",
-                    RexWire.blockPayload(
-                        sessionID: sessionID, blockID: blockID, args: ["data": text]))
+                _ = try await terminalCall("write", block: blockID, ["data": text])
             } catch {
                 Self.log.debug("write failed: \(String(describing: error), privacy: .public)")
             }
@@ -570,21 +539,15 @@ actor RexSession: TerminalTransport {
 
     func resize(cols: Int, rows: Int) async throws {
         size = (cols, rows)
-        guard isOpen, !isClosed, let blockID else { return }
-        // Applies at once while this client owns the block, and otherwise
-        // waits server-side until it does — never a failure worth raising.
-        _ = try? await call(
-            RexWire.terminalCreator + ".resize",
-            RexWire.blockPayload(
-                sessionID: sessionID, blockID: blockID,
-                args: ["columns": cols, "rows": rows]))
+        guard phase == .live, let blockID else { return }
+        await sendSize(to: blockID)
     }
 
     /// Idempotent, and always closes the SSH connection the two pipes ride:
     /// a tab that ended on its own (`finish`) still has that link to drop.
     func close() async {
-        if !isClosed {
-            isClosed = true
+        if phase != .closed {
+            phase = .closed
             await teardown(failing: Failure("closed"))
         }
         await closeLink()
@@ -592,9 +555,21 @@ actor RexSession: TerminalTransport {
 
     // MARK: - Requests
 
-    private func call(
-        _ method: String, _ payload: [String: Any]?, timeout: Double = 10
+    /// How long the server gets to answer a request or reach a handshake
+    /// milestone.
+    private static let replyTimeout = Duration.seconds(10)
+
+    /// One of the terminal's own methods (`com.superlogical.terminal.<verb>`)
+    /// on one block of this session.
+    private func terminalCall(
+        _ verb: String, block blockID: String, _ args: [String: Any] = [:]
     ) async throws -> [String: Any] {
+        try await call(
+            RexWire.terminalCreator + "." + verb,
+            RexWire.blockPayload(sessionID: sessionID, blockID: blockID, args: args))
+    }
+
+    private func call(_ method: String, _ payload: [String: Any]) async throws -> [String: Any] {
         guard let control else { throw Failure("not connected") }
         requestCount += 1
         let id = "m\(requestCount)"
@@ -602,7 +577,7 @@ actor RexSession: TerminalTransport {
         let reply: Reply = try await withCheckedThrowingContinuation { continuation in
             pending[id] = continuation
             timeouts[id] = Task { [weak self] in
-                do { try await Task.sleep(for: .seconds(timeout)) } catch { return }
+                do { try await Task.sleep(for: Self.replyTimeout) } catch { return }
                 await self?.settle(id, .failure(Failure(String(
                     localized: "The Rex server did not answer in time."))))
             }
@@ -624,10 +599,10 @@ actor RexSession: TerminalTransport {
 
     // MARK: - Milestones
 
-    private func wait(for milestone: Milestone, seconds: Double = 10) async throws {
+    private func wait(for milestone: Milestone) async throws {
         guard !reached.contains(milestone) else { return }
         let timer = Task { [weak self] in
-            do { try await Task.sleep(for: .seconds(seconds)) } catch { return }
+            do { try await Task.sleep(for: Self.replyTimeout) } catch { return }
             await self?.fail(milestone, Failure(String(
                 localized: "The Rex server did not answer in time.")))
         }
@@ -722,7 +697,7 @@ actor RexSession: TerminalTransport {
         guard generation == dataGeneration else { return }
         switch message {
         case .binary(let bytes):
-            guard var stream else {
+            guard stream != nil else {
                 switch RexWire.parseDataReply(bytes) {
                 case .welcome(let nonce)?:
                     self.stream = RexTerminalStream(nonce: nonce)
@@ -738,13 +713,14 @@ actor RexSession: TerminalTransport {
                 }
                 return
             }
-            let events = stream.consume(bytes)
-            self.stream = stream
-            if stream.isLive { reach(.live) }
+            // In place: a copy taken out and put back would share the
+            // stream's buffer and force it to be duplicated on every chunk.
+            let events = stream?.consume(bytes) ?? []
+            if stream?.isLive == true { reach(.live) }
             for event in events {
                 switch event {
                 case .output(let output):
-                    if isBootstrapped { deliver(output) } else { held.append(output) }
+                    if held == nil { deliver(output) } else { held?.append(output) }
                 case .resize, .childExited:
                     // The size is this tab's own while it owns the block,
                     // and a program's exit closes the block, which arrives
@@ -778,8 +754,8 @@ actor RexSession: TerminalTransport {
     /// second, unrelated failure. During the attach the detail IS the
     /// reason ("no Rex server is running"), so it is kept.
     private func linkEnded(_ reason: String?, failed: Bool = false) {
-        guard !isClosed else { return }
-        guard isOpen else {
+        guard phase != .closed else { return }
+        guard phase == .live else {
             let failure = Failure(reason ?? String(
                 localized: "The connection to the Rex server ended."))
             for milestone in Array(waiters.keys) { fail(milestone, failure) }
@@ -792,9 +768,11 @@ actor RexSession: TerminalTransport {
     }
 
     private func finish(_ reason: String?) {
-        guard !isClosed else { return }
-        isClosed = true
-        let notify = isOpen ? onClose : nil
+        guard phase != .closed else { return }
+        // Only a tab that went live has someone to tell; a failed attach
+        // is reported by `open` throwing.
+        let notify = phase == .live ? onClose : nil
+        phase = .closed
         Task {
             await self.teardown(failing: Failure(reason ?? "ended"))
             notify?(reason)

@@ -1845,6 +1845,27 @@ final class TerminalWindowViewController: UIViewController,
         if agentChanged { renderNow() }
         await model.refreshAndWait(ifStaleFor: 4)
 
+        // The wall probe's verdict, as it stands now. All a backend with
+        // no focused-pane query ever has, and what an unfocused herdr
+        // window goes by between its own checks.
+        func followWallVerdict() {
+            let nextAgent = detectedAgent
+            if shownAgent != nextAgent {
+                hideAgentTask?.cancel()
+                shownAgent = nextAgent
+                renderNow()
+            }
+        }
+
+        guard backend.hasFocusedPaneProbe else {
+            while !Task.isCancelled {
+                guard activeTab?.id == watchedTab.id else { return }
+                if UIApplication.shared.applicationState == .active { followWallVerdict() }
+                try? await Task.sleep(for: Self.focusedPaneProbeInterval)
+            }
+            return
+        }
+
         if backend == .herdr {
             // The five-second wall probe remains the broad session/attention
             // authority. Between ticks, the one terminal that owns keyboard
@@ -1867,12 +1888,7 @@ final class TerminalWindowViewController: UIViewController,
                         if let detection { apply(detection) }
                     }
                 } else if UIApplication.shared.applicationState == .active {
-                    let nextAgent = detectedAgent
-                    if shownAgent != nextAgent {
-                        hideAgentTask?.cancel()
-                        shownAgent = nextAgent
-                        renderNow()
-                    }
+                    followWallVerdict()
                 }
                 try? await Task.sleep(for: Self.focusedPaneProbeInterval)
             }
@@ -2929,7 +2945,7 @@ extension TerminalWindowViewController {
                 } : nil,
             fullScreenActive: fullScreenColumn,
             extraNewTabTarget: extraNewTabTarget,
-            shortcutBackend: activeTab?.shortcutBackend,
+            shortcutBackend: activeTab?.sessionBackend,
             style: vertical ? .verticalColumn : profile.style,
             deckControl: shell?.deckControl ?? .back,
             availableWidth: vertical ? column.width : umdAvailableWidth,

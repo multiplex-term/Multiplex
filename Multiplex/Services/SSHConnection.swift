@@ -995,8 +995,9 @@ private final class PipeWriter: @unchecked Sendable {
 }
 
 /// Resumes a continuation exactly once, from whichever side gets there first
-/// (the PTY going live vs. the channel failing during setup).
-private final class OneShotGate: @unchecked Sendable {
+/// (the PTY going live vs. the channel failing during setup; a Rex socket's
+/// upgrade completing vs. its pipe ending).
+final class OneShotGate: @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<Void, Error>?
 
@@ -1012,7 +1013,7 @@ private final class OneShotGate: @unchecked Sendable {
         return taken
     }
 
-    /// PTY is live — resume the waiter. No-op if already resolved.
+    /// The channel is live — resume the waiter. No-op if already resolved.
     func open() {
         take()?.resume()
     }

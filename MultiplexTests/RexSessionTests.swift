@@ -40,6 +40,13 @@ final class RexSessionTests: XCTestCase {
         )
     }
 
+    /// The two reads a screen is drawn from, sorted. They share a round
+    /// trip, so which the server sees first is not the session's to say.
+    private static let screenReads = [
+        "com.superlogical.terminal.format",
+        "com.superlogical.terminal.modes",
+    ]
+
     private func eventually(
         _ condition: @escaping () -> Bool, file: StaticString = #filePath, line: UInt = #line
     ) async {
@@ -57,16 +64,15 @@ final class RexSessionTests: XCTestCase {
         let sink = Sink()
         try await open(session, sink: sink)
 
-        XCTAssertEqual(server.calls, [
+        XCTAssertEqual(Array(server.calls.prefix(4)), [
             "session.attach",
             // Claim and size FIRST: the rendering and the stream below must
             // describe the terminal at this tab's size.
             "session.own_block",
             "com.superlogical.terminal.resize 100x30",
             "data.connect",
-            "com.superlogical.terminal.modes",
-            "com.superlogical.terminal.format",
         ])
+        XCTAssertEqual(server.calls.dropFirst(4).sorted(), Self.screenReads)
         // The hello never claims to be an app (see `RexWire.hello`).
         XCTAssertEqual(server.helloKind, "other")
         // The fronted block was chosen: active window, focused block.
@@ -136,14 +142,14 @@ final class RexSessionTests: XCTestCase {
         // the new one claimed, sized, streamed and drawn — the attach's own
         // order, on the same control connection.
         XCTAssertEqual(server.closeFramesReceived, [RexWire.dataPath])
-        XCTAssertEqual(Array(server.calls.dropFirst(attachCalls)), [
+        let switchCalls = Array(server.calls.dropFirst(attachCalls))
+        XCTAssertEqual(Array(switchCalls.prefix(4)), [
             "session.disown_block block:front",
             "session.own_block",
             "com.superlogical.terminal.resize 100x30",
             "data.connect",
-            "com.superlogical.terminal.modes",
-            "com.superlogical.terminal.format",
         ])
+        XCTAssertEqual(switchCalls.dropFirst(4).sorted(), Self.screenReads)
         XCTAssertEqual(server.attachedBlock, "block:other")
         XCTAssertEqual(sink.text, ["\u{1B}cSCREEN", "\u{1B}cOTHER"])
         // The retired stream ending is NOT the tab ending.
@@ -154,7 +160,10 @@ final class RexSessionTests: XCTestCase {
         server.sendOutput("from other\r\n")
         await eventually { sink.text.last == "from other\r\n" }
         try await session.write(Data("x".utf8))
-        XCTAssertEqual(server.written, ["x"])
+        await eventually {
+            server.written == ["x"]
+                && server.calls.last == "com.superlogical.terminal.write"
+        }
         XCTAssertEqual(server.lastWriteBlock, "block:other")
         let listed = await session.terminalChoices()
         let choices = try XCTUnwrap(listed)
@@ -195,10 +204,35 @@ final class RexSessionTests: XCTestCase {
         try await session.write(wide.prefix(2))
         try await session.write(wide.suffix(1))
         try await session.write(Data([0x1B, 0x5B, 0x41]))
-        XCTAssertEqual(server.written, ["ls\r", "測", "\u{1B}[A"])
+        // A write queues and returns, so how the four were grouped into
+        // calls is timing. What is not: every byte once, in order, and no
+        // call carrying half a character.
+        await eventually { server.written.joined() == "ls\r測\u{1B}[A" }
+        XCTAssertFalse(server.written.contains { $0.contains("\u{FFFD}") })
 
         try await session.resize(cols: 120, rows: 40)
         XCTAssertEqual(server.calls.last, "com.superlogical.terminal.resize 120x40")
+        await session.close()
+    }
+
+    func testWhatIsTypedWhileAWriteIsInFlightRidesTheNextOneTogether() async throws {
+        let server = FakeRexServer()
+        let session = makeSession(server)
+        try await open(session, sink: Sink())
+
+        // The server sits on its answers, as a slow link does.
+        server.holdWriteReplies()
+        try await session.write(Data("a".utf8))
+        await eventually { server.written == ["a"] }
+        // None of these waits for "a" to be answered...
+        try await session.write(Data("b".utf8))
+        try await session.write(Data("c".utf8))
+        try await session.write(Data("d".utf8))
+        XCTAssertEqual(server.written, ["a"])
+
+        // ...and once it is, they go as one call, not three round trips.
+        server.releaseWriteReplies()
+        await eventually { server.written == ["a", "bcd"] }
         await session.close()
     }
 
@@ -210,6 +244,7 @@ final class RexSessionTests: XCTestCase {
 
         // While this tab owns the block, typing claims nothing.
         try await session.write(Data("a".utf8))
+        await eventually { server.written == ["a"] }
         XCTAssertEqual(server.calls.filter { $0 == "session.own_block" }.count, before)
 
         // The Rex app takes the block; the next keystroke takes it back and
@@ -218,6 +253,10 @@ final class RexSessionTests: XCTestCase {
         await eventually { server.eventsDelivered == 1 }
         try await Task.sleep(for: .milliseconds(150))
         try await session.write(Data("b".utf8))
+        await eventually {
+            server.written == ["a", "b"]
+                && server.calls.last == "com.superlogical.terminal.write"
+        }
         XCTAssertEqual(server.calls.filter { $0 == "session.own_block" }.count, before + 1)
         XCTAssertEqual(server.calls.suffix(3), [
             "session.own_block",
@@ -411,6 +450,9 @@ private final class FakeRexServer: @unchecked Sendable {
     private var events = 0
     private var controlFeed: AsyncThrowingStream<Data, Error>.Continuation?
     private var dataFeed: AsyncThrowingStream<Data, Error>.Continuation?
+    /// nil while write calls are answered as they arrive; otherwise the
+    /// answers a test is sitting on.
+    private var heldWriteReplies: [() -> Void]?
 
     // What a test configures before the attach.
     var attachError: [String: Any]?
@@ -460,6 +502,20 @@ private final class FakeRexServer: @unchecked Sendable {
     func dropLinks(_ error: Error) {
         let feeds = lock.withLock { [controlFeed, dataFeed] }
         feeds.forEach { $0?.finish(throwing: error) }
+    }
+
+    /// Write calls are recorded as they arrive but go unanswered until
+    /// `releaseWriteReplies` — a link slow enough to type ahead of.
+    func holdWriteReplies() {
+        lock.withLock { heldWriteReplies = [] }
+    }
+
+    func releaseWriteReplies() {
+        let held = lock.withLock {
+            defer { heldWriteReplies = nil }
+            return heldWriteReplies ?? []
+        }
+        held.forEach { $0() }
     }
 
     func announceOwner(_ owner: String) {
@@ -624,7 +680,13 @@ private final class FakeRexServer: @unchecked Sendable {
             server.lock.withLock { server.recordedCalls.append(record) }
             var response: [String: Any] = ["type": "response", "id": id, "seq": 0]
             if let error { response["error"] = error } else { response["payload"] = result }
-            send(response)
+            let reply = response
+            let isHeld = method == "com.superlogical.terminal.write" && server.lock.withLock {
+                guard server.heldWriteReplies != nil else { return false }
+                server.heldWriteReplies?.append { [self] in send(reply) }
+                return true
+            }
+            if !isHeld { send(response) }
         }
 
         private func view() -> [String: Any] {

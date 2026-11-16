@@ -306,7 +306,7 @@ enum ExternalActionPerformer {
         // target resolves to nothing and the launch falls through to a
         // fresh session — on Rex when the action named Rex.
         let candidates = openableSessions(model, backend: backend)
-            .filter { $0.backend != .rex }
+            .filter(\.backend.opensWindowsInSession)
         if case .existingSession(let name, let placement) = target,
            let session = candidates.first(where: { $0.name == name }) {
             guard let mode = await model.launchInSession(
@@ -453,15 +453,9 @@ enum ExternalActionPerformer {
         // generic one) would send the user after the wrong thing.
         // createSession marks the host failed when the control link IS the
         // problem; reuse that reason when it exists.
-        let message: String
-        if let failure = model.sessionCreateFailure {
-            message = failure.message(hostName: host.name)
-        } else if case .failed(let reason) = model.phase {
-            message = reason
-        } else {
-            message = String(localized: "Couldn't create the session on \(host.name).")
-        }
-        context.presentFailure(ExternalActionFailure(hostName: host.name, message: message))
+        context.presentFailure(ExternalActionFailure(
+            hostName: host.name,
+            message: model.sessionCreateFailureMessage(hostName: host.name)))
     }
 
     private static func failureMessage(for phase: HostConnectionModel.Phase, host: Host) -> String {

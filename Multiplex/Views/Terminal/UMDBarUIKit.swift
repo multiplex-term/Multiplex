@@ -875,7 +875,7 @@ final class UMDBarViewController: UIViewController,
 
     private func statusCluster(_ state: UMDBarObservedState) -> UIView {
         var views: [UIView] = []
-        if configuration.controller?.host.useMosh == true {
+        if configuration.controller?.ridesMosh == true {
             let mosh = UMDStateBadgeView(
                 caption: "MOSH",
                 accessibilityLabel: String(localized: "Connects over mosh")

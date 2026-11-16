@@ -551,7 +551,7 @@ enum HerdrProbe {
             // is how a tile knows not to render this as an age, while
             // external actions and the widget still sort "most recent"
             // by it — herdr's own list order is the only order it states.
-            created: Date(timeIntervalSince1970: TimeInterval(index)),
+            created: syntheticCreated(position: index),
             tmuxID: entry.name,
             serverHost: "",
             // The one place a herdr record learns it is one. Everything
@@ -562,10 +562,16 @@ enum HerdrProbe {
         )
     }
 
-    /// True for the near-epoch stand-ins `session(entry:index:snapshot:)`
-    /// mints — herdr states no creation time, so a tile must render these
-    /// as no age at all. The one decoder of that encoding; keep them in
-    /// step.
+    /// The stand-in creation date for a backend that states none (herdr,
+    /// Rex): the session's place in the backend's own list, as seconds past
+    /// the epoch. The one encoder; `isSyntheticCreated` is its decoder.
+    static func syntheticCreated(position: Int) -> Date {
+        Date(timeIntervalSince1970: TimeInterval(position))
+    }
+
+    /// True for the near-epoch stand-ins `syntheticCreated` mints — the
+    /// backend states no creation time, so a tile must render these as no
+    /// age at all. The one decoder of that encoding; keep them in step.
     static func isSyntheticCreated(_ date: Date) -> Bool {
         date.timeIntervalSince1970 <= 86_400
     }

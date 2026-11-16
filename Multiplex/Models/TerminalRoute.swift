@@ -67,7 +67,7 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
             case .herdr:
                 return .herdrAttach(sessionName: sessionName)
             case .rex:
-                guard let sessionID, RexProbe.bakeableSessionID(sessionID) else { return nil }
+                guard let sessionID, RexWire.bakeableSessionID(sessionID) else { return nil }
                 return .rexAttach(sessionName: sessionName, sessionID: sessionID)
             }
         }
@@ -92,6 +92,21 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
             attach(
                 backend: session.backend, sessionName: session.name,
                 sessionID: session.tmuxID)
+        }
+
+        /// The mode for ONE terminal of a session, as its own tab — a Rex
+        /// tile's Open Terminal row. nil for a record with no usable ids,
+        /// and for a backend whose tab shows the whole session: its panes
+        /// are reached inside the tab, not opened one each.
+        static func attach(session: TmuxSession, window: TmuxWindow, pane: TmuxPane) -> Mode? {
+            guard session.backend == .rex,
+                  RexWire.bakeableSessionID(session.tmuxID), !pane.tmuxID.isEmpty
+            else { return nil }
+            return .rexAttach(
+                sessionName: session.name,
+                sessionID: session.tmuxID,
+                block: RexBlockRef(id: pane.tmuxID, label: window.name)
+            )
         }
     }
 
@@ -191,14 +206,6 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
         case .shell, .viewport, .fileViewer: nil
         }
     }
-
-    /// The backend whose panel this tab carries — the rail's TMUX / HRDR /
-    /// REX key and the panel behind it (`ShortcutPanelContent.content`).
-    /// One accessor so the window bar and the pane rail cannot disagree;
-    /// the key's face is `SessionBackend.shortcutKeyCaption`, because a
-    /// two-way `herdr ? "HRDR" : "TMUX"` at each site once drew a TMUX key
-    /// on a Rex tab.
-    var shortcutBackend: Host.SessionBackend? { sessionBackend }
 
     /// Complete multiplexer identity for control-plane work that outlives or
     /// sits beside this tab's interactive transport (for example a mosh tab
