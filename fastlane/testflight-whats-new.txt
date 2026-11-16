@@ -12,5 +12,6 @@ PLEASE TRY
 8. On a host showing Rex sessions, press + NEW SESSION and choose REX under Runs on: a new Rex session should open as a tab and appear in Rex. Press + TAB in a Rex tab and choose New Session: the new session should start in the same directory. With Rex not running on the host, the same press should say that no Rex server is running.
 9. Lock the device for a minute with a Rex tab open, then return: the tab should reconnect by itself.
 10. Open Host Settings and find Backends: REX should be checkable, and New sessions run on should never list it. Uncheck it: the Rex tiles should go away.
+11. Open a Rex terminal where an agent such as Claude Code is running: the Agent Bar should show that agent's keys. Bring another window of the same session to the front in Rex: the bar should stay, because the tab is still on the agent's terminal.
 
 Feedback: screenshot in TestFlight

@@ -997,15 +997,23 @@ final class TerminalWindowViewController: UIViewController,
               let backend = activeTab.sessionBackend,
               host.monitors(backend)
         else { return nil }
-        let model = hub.model(for: host)
-        // One expression serves both backends on purpose: a herdr tile IS
+        let sessions = hub.model(for: host).sessions(on: backend)
+        // A Rex tab is ONE terminal of its session, and not necessarily the
+        // one the session is fronting — Open Terminal, Switch Terminal, or
+        // the Rex app showing another window — so the strip is that
+        // terminal's (`TmuxSession.agent(inPane:)`). Found by id: a Rex
+        // label is not an identity, and is respelled when another session
+        // takes the same one.
+        if let rex = activeTab.rexTarget {
+            return sessions.first { $0.tmuxID == rex.sessionID }?
+                .agent(inPane: activeController?.rexBlockID ?? rex.blockID)
+        }
+        // One expression serves tmux and herdr on purpose: a herdr tile IS
         // a whole session, and the probe writes its live focus into the
         // record (active window = focused workspace, active pane = the
         // session's one focus every client mirrors) — so following
         // `activeAgent` follows a workspace switch inside the TUI too.
-        return model.sessions(on: backend)
-            .first { $0.name == sessionName }?
-            .activeAgent
+        return sessions.first { $0.name == sessionName }?.activeAgent
     }
     private var resolvedTerminalTheme: TerminalTheme {
         // Prefer the pinned choice over the live traits: the observation
@@ -1845,26 +1853,11 @@ final class TerminalWindowViewController: UIViewController,
         if agentChanged { renderNow() }
         await model.refreshAndWait(ifStaleFor: 4)
 
-        // The wall probe's verdict, as it stands now. All a backend with
-        // no focused-pane query ever has, and what an unfocused herdr
-        // window goes by between its own checks.
-        func followWallVerdict() {
-            let nextAgent = detectedAgent
-            if shownAgent != nextAgent {
-                hideAgentTask?.cancel()
-                shownAgent = nextAgent
-                renderNow()
-            }
-        }
-
-        guard backend.hasFocusedPaneProbe else {
-            while !Task.isCancelled {
-                guard activeTab?.id == watchedTab.id else { return }
-                if UIApplication.shared.applicationState == .active { followWallVerdict() }
-                try? await Task.sleep(for: Self.focusedPaneProbeInterval)
-            }
-            return
-        }
+        // No fast path to run between wall probes: the wall's record is the
+        // only authority, and it already reaches the strip through the
+        // render's own observation of `detectedAgent` (with its grace
+        // before hiding). Polling here would ask a question with no answer.
+        guard backend.hasFocusedPaneProbe else { return }
 
         if backend == .herdr {
             // The five-second wall probe remains the broad session/attention
@@ -1888,7 +1881,12 @@ final class TerminalWindowViewController: UIViewController,
                         if let detection { apply(detection) }
                     }
                 } else if UIApplication.shared.applicationState == .active {
-                    followWallVerdict()
+                    let nextAgent = detectedAgent
+                    if shownAgent != nextAgent {
+                        hideAgentTask?.cancel()
+                        shownAgent = nextAgent
+                        renderNow()
+                    }
                 }
                 try? await Task.sleep(for: Self.focusedPaneProbeInterval)
             }

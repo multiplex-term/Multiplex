@@ -140,9 +140,13 @@ final class TerminalSessionController {
     private var transport: (any TerminalTransport)?
     /// The transport as the Rex client it is on a Rex tab; nil on any other.
     private var rexSession: RexSession? { transport as? RexSession }
-    /// The terminal a Rex tab was last switched to from its REX panel —
-    /// preferred over the route's own block on the next transport run.
-    private var rexBlockOverride: String?
+    /// The terminal a Rex tab is showing: learned when the attach settles
+    /// on one, changed by its REX panel's Switch Terminal. nil until then,
+    /// and on every other kind of tab. Two readers: the next transport run
+    /// prefers it over the route's own block, so a reconnect comes back to
+    /// the terminal the user was on; and the window reads the tab's agent
+    /// from it — the session's fronted terminal is somebody else's choice.
+    private(set) var rexBlockID: String?
     /// SSH path only: the exec/SFTP surface (pane cwd, file drops). nil on
     /// mosh tabs — their bootstrap SSH connection is transient by design.
     private var connection: SSHConnection?
@@ -474,7 +478,7 @@ final class TerminalSessionController {
             RexSession(
                 connection: connection,
                 sessionID: target.sessionID,
-                blockID: rexBlockOverride ?? target.blockID,
+                blockID: rexBlockID ?? target.blockID,
                 clientVersion: Bundle.main.object(
                     forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
             )
@@ -510,6 +514,9 @@ final class TerminalSessionController {
                 try await rex.open(
                     cols: openedSize.cols, rows: openedSize.rows,
                     onData: onData, onClose: onClose)
+                // Which terminal an unnamed attach landed on is the
+                // session's answer, known only now.
+                rexBlockID = await rex.blockID ?? rexBlockID
             } else {
                 // Armed before the PTY opens so the first output chunk is
                 // already scanned; an rc-time oh-my-zsh update prompt
@@ -1249,7 +1256,7 @@ final class TerminalSessionController {
     /// with.
     func selectRexTerminal(_ choice: TmuxWindowChoice) {
         guard status == .live, let rexSession else { return }
-        rexBlockOverride = choice.tmuxID
+        rexBlockID = choice.tmuxID
         Task { await rexSession.switchBlock(to: choice.tmuxID) }
     }
 

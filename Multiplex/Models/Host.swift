@@ -73,7 +73,8 @@ struct Host: Identifiable, Codable, Hashable {
         /// Whether one exec can say which pane of a session is in front
         /// and what runs in it — the helper chips' fast path between wall
         /// probes. A Rex tab's terminal was chosen at attach and there is
-        /// no such query to make; the wall probe's record answers alone.
+        /// no such query to make; the wall probe's record answers alone,
+        /// for that terminal (`TmuxSession.agent(inPane:)`).
         var hasFocusedPaneProbe: Bool {
             switch self {
             case .tmux, .herdr: true

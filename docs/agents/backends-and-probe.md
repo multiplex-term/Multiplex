@@ -445,7 +445,7 @@ HerdrProbe, RexProbe, session creation/targeting, or file attach/drop.
     tab's. Each data stream carries a generation (`dataGeneration`): the
     old stream's end must not read as the tab ending, and input typed
     during the switch is dropped rather than sent to whichever block wins.
-    The choice survives a reconnect (`rexBlockOverride`). The rail key's
+    The choice survives a reconnect (`rexBlockID`). The rail key's
     face comes from `SessionBackend.shortcutKeyCaption` — the three
     `herdr ? "HRDR" : "TMUX"` sites it replaced drew a TMUX key on a Rex
     tab.
@@ -550,13 +550,33 @@ HerdrProbe, RexProbe, session creation/targeting, or file attach/drop.
     60 s resume window; the fresh attach is a new client beside it.
   - What a Rex tab does not have: a prefix-key list (the REX panel only
     switches terminals), Copy Mode, HISTORY, the one-second helper-chip
-    probe (`SessionBackend.hasFocusedPaneProbe` is false, so the chips
-    follow the wall probe's record instead of polling for an answer that
-    is always nil), and mosh (no PTY for mosh-server to run — a Rex tab
-    rides SSH whatever the host prefers). ⚠ `TerminalSessionController
-    .ridesMosh` is the one statement of that last rule: scrollback, FILE
-    and the bar's MOSH badge read it, where reading `host.useMosh` raw
-    gave a Rex tab on a mosh host no scrollback, no FILE and a MOSH badge.
+    probe (`SessionBackend.hasFocusedPaneProbe` is false: the wall probe's
+    record is the only authority, and it reaches the strip through the
+    window's own observation, so nothing polls), and mosh (no PTY for
+    mosh-server to run — a Rex tab rides SSH whatever the host prefers).
+    ⚠ `TerminalSessionController.ridesMosh` is the one statement of that
+    last rule: scrollback, FILE and the bar's MOSH badge read it, where
+    reading `host.useMosh` raw gave a Rex tab on a mosh host no
+    scrollback, no FILE and a MOSH badge.
+  - ⚠ **A Rex tab's agent bar is its OWN terminal's, not the session's
+    fronted one** (`TmuxSession.agent(inPane:)`, fed by
+    `TerminalSessionController.rexBlockID`; the session is found by id,
+    since a label is respelled when another session takes it). tmux and
+    herdr tabs show the whole session, so following the record's active
+    pane follows what the tab shows; a Rex tab is one terminal, and the
+    session's focus is whatever the Rex app last fronted. Read off the
+    active pane, the bar vanished from a tab still on Claude Code as soon
+    as Rex fronted another window, and never appeared on a tab opened or
+    switched to a terminal that was not in front (user-reported
+    2026-11-16, reproduced with a real `claude` on a throwaway server).
+    `rexBlockID` is learned when the attach settles on a terminal and
+    changed by Switch Terminal; the next transport run prefers it too, so
+    a reconnect returns to the terminal the tab was on.
+    - Measured with Claude Code 2.1.325 (macOS native install) at its
+      folder-trust prompt: `process.foreground` is `name: "2.1.325"`,
+      `argv0: "claude"`; the title is the shell's (`claude`); `program
+      _status` has NO records. So it is the bare-semver rule in
+      `AgentSignature.classify` that names it there, not OSC 7501.
   - Deliberately NOT built, with the reason each would need new facts to
     reopen:
     - **Drawing a window's splits.** Every terminal in a split needs its

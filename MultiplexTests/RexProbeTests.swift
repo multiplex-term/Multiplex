@@ -491,6 +491,27 @@ final class RexProbeTests: XCTestCase {
             legacy, .rexAttach(sessionName: "api", sessionID: "session:0000-aaaaaa"))
     }
 
+    func testATabsAgentIsItsOwnTerminalsNotTheOneTheSessionFronts() throws {
+        let session = try XCTUnwrap(
+            try sessions(RexProbe.parseProbe(try fixture())).first)
+        // The session is fronting its editor window, where no agent runs;
+        // the agent is in another window.
+        XCTAssertNil(session.activeAgent)
+        let agentPane = try XCTUnwrap(session.windows[1].panes?.first)
+        // A tab on the agent's terminal speaks for the agent, whatever the
+        // Rex app is showing (seen live: fronting another window took the
+        // strip off a tab that was still on Claude Code).
+        XCTAssertEqual(session.agent(inPane: agentPane.tmuxID), .claudeCode)
+        // A tab on a plain terminal of the same session speaks for none.
+        let logsPane = try XCTUnwrap(session.windows[0].panes?.last)
+        XCTAssertNil(session.agent(inPane: logsPane.tmuxID))
+        // A tab that names no terminal shows the whole session and follows
+        // its focus — tmux and herdr.
+        XCTAssertEqual(session.agent(inPane: nil), session.activeAgent)
+        // A terminal the record does not list has nothing to report.
+        XCTAssertNil(session.agent(inPane: "block:gone"))
+    }
+
     func testOpenTerminalNamesEachTerminalAndTargetsItsBlock() throws {
         let session = try XCTUnwrap(
             try sessions(RexProbe.parseProbe(try fixture())).first)
