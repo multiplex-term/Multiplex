@@ -530,16 +530,53 @@ final class TerminalKeyBarUIKitTests: XCTestCase {
         return defaults
     }
 
+    /// Locking only swaps the keyboard key for the lock and adds RET: a roomy
+    /// row keeps its symbols, its page keys, and TMUX, inside its own bounds.
+    func testLockingTheKeyboardKeepsARoomyRowsKeys() {
+        for width in stride(from: CGFloat(552), through: 1_100, by: 2) {
+            let unlocked = specification(width: width, returns: false)
+            let locked = specification(width: width, returns: true, onlyWhileLocked: true)
+            XCTAssertEqual(locked.symbols, unlocked.symbols, "\(width)")
+            XCTAssertEqual(locked.pageKeys, unlocked.pageKeys, "\(width)")
+            XCTAssertEqual(locked.tmux, unlocked.tmux, "\(width)")
+            let frames = TerminalKeyBarLayout.keyFrames(
+                specification: locked,
+                keyCount: locked.keyCount(includesReturn: true),
+                includesReturn: true,
+                width: width,
+                contentSafeArea: .zero,
+                keyTop: 7,
+                keyHeight: 34
+            )
+            XCTAssertEqual(frames.count, unlocked.keyCount(includesReturn: false) + 1, "\(width)")
+            XCTAssertLessThanOrEqual(frames.last?.maxX ?? 0, width, "\(width)")
+            XCTAssertGreaterThanOrEqual(frames.first?.width ?? 0, 41, "faces stay pressable at \(width)")
+        }
+    }
+
+    /// Below the regular faces the RET ladder still rules, cutoffs included.
+    func testLockingOnANarrowRowStaysOnTheReturnLadder() {
+        for width in [375, 390, 420, 466, 540] as [CGFloat] {
+            XCTAssertEqual(
+                specification(width: width, returns: true, onlyWhileLocked: true),
+                specification(width: width, returns: true),
+                "\(width)"
+            )
+        }
+    }
+
     private func specification(
         width: CGFloat,
         returns: Bool,
-        safeArea: UIEdgeInsets = .zero
+        safeArea: UIEdgeInsets = .zero,
+        onlyWhileLocked: Bool = false
     ) -> TerminalKeyBarLayout.Specification {
         TerminalKeyBarLayout.specification(
             width: width,
             contentSafeArea: safeArea,
             showsTmux: true,
-            includesReturn: returns
+            includesReturn: returns,
+            returnOnlyWhileLocked: onlyWhileLocked
         )
     }
 
@@ -629,6 +666,34 @@ final class TerminalKeyClusterUIKitTests: XCTestCase {
         XCTAssertFalse((leading.subviews + trailing.subviews).contains {
             String(describing: type(of: $0)).contains("Hosting")
         })
+    }
+
+    func testKeyboardKeyWearsThePadlockWhileTheKeyboardIsLocked() throws {
+        let context = TerminalKeyClusterContext(orderStore: try isolatedStore())
+        let trailing = TerminalKeyClusterGroupView(role: .trailing, metric: .regular, context: context)
+        func keyboardKey() throws -> TerminalTallyKeyControl {
+            try XCTUnwrap(trailing.keys.first {
+                $0.accessibilityIdentifier == "terminal.keyCluster.keyboard"
+            })
+        }
+        XCTAssertFalse(try keyboardKey().isLatched)
+        XCTAssertNotNil(try keyboardKey().longPressAction, "the hold is the lock")
+
+        // The lock is app-wide state only the arbiter writes; a scratch
+        // terminal engages it and the defer releases it for the next test.
+        let terminal = TerminalView(frame: CGRect(x: 0, y: 0, width: 300, height: 200))
+        TerminalFocusArbiter.lock(terminal)
+        defer { TerminalFocusArbiter.unlock(terminal, summoning: false) }
+        trailing.applyContextState()
+        XCTAssertTrue(try keyboardKey().isLatched)
+        XCTAssertEqual(try keyboardKey().accessibilityLabel, "Unlock keyboard")
+        XCTAssertNil(try keyboardKey().longPressAction, "the padlock's press is the unlock")
+        XCTAssertEqual(trailing.renderedSlots.count, 7, "the face changes; the row does not")
+
+        TerminalFocusArbiter.unlock(terminal, summoning: false)
+        trailing.applyContextState()
+        XCTAssertFalse(try keyboardKey().isLatched)
+        XCTAssertNotNil(try keyboardKey().longPressAction)
     }
 
     func testClustersFollowTheStoredOrderAcrossSlabsAndArrangeMovesCrossTheUMD() throws {

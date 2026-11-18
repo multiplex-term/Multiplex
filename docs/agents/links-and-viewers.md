@@ -99,7 +99,15 @@ link/path resolution, the ⌗ viewport, or the ▤ file viewer.
   This file-URI check MUST precede `TerminalLink`, while ordinary links
   MUST precede ordinary paths so `example.com/docs` stays a URL. Only text
   BOTH resolvers decline ($VAR/…, colon prose, whitespace in a
-  bare-relative shape) still falls to selection. Paths with spaces resolve
+  bare-relative shape) still falls to selection. **A press on an agent's
+  slash command is not a path** (`TerminalPathTarget.resolvePressed`, the
+  press road only; the sheet's field keeps `resolve`, a typed path being
+  intent): a lone dotless first segment needs a well-known system root
+  (`/tmp`) to count, so `/compact` and `/review src/foo.ts` decline to the
+  remote while `/data/x`, `/data/`, and `/notes.md` still confirm. Accepted
+  trade: bare `/data` and spaced `/My Dir/x` no longer confirm from a press.
+  The fork's pointer-hover underline is regex-only and still lights them.
+  Paths with spaces resolve
   when rooted by a base marker (`/`, `~/`, `./`, `$HOME/`); bare relatives
   keep the prose guard. `trimmingProseTail` sheds trailing
   chunks carrying neither `/` nor `.` — hence the sheet's OPENS row
@@ -240,6 +248,54 @@ link/path resolution, the ⌗ viewport, or the ▤ file viewer.
   ⚠ `mountBlocksIfNeeded` must `setNeedsLayout` the scroll view before
   reading `contentSize`, or a teardown's stale tall height reads as a full
   viewport and the screen stays BLANK until the reader scrolls.
+- **FIND searches what the screen shows, and the bar is pane chrome**
+  (2026-11-06; `FileViewerFind` / `FileViewerFindCorpus` /
+  `MarkdownFindText` pure + tested, `FileViewerFindBarView`,
+  `FileViewerFindTarget`). The query runs literal and case-insensitive over
+  the screen's own text (UTF-16 `NSRange`s, capped at 5 000 hits, so the
+  count reads `5000+`). Code, diff, markdown source, AND the rendered
+  markdown preview are searchable. **The preview is searched as it reads,
+  never flipped to source** (the first cut flipped it, which threw away the
+  rendering the reader was searching and their place in it). It is one run per
+  text surface — heading, paragraph, list prose, fence, table cell — and a
+  hit never spans two runs. `MarkdownFindText` spells each run exactly as
+  the renderer does (an empty run is one space, an image is its `⟨image: …⟩`
+  / `⌄ image: …` caption), and a UIKit test holds the two together. Blocks
+  past the mount frontier have no view: they wash as they mount, and a
+  reveal mounts through the hit's block first. That is the price of
+  scrolling there, paid in one go: measured ~1.5 s to reach paragraph 350
+  of 400 (visionOS sim, Debug), split between building the TextKit views and
+  laying out the stack. A width hint to skip the second measurement saved
+  only ~0.1 s and was dropped. Estimated heights stay rejected (see the
+  mount record above). A picture, PDF, sound,
+  BINARY, or failure screen closes the bar; loading/idle keep it, so a query
+  survives a walk through the tree. Rules:
+  - Hits are DECOR, like the row grounds: `FileViewerTextView` washes them in
+    the backdrop (per text segment, only on visible rows), and a preview
+    text surface carries a `FileViewerFindWashView` behind its TextKit
+    canvas (inside the text view, so a sideways-scrolled fence keeps its
+    washes). Never text attributes, never the selection, and a copy carries
+    none of it.
+  - The screen fires `findCorpusDidChange` when its text changes (a rescale,
+    an appearance flip, a watch tick's quiet swap, a picture shown in place
+    re-spelling its caption), and the pane re-searches in place. A re-search never moves the reader: only a typed query or a
+    step reveals a hit, and a reveal leaves an already-visible hit alone and
+    centers an off-screen one. Large texts (>200 k units) wait 120 ms after
+    each keystroke; the scan runs detached.
+  - The bar sits under the header on every platform, so a raised keyboard
+    never covers it. The rails carry only a FIND chip (in-window rail,
+    visionOS ornament, side-panel header with `⋯` fallback). Return/⇧Return
+    and ◂ ▸ step, Esc and DONE close, and the query is kept for next time.
+  - ⌘F / ⌘G / ⇧⌘G are the standard `find:` / `findNext:` / `findPrevious:`
+    actions on the pane, so a selection in the screen still reaches them. **A
+    tab-road ▤ pane becomes first responder while active**
+    (`claimsHardwareKeys`): switching to it released the terminal, so nothing
+    else in the window holds keys, and with no responder ⌘F would reach no
+    one. It is not a text input, so `TerminalFocusArbiter` has no input
+    session to juggle. A side panel does NOT claim (the host terminal keeps
+    the keyboard, and ⌘F goes to the remote there). Its find field borrows
+    the terminal's keyboard (`lend`) and hands it back on close
+    (`resumeAfterPresentation`).
 - **The side panel is the first home for a terminal-summoned ▤/⌗ on iPad and
   visionOS** (2026-08-21; `SidePanelViewController`, `SidePanelPolicy`,
   `SidePanelWidth`): an overlay over the pane on regular-width iPad (≥ 660 pt)

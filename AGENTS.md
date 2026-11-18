@@ -81,9 +81,9 @@ approaches. Don't re-litigate a recorded decision without new facts.
   notify hooks (`debug.*`), simulator / iOS-on-Mac / mosh / herdr caveats.
   Read before any simulator run, E2E proof, or screenshot capture.
 - `architecture.md` — the full component map.
-- `swiftterm-fork.md` — vendored `Vendor/` packages: SwiftTerm's fourteen
-  patch groups, the Citadel / swift-nio-ssh pins. Read before touching
-  `Vendor/`, input encoding, or rendering.
+- `swiftterm-fork.md` — vendored `Vendor/` packages: SwiftTerm's patch
+  groups and 2.0 threading seams, the Citadel / swift-nio-ssh pins. Read
+  before touching `Vendor/`, input encoding, or rendering.
 - `input-and-windows.md` — keyboard focus, key rail/ornament cluster,
   terminal window chrome, dictation, Copy Mode / Select Text, scene routing
   and tab moves, keyboard avoidance, secret fields, held-backspace filler.
@@ -93,7 +93,7 @@ approaches. Don't re-litigate a recorded decision without new facts.
   systemd-run), file attach/drop.
 - `agent-helpers.md` — CLI-agent detection, helper chips, launch model
   override, keychain-locked tip, HISTORY/jump.
-- `lifecycle-and-attention.md` — disabled hosts, session resume, background
+- `lifecycle-and-attention.md` — disabled hosts, session resume, keep screen on, background
   keep-alive + `BGAppRefreshTask`, attention alerts and notification rules.
 - `mosh.md` — the clean-room mosh transport.
 - `bind-host.md` — Bind Host flow + `mpx` CLI distribution.

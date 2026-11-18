@@ -23,7 +23,7 @@ final class TerminalGuideTests: XCTestCase {
         ))
         XCTAssertEqual(entries.map(\.id), [
             "doubletap", "longpress", "rightclick", "pan",
-            "link", "path", "shiftreturn", "shortcutkey", "keycommands", "talkback",
+            "link", "path", "kbdlock", "shiftreturn", "shortcutkey", "keycommands", "talkback",
         ])
     }
 
@@ -55,7 +55,7 @@ final class TerminalGuideTests: XCTestCase {
         ))
         let link = try XCTUnwrap(entries.first { $0.id == "link" })
         XCTAssertEqual(link.figure, 6)
-        XCTAssertEqual(entries.compactMap(\.figure), [1, 2, 3, 4, 6, 7, 10, 11, 12, 13])
+        XCTAssertEqual(entries.compactMap(\.figure), [1, 2, 3, 4, 6, 7, 8, 10, 11, 12, 13])
     }
 
     func testBankOrder() {

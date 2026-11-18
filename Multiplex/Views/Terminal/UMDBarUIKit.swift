@@ -36,6 +36,11 @@ struct UMDBarConfiguration {
     /// nil while the global stats setting is off — the row disappears with
     /// every other entry.
     var showConnectionStats: (() -> Void)?
+    /// Enters or leaves full screen (`⋯` → Full Screen). nil drops the row.
+    var toggleFullScreen: (() -> Void)?
+    /// Full screen is on: the row reads Exit Full Screen. Only the iPhone
+    /// Duo's outer display shows a rail then (its side column).
+    var fullScreenActive = false
     /// The herdr-only second `+ TAB` entry, if the active tab offers one —
     /// New Session leads the menu on every backend (see
     /// `TerminalRoute.NewTabTarget`).
@@ -101,6 +106,8 @@ private struct UMDBarPresentationKey: Equatable {
     var hasCloseSession: Bool
     var hasKeychainTip: Bool
     var hasConnectionStats: Bool
+    var hasToggleFullScreen: Bool
+    var fullScreenActive: Bool
     var extraNewTabTarget: TerminalRoute.NewTabTarget?
     var shortcutBackend: Host.SessionBackend?
     var style: UMDBarStyle
@@ -126,6 +133,8 @@ private struct UMDBarPresentationKey: Equatable {
         hasCloseSession = configuration.closeSession != nil
         hasKeychainTip = configuration.keychainTip != nil
         hasConnectionStats = configuration.showConnectionStats != nil
+        hasToggleFullScreen = configuration.toggleFullScreen != nil
+        fullScreenActive = configuration.fullScreenActive
         extraNewTabTarget = configuration.extraNewTabTarget
         shortcutBackend = configuration.shortcutBackend
         style = configuration.style
@@ -163,6 +172,7 @@ enum UMDBarAction: Equatable {
     case toggleKeyBarArranging
     case showGuide
     case showConnectionStats
+    case toggleFullScreen
     case attach(FileAttachPicker)
 }
 
@@ -289,15 +299,15 @@ final class UMDBarViewController: UIViewController,
         case .closeSession:
             configuration.closeSession?()
         case .toggleKeyboardLock:
-            #if !os(visionOS)
             configuration.controller?.toggleKeyboardLock()
-            #endif
         case .toggleKeyBarArranging:
             configuration.controller?.toggleKeyBarArranging()
         case .showGuide:
             showGuide()
         case .showConnectionStats:
             configuration.showConnectionStats?()
+        case .toggleFullScreen:
+            configuration.toggleFullScreen?()
         case .attach(let picker):
             fileAttachController.request(
                 picker,
@@ -625,8 +635,9 @@ final class UMDBarViewController: UIViewController,
             offered.append(.guide)
             chips[.guide] = guideButton()
         }
-        // The standing entries (keyboard lock, arrange, stats) keep ⋯ on the
-        // row whether or not anything drops; it always sits before DETACH.
+        // The standing entries (full screen, keyboard lock, arrange, stats)
+        // keep ⋯ on the row whether or not anything drops; it always sits
+        // before DETACH.
         if !makeOverflowMenu().children.isEmpty {
             offered.append(.overflow)
         }
@@ -1021,12 +1032,25 @@ final class UMDBarViewController: UIViewController,
         ])
     }
 
-    /// The standing entries (keyboard lock, arrange, stats) plus the chips
-    /// the rail dropped (`overflowing`), so the menu carries exactly those.
+    /// The standing entries (full screen, keyboard lock, arrange, stats) plus
+    /// the chips the rail dropped (`overflowing`), so the menu carries exactly
+    /// those.
     private func makeOverflowMenu(overflowing: Set<RailItem> = []) -> UIMenu {
         var children: [UIMenuElement] = []
         let carries: (RailItem) -> Bool = { overflowing.contains($0) }
-        #if !os(visionOS)
+        if configuration.toggleFullScreen != nil {
+            let active = configuration.fullScreenActive
+            children.append(menuAction(
+                title: active
+                    ? String(localized: "Exit Full Screen")
+                    : String(localized: "Full Screen"),
+                image: UIImage(systemName: active
+                    ? "arrow.down.right.and.arrow.up.left"
+                    : "arrow.up.left.and.arrow.down.right"),
+                identifier: "umd.fullScreen",
+                action: .toggleFullScreen
+            ))
+        }
         let offersKeyboardLock = currentObservedState.keyboardLocked
             || !currentObservedState.hardwareKeyboardConnected
         if configuration.controller != nil, offersKeyboardLock {
@@ -1042,7 +1066,6 @@ final class UMDBarViewController: UIViewController,
                 action: .toggleKeyboardLock
             ))
         }
-        #endif
         // Arrange Keys: a menu row on purpose — every key hold is spoken for
         // and a held key is unfindable. Reads DONE while the mode is on.
         if configuration.controller != nil {
@@ -1079,14 +1102,18 @@ final class UMDBarViewController: UIViewController,
                 title: String(localized: "Text Size"),
                 options: .displayInline,
                 children: [
+                    // Keep the menu up so repeated taps step the size
+                    // while the reader watches the terminal resize.
                     menuAction(
                         title: String(localized: "Smaller Text"),
                         identifier: "umd.fontDown.action",
+                        attributes: .keepsMenuPresented,
                         action: .fontDown
                     ),
                     menuAction(
                         title: String(localized: "Larger Text"),
                         identifier: "umd.fontUp.action",
+                        attributes: .keepsMenuPresented,
                         action: .fontUp
                     ),
                 ]
@@ -1233,13 +1260,22 @@ final class UMDBarViewController: UIViewController,
                 configuration.controller?.suspendFocusForPresentation() == true
         }
 
+        // A column's own width is its strip; the panel opens beside the
+        // chip, over the pane, so its room is the window's side of the chip
+        // the pane is on (the 24 below clears the arrow and screen margin).
+        let room: CGFloat?
+        if configuration.style == .verticalColumn, let window = view.window {
+            let chip = source.convert(source.bounds, to: window)
+            room = max(
+                chip.minX - window.safeAreaInsets.left,
+                window.bounds.width - window.safeAreaInsets.right - chip.maxX
+            )
+        } else {
+            room = configuration.availableWidth
+        }
         let panelWidth = min(
             ShortcutPanelViewController.preferredWidth,
-            max(
-                280,
-                (configuration.availableWidth
-                    ?? ShortcutPanelViewController.preferredWidth + 24) - 24
-            )
+            max(280, (room ?? ShortcutPanelViewController.preferredWidth + 24) - 24)
         )
         let panel = ShortcutPanelViewController(
             content: content,
@@ -1291,8 +1327,13 @@ final class UMDBarViewController: UIViewController,
         if let popover = panel.popoverPresentationController {
             popover.sourceView = source
             popover.sourceRect = source.bounds
-            popover.permittedArrowDirections = configuration.style == .regular
-                ? .down : .up
+            // A column chip opens the panel sideways, toward the pane: below
+            // a chip low in the column it would get only the strip's tail.
+            popover.permittedArrowDirections = switch configuration.style {
+            case .regular: .down
+            case .shell: .up
+            case .verticalColumn: [.left, .right]
+            }
             #if !os(visionOS)
             popover.backgroundColor = UIKitChassis.bezel
             #endif

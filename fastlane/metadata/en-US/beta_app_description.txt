@@ -15,7 +15,7 @@ WHERE THINGS ARE
 - Host Settings → BACKEND switches a host between TMUX and HERDR. → MONITORING also holds Keep alive in background, off by default.
 - + NEW SESSION starts a persistent session, or launches an agent with an optional setup script, model, and first prompt. Widget and Shortcut launches work on both backends and can land inside an existing session.
 - TMUX (bottom bar on Vision Pro, key rail on iPad/iPhone, top-right on narrow iPhones) sends everyday tmux commands. On herdr tabs the key reads HRDR and sends herdr's own.
-- Long-press, double-tap, or secondary-click the terminal for SELECT / SELECT ALL / PASTE on either backend; the selection stays inside that pane. herdr tabs add MENU, which opens herdr's own pane menu at that cell.
+- Long-press, double-tap, or secondary-click the terminal for SELECT / SELECT ALL / PASTE on either backend; the selection stays inside that pane. herdr tabs add MENU, which opens herdr's own pane menu at that cell. On herdr, keep holding and drag to select with herdr itself; it copies to the clipboard when you lift.
 - FILE uploads from Photos, Files, or the camera into the active pane's working directory and types the remote path without pressing Return. Dragging a file in does the same.
 - + TAB → File Viewer browses host files and git diffs; long-press a path in terminal output to open that file beside the session. Web links in rendered Markdown can open in a docked viewport or the system browser.
 - A terminal's GUIDE chip is an illustrated field manual of the gestures for that tab.

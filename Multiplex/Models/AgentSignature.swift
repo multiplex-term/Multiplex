@@ -166,9 +166,13 @@ struct PSRow: Hashable {
 /// against real processes on 2026-07-10 (Claude Code v2.1.206, Codex
 /// rust-v0.144.x) and 2026-07-15 (Pi v0.80.7, npm + native) — see
 /// local-plan/agent-harness-helpers.md §1.1 for the original experiment
-/// matrix. Grok Build's rules (2026-08-16) come from reading the
-/// xai-org/grok-build source rather than a live process: comm/argv[0] is
-/// `grok` (official installs) or `xai-grok-pager` (the cargo artifact).
+/// matrix. Process signals re-verified live 2026-10-07: Claude Code 2.1.292,
+/// Codex 0.160.1 (bun `node …/codex` → native `codex`), Pi 1.0.4 (npm
+/// package now `@earendil-works/pi-coding-agent`), Grok 1.0.46
+/// (`grok-1.0.46-mac` comm), Antigravity 1.3.1. Grok Build's rules
+/// (2026-08-16) come from reading the xai-org/grok-build source rather than
+/// a live process: comm/argv[0] is `grok` (official installs) or
+/// `xai-grok-pager` (the cargo artifact).
 /// Everything here is pure and pinned by AgentSignatureTests; when an agent
 /// changes its signature, this file and its tests are the whole blast radius.
 enum AgentSignature {
@@ -263,15 +267,31 @@ enum AgentSignature {
     /// Hermes is a Python venv entrypoint: its installer's `hermes` launcher
     /// execs `…/venv/bin/python …/hermes-agent/hermes` (install.sh,
     /// 2026-08-23), so the pane's comm is `python3.x`/`Python` and only
-    /// argv[1] names the agent — hence the `python*` rung.
+    /// argv[1] names the agent — hence the `python*` rung. Hermes's PM
+    /// installs (2026-09+) publish `.hermes/bin/hermes` as
+    /// `exec <python> -I -c '<inline launcher>'` instead, so argv[1] is
+    /// `-I`; that launcher's first source line is the shape Hermes itself
+    /// keys on (`gateway/status_inline_source.py` `_BOOTSTRAPS`).
     static func match(argv args: String) -> AgentKind? {
         let argv = args.split(separator: " ")
         guard let first = argv.first else { return nil }
         if let kind = agentNamed(basename(of: first)) { return kind }
-        if isInterpreter(basename(of: first)), argv.count > 1 {
-            return agentNamed(basename(of: argv[1]))
-        }
-        return nil
+        guard isInterpreter(basename(of: first)), argv.count > 1 else { return nil }
+        if isHermesInlineLauncher(argv) { return .hermes }
+        return agentNamed(basename(of: argv[1]))
+    }
+
+    /// `python -I -c import os, re, sys⏎…`. The source's newline renders as
+    /// `\012` in macOS ps, `?` in procps, or ends the row outright, so the
+    /// token after `sys` only needs to not continue the identifier.
+    private static func isHermesInlineLauncher(_ argv: [Substring]) -> Bool {
+        guard argv.count >= 7,
+              argv[1] == "-I", argv[2] == "-c",
+              argv[3] == "import", argv[4] == "os,", argv[5] == "re,",
+              argv[6].hasPrefix("sys")
+        else { return false }
+        let next = argv[6].dropFirst("sys".count).first
+        return next.map { !($0.isLetter || $0.isNumber || $0 == "_" || $0 == ",") } ?? true
     }
 
     private static func isInterpreter(_ name: String) -> Bool {

@@ -105,6 +105,71 @@ final class SingleWindowShellUIKitTests: XCTestCase {
         XCTAssertEqual(controller.currentLayoutMetrics?.deckFrame.width, 0)
     }
 
+    func testRotatingAcrossTheBreakpointKeepsAHiddenDeckHidden() throws {
+        let harness = makeController(initialRoute: TerminalWindowRoute(
+            tab: terminal("main")
+        ))
+        let controller = harness.controller
+        controller.loadViewIfNeeded()
+        let landscape = CGSize(width: 1_024, height: 600)
+        let portrait = CGSize(width: 600, height: 1_024)
+        controller.applyTestLayout(size: landscape)
+        XCTAssertTrue(controller.currentLayoutMetrics?.expanded == true)
+        controller.showDeck()
+        XCTAssertFalse(controller.deckRailVisible)
+
+        controller.applyTestLayout(size: portrait)
+        XCTAssertFalse(controller.currentLayoutMetrics?.expanded == true)
+        XCTAssertTrue(controller.compactShowsTerminal)
+
+        controller.applyTestLayout(size: landscape)
+        XCTAssertTrue(controller.currentLayoutMetrics?.expanded == true)
+        XCTAssertFalse(controller.deckRailVisible, "a rotation keeps the display; ◧ hid the rail")
+        XCTAssertEqual(controller.currentLayoutMetrics?.deckFrame.width, 0)
+    }
+
+    func testRotatingBackFromTheSinglePaneDeckRestoresTheRail() throws {
+        let harness = makeController(initialRoute: TerminalWindowRoute(
+            tab: terminal("main")
+        ))
+        let controller = harness.controller
+        controller.loadViewIfNeeded()
+        let landscape = CGSize(width: 1_024, height: 600)
+        let portrait = CGSize(width: 600, height: 1_024)
+        controller.applyTestLayout(size: landscape)
+        controller.showDeck()
+        controller.applyTestLayout(size: portrait)
+        // ‹ DECK in the single pane: the user is on the deck now.
+        controller.showDeck()
+        XCTAssertFalse(controller.compactShowsTerminal)
+
+        controller.applyTestLayout(size: landscape)
+        XCTAssertTrue(controller.deckRailVisible)
+        XCTAssertGreaterThan(controller.currentLayoutMetrics?.deckFrame.width ?? 0, 0)
+    }
+
+    func testBackgroundSnapshotLayoutsLeaveAHiddenDeckHidden() throws {
+        let harness = makeController(initialRoute: TerminalWindowRoute(
+            tab: terminal("main")
+        ))
+        let controller = harness.controller
+        controller.loadViewIfNeeded()
+        let open = CGSize(width: 951, height: 669)
+        controller.applyTestLayout(size: open)
+        XCTAssertTrue(controller.currentLayoutMetrics?.expanded == true)
+        controller.showDeck()
+        XCTAssertFalse(controller.deckRailVisible)
+
+        // Backgrounded, iOS snapshots the scene at the closed display's size.
+        controller.applyTestLayout(size: CGSize(width: 466, height: 678), inBackground: true)
+        XCTAssertFalse(controller.currentLayoutMetrics?.expanded == true)
+
+        controller.applyTestLayout(size: open)
+        XCTAssertTrue(controller.currentLayoutMetrics?.expanded == true)
+        XCTAssertFalse(controller.deckRailVisible, "a snapshot pass is not an unfold")
+        XCTAssertEqual(controller.currentLayoutMetrics?.deckFrame.width, 0)
+    }
+
     func testCrossingTheBreakpointWithNothingAttachedShowsTheDeck() throws {
         let harness = makeController()
         let controller = harness.controller
@@ -161,6 +226,55 @@ final class SingleWindowShellUIKitTests: XCTestCase {
         XCTAssertEqual(controller.shellState.presentation.deckControl, .show)
         XCTAssertFalse(metrics.deckInteractive)
         XCTAssertTrue(view("singleWindowShell.divider", in: controller.view)?.isHidden == true)
+    }
+
+    func testFullScreenTerminalTakesTheWholeShellOnlyWhileOnScreen() {
+        func resolve(
+            size: CGSize,
+            idiom: ShellModeDecision.Idiom,
+            compactShowsTerminal: Bool,
+            fullScreen: Bool
+        ) -> SingleWindowShellLayoutMetrics {
+            SingleWindowShellNativeLayout.resolve(
+                size: size,
+                safeArea: UIEdgeInsets(top: 24, left: 0, bottom: 20, right: 0),
+                verticalSizeClass: .regular,
+                idiom: idiom,
+                deckRailVisible: true,
+                compactShowsTerminal: compactShowsTerminal,
+                compactBackSwipeOffset: 0,
+                compactBackSwipeActive: false,
+                terminalFullScreen: fullScreen
+            )
+        }
+        let size = CGSize(width: 1_366, height: 1_024)
+        let windowed = resolve(size: size, idiom: .pad, compactShowsTerminal: true, fullScreen: false)
+        let full = resolve(size: size, idiom: .pad, compactShowsTerminal: true, fullScreen: true)
+        XCTAssertTrue(windowed.hasDeckColumn)
+        XCTAssertEqual(full.terminalFrame, CGRect(origin: .zero, size: size))
+        XCTAssertEqual(full.dividerFrame, .zero)
+        XCTAssertEqual(full.deckAlpha, 0)
+        XCTAssertFalse(full.deckInteractive)
+        XCTAssertTrue(full.terminalInteractive)
+        // What the panes are told stays put, so neither side re-renders: the
+        // terminal insets its own full-screen pane.
+        XCTAssertEqual(full.terminalSafeArea, windowed.terminalSafeArea)
+        XCTAssertEqual(full.terminalAvailableWidth, windowed.terminalAvailableWidth)
+        XCTAssertEqual(full.deckPresentation, windowed.deckPresentation)
+        XCTAssertEqual(full.deckToggles, windowed.deckToggles)
+        XCTAssertEqual(full.railOwnsBottomSafeArea, windowed.railOwnsBottomSafeArea)
+
+        // A compact shell showing its deck leaves the flag dormant.
+        let phone = CGSize(width: 390, height: 844)
+        XCTAssertEqual(
+            resolve(size: phone, idiom: .phone, compactShowsTerminal: false, fullScreen: true),
+            resolve(size: phone, idiom: .phone, compactShowsTerminal: false, fullScreen: false)
+        )
+        XCTAssertEqual(
+            resolve(size: phone, idiom: .phone, compactShowsTerminal: true, fullScreen: true)
+                .terminalFrame,
+            CGRect(origin: .zero, size: phone)
+        )
     }
 
     func testSafeAreaMathMatchesCompactLandscapeAndBottomRailOwnership() {

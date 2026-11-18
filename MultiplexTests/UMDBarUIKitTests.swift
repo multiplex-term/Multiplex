@@ -270,14 +270,9 @@ final class UMDBarUIKitTests: XCTestCase {
                 UIAction.Identifier("umd.guide.action")
             )
         }
-        #if os(visionOS)
-        // Keyboard lock is an iPad software-keyboard affordance. The
-        // production controller and the SwiftUI surface it replaced both
-        // compile this action out on visionOS, where there is no key rail.
-        XCTAssertFalse(allActions.map(\.title).contains("Lock Keyboard Closed"))
-        #else
+        // The lock is a named action on every platform — the visionOS
+        // cluster key's hold is as unfindable as the rail key's.
         XCTAssertTrue(allActions.map(\.title).contains("Lock Keyboard Closed"))
-        #endif
         XCTAssertTrue(allActions.map(\.title).contains("Smaller Text"))
         XCTAssertTrue(allActions.map(\.title).contains("Larger Text"))
         XCTAssertTrue(allActions.map(\.title).contains("New Session"))
@@ -302,7 +297,6 @@ final class UMDBarUIKitTests: XCTestCase {
         let files = try XCTUnwrap(allActions.first { $0.title == "Files…" })
         XCTAssertTrue(files.attributes.contains(.disabled))
 
-        #if !os(visionOS)
         controller.applyObservedState(UMDBarObservedState(
             status: .connecting,
             contactLost: false,
@@ -334,7 +328,24 @@ final class UMDBarUIKitTests: XCTestCase {
                 .map(\.title)
                 .contains("Unlock Keyboard")
         )
-        #endif
+
+        // No keyboard attached (visionOS always reads so): the lock is on
+        // offer by name.
+        controller.applyObservedState(UMDBarObservedState(
+            status: .connecting,
+            contactLost: false,
+            needsYou: false,
+            keyboardLocked: false,
+            hardwareKeyboardConnected: false
+        ))
+        let offeringOverflow = try XCTUnwrap(
+            control("umd.overflow", in: controller.view) as? UIButton
+        )
+        XCTAssertTrue(
+            actions(in: try XCTUnwrap(offeringOverflow.menu))
+                .map(\.title)
+                .contains("Lock Keyboard Closed")
+        )
     }
 
     func testOverflowCarriesArrangeKeysThatReadsDoneWhileArranging() throws {
@@ -377,6 +388,65 @@ final class UMDBarUIKitTests: XCTestCase {
         XCTAssertEqual(try arrangeRow()?.title, "Done Arranging Keys")
         controller.perform(.toggleKeyBarArranging)
         XCTAssertFalse(terminal.keyBarArranging)
+    }
+
+    func testOverflowLeadsWithFullScreenOnEveryRowStyle() throws {
+        let state = UMDBarObservedState(
+            status: .live,
+            contactLost: false,
+            needsYou: false,
+            keyboardLocked: false,
+            hardwareKeyboardConnected: true
+        )
+        for (style, width) in [(UMDBarStyle.regular, nil), (.shell, 375), (.shell, 900)] {
+            var entered = 0
+            let controller = UMDBarViewController(configuration: configuration(
+                controller: terminalController(useMosh: false),
+                toggleFullScreen: { entered += 1 },
+                style: style,
+                availableWidth: width.map { CGFloat($0) }
+            ))
+            controller.loadViewIfNeeded()
+            controller.applyObservedState(state)
+            let overflow = try XCTUnwrap(
+                control("umd.overflow", in: controller.view) as? UIButton,
+                "\(style) at \(String(describing: width)) keeps ⋯ for the standing rows"
+            )
+            let row = try XCTUnwrap(actions(in: try XCTUnwrap(overflow.menu)).first)
+            XCTAssertEqual(row.identifier.rawValue, "umd.fullScreen")
+            XCTAssertEqual(row.title, "Full Screen")
+            controller.perform(.toggleFullScreen)
+            XCTAssertEqual(entered, 1)
+        }
+
+        // The Duo's outer display keeps its column in full screen; there the
+        // row is the way back.
+        let active = UMDBarViewController(configuration: configuration(
+            controller: terminalController(useMosh: false),
+            toggleFullScreen: {},
+            fullScreenActive: true,
+            style: .verticalColumn
+        ))
+        active.loadViewIfNeeded()
+        active.applyObservedState(state)
+        let column = try XCTUnwrap(control("umd.overflow", in: active.view) as? UIButton)
+        XCTAssertEqual(
+            actions(in: try XCTUnwrap(column.menu)).first?.title,
+            "Exit Full Screen"
+        )
+
+        // No route in (a missing host's tab), no row.
+        let none = UMDBarViewController(configuration: configuration(
+            controller: terminalController(useMosh: false),
+            style: .shell,
+            availableWidth: 375
+        ))
+        none.loadViewIfNeeded()
+        none.applyObservedState(state)
+        let overflow = try XCTUnwrap(control("umd.overflow", in: none.view) as? UIButton)
+        XCTAssertFalse(actions(in: try XCTUnwrap(overflow.menu)).contains {
+            $0.identifier.rawValue == "umd.fullScreen"
+        })
     }
 
     func testStatusClusterPreservesMoshConnectionAttentionAndKeychainSemantics() throws {
@@ -572,6 +642,8 @@ final class UMDBarUIKitTests: XCTestCase {
         closeSession: (() -> Void)? = nil,
         keychainTip: (() -> Void)? = nil,
         showConnectionStats: (() -> Void)? = nil,
+        toggleFullScreen: (() -> Void)? = nil,
+        fullScreenActive: Bool = false,
         extraNewTabTarget: TerminalRoute.NewTabTarget? = nil,
         shortcutBackend: Host.SessionBackend? = .tmux,
         style: UMDBarStyle = .regular,
@@ -595,6 +667,8 @@ final class UMDBarUIKitTests: XCTestCase {
             closeSession: closeSession,
             keychainTip: keychainTip,
             showConnectionStats: showConnectionStats,
+            toggleFullScreen: toggleFullScreen,
+            fullScreenActive: fullScreenActive,
             extraNewTabTarget: extraNewTabTarget,
             shortcutBackend: shortcutBackend,
             style: style,

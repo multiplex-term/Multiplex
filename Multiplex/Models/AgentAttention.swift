@@ -278,7 +278,9 @@ enum AgentAttention {
         else { return nil }
         let dialogRegion = tail.suffix(questionCaretWindow)
             .map { $0.trimmingCharacters(in: .whitespaces) }
-        guard dialogRegion.contains(where: isCaretOptionRow) else { return nil }
+        guard dialogRegion.contains(where: isCaretOptionRow)
+                || hasUnnumberedOptionBlock(in: Array(tail.suffix(questionCaretWindow)))
+        else { return nil }
         let isPermission = lines.contains { line in
             permissionMarks.contains { line.contains($0) }
         }
@@ -297,6 +299,38 @@ enum AgentAttention {
         let ordinal = rest.prefix(while: { $0.isASCII && $0.isNumber })
         guard (1...2).contains(ordinal.count) else { return false }
         return rest.dropFirst(ordinal.count).hasPrefix(".")
+    }
+
+    /// Claude Code also renders option lists without ordinals — the folder
+    /// trust dialog (live, v2.1.292: ` ❯ No, exit` / `   Yes, I trust this
+    /// folder`) and `defaultToNo` safety prompts. Without the ordinal, the
+    /// caret alone also matches the composer row and prompt echoes, so the
+    /// block's own geometry stands in: the caret row, ≥1 sibling indented
+    /// exactly past `❯ ` (deeper lines are wrapped labels/descriptions), and
+    /// the hint row directly beneath. The composer is followed by a `────`
+    /// rule and a prompt echo by `⏺`, never by the hint.
+    private static func hasUnnumberedOptionBlock(in region: [String]) -> Bool {
+        for (index, line) in region.enumerated() {
+            let indent = line.prefix { $0 == " " }.count
+            let body = line.dropFirst(indent)
+            guard body.hasPrefix("❯ "),
+                  body.dropFirst(2).first.map({ !$0.isWhitespace }) == true
+            else { continue }
+            let siblingIndent = String(repeating: " ", count: indent + 2)
+            var next = index + 1
+            var siblings = 0
+            while next < region.count, region[next].hasPrefix(siblingIndent),
+                  let lead = region[next].dropFirst(indent + 2).first {
+                if !lead.isWhitespace { siblings += 1 }
+                next += 1
+            }
+            guard siblings > 0, next < region.count else { continue }
+            let hint = region[next]
+            if hint.contains("Enter to confirm") || hint.contains("Esc to cancel") {
+                return true
+            }
+        }
+        return false
     }
 
     /// Human copy for a needs-input notification: what the dialog is

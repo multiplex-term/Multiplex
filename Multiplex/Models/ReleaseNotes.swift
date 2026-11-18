@@ -138,7 +138,7 @@ struct ReleaseNotesRelease: Equatable {
 enum ReleaseNotes {
     /// Newest first. The launch card speaks only for the first; the log
     /// carries them all.
-    static let releases: [ReleaseNotesRelease] = [v142, v141, v14, v131, v13]
+    static let releases: [ReleaseNotesRelease] = [v152, v151, v15, v142, v141, v14, v131, v13]
 
     /// The release the launch card announces.
     static var current: ReleaseNotesRelease { releases[0] }
@@ -176,6 +176,480 @@ enum ReleaseNotes {
     static func alsoLine(for platform: ReleaseNotePlatform) -> String? {
         current.alsoLine(for: platform)
     }
+
+    // MARK: - 1.5.2
+
+    private static let v152 = ReleaseNotesRelease(
+        version: "1.5.2",
+        promise: "Find text in the file viewer, lock the keyboard closed on "
+            + "Vision Pro, and give the iPhone Duo key row the full width.",
+        entries: [
+            ReleaseNoteEntry(
+                id: "viewerfind",
+                bank: .terminal,
+                title: "Find in the file viewer",
+                body: "Press FIND on the file viewer's bar, or Command-F with "
+                    + "a keyboard, and type: every match is marked, with a "
+                    + "count, and Return or the arrows step through them "
+                    + "(Command-G and Shift-Command-G from the keyboard). It "
+                    + "works on code, diffs and rendered markdown, and stays "
+                    + "open as you pick other files from the tree.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: nil
+            ),
+            ReleaseNoteEntry(
+                id: "visionkeylock",
+                bank: .terminal,
+                title: "Lock the keyboard closed",
+                body: "Hold the keyboard key under the window, or use "
+                    + "three-dot menu → Lock Keyboard Closed: the key turns "
+                    + "into a padlock and selecting the terminal no longer "
+                    + "brings up the keyboard. The other keys under the "
+                    + "window keep working.",
+                tag: "Vision Pro",
+                platforms: [.vision],
+                mention: "Lock Keyboard Closed"
+            ),
+            ReleaseNoteEntry(
+                id: "slashcommand",
+                bank: .terminal,
+                title: "Slash commands are not file paths",
+                body: "Tapping a slash command such as /compact in an agent's "
+                    + "input bar or command list no longer offers to open it "
+                    + "as a file. Real paths still open.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: "slash commands no longer taken for paths"
+            ),
+            ReleaseNoteEntry(
+                id: "duokeyrow",
+                bank: .terminal,
+                title: "The iPhone Duo key row takes the full width",
+                body: "On both displays the key row runs under the side "
+                    + "column, so the keys have more room, and the keys at "
+                    + "its ends stay clear of the rounded corners. The bottom "
+                    + "bar of a file viewer or web page tab clears the "
+                    + "corners too, and the closed display in landscape "
+                    + "loses its grey bands.",
+                tag: "iPhone Duo",
+                platforms: [.phone],
+                mention: "a full-width iPhone Duo key row"
+            ),
+            ReleaseNoteEntry(
+                id: "phonelockkeys",
+                bank: .terminal,
+                title: "A locked keyboard keeps the key row",
+                body: "Locking the keyboard no longer takes keys off a roomy "
+                    + "key row: in landscape, ~ and / stay, with RET added "
+                    + "alongside them.",
+                tag: "iPhone",
+                platforms: [.phone],
+                mention: "a key row that keeps its keys when locked"
+            ),
+            ReleaseNoteEntry(
+                id: "displayzoom",
+                bank: .terminal,
+                title: "The terminal fits under More Space",
+                body: "With Display Zoom set to More Space, the terminal no "
+                    + "longer draws magnified, cutting off its top row and "
+                    + "landing taps off the rows you see.",
+                tag: "iPad",
+                platforms: [.pad],
+                mention: "a terminal that fits under More Space"
+            ),
+        ],
+        highlights: [
+            ReleaseNoteHighlight(
+                id: "viewerfind",
+                covers: ["viewerfind"],
+                title: "Find in the file viewer",
+                body: "FIND or Command-F marks every match; Return steps "
+                    + "through them.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all
+            ),
+            ReleaseNoteHighlight(
+                id: "visionkeylock",
+                covers: ["visionkeylock"],
+                title: "Lock the keyboard closed",
+                body: "Hold the keyboard key under the window; the keys "
+                    + "beside it keep working.",
+                tag: nil,
+                platforms: [.vision]
+            ),
+            ReleaseNoteHighlight(
+                id: "duokeyrow",
+                covers: ["duokeyrow"],
+                title: "A full-width key row on iPhone Duo",
+                body: "It runs under the side column and clears the rounded "
+                    + "corners.",
+                tag: nil,
+                platforms: [.phone]
+            ),
+            ReleaseNoteHighlight(
+                id: "displayzoom",
+                covers: ["displayzoom"],
+                title: "The terminal fits under More Space",
+                body: "Display Zoom no longer magnifies the grid or throws "
+                    + "taps off.",
+                tag: nil,
+                platforms: [.pad]
+            ),
+            ReleaseNoteHighlight(
+                id: "slashcommand",
+                covers: ["slashcommand"],
+                title: "Slash commands stay commands",
+                body: "Tapping /compact no longer offers to open a file.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all
+            ),
+        ]
+    )
+
+    // MARK: - 1.5.1
+
+    private static let v151 = ReleaseNotesRelease(
+        version: "1.5.1",
+        promise: "Give the whole window to the terminal, and select text in "
+            + "herdr panes the way a mouse drag does on your desktop.",
+        entries: [
+            ReleaseNoteEntry(
+                id: "herdrselect",
+                bank: .backends,
+                title: "Select Text stays inside the herdr pane",
+                body: "On herdr 0.9 and later, a selection stays inside the "
+                    + "pane you pressed. A multi-line copy no longer picks up "
+                    + "the sidebar's border or drops the pane's right edge, "
+                    + "and a zoomed pane selects as the whole pane.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: nil
+            ),
+            ReleaseNoteEntry(
+                id: "herdrdrag",
+                bank: .backends,
+                title: "Long-press and drag to select in herdr",
+                body: "Long-press text in a herdr pane and keep going into a "
+                    + "drag: herdr selects inside the pane, as a mouse drag "
+                    + "does in iTerm or Ghostty, and puts the text on the "
+                    + "clipboard when you lift. A long press that doesn't "
+                    + "move still opens SELECT / SELECT ALL / PASTE.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: nil
+            ),
+            ReleaseNoteEntry(
+                id: "herdrsidebar",
+                bank: .backends,
+                title: "Show or hide herdr's sidebar",
+                body: "The HRDR panel's Workspaces group gains Toggle Sidebar.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: "Toggle Sidebar in the HRDR panel"
+            ),
+            ReleaseNoteEntry(
+                id: "fullscreen",
+                bank: .terminal,
+                title: "Full screen for the terminal",
+                body: "Three-dot menu → Full Screen hands the window to the "
+                    + "terminal: the rails, tabs and keys step aside, and the "
+                    + "agent bar folds to its dot. One button in the corner "
+                    + "brings them back, and a locked keyboard unlocks from "
+                    + "its KEYBOARD LOCKED tip.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: nil
+            ),
+            ReleaseNoteEntry(
+                id: "textsize",
+                bank: .terminal,
+                title: "Step the text size without reopening the menu",
+                body: "Smaller Text and Larger Text leave the three-dot menu "
+                    + "open, so you can keep tapping while you watch the "
+                    + "terminal resize.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: "text size steps that keep the menu open"
+            ),
+            ReleaseNoteEntry(
+                id: "keepscreen",
+                bank: .terminal,
+                title: "Keep the screen on",
+                body: "Settings → Screen → Keep screen on keeps the display "
+                    + "lit while a terminal or the file viewer is on screen, "
+                    + "instead of dimming on Auto-Lock. The deck alone still "
+                    + "sleeps as usual. Off by default.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.iOS,
+                mention: "Keep screen on"
+            ),
+            ReleaseNoteEntry(
+                id: "hiddendeck",
+                bank: .terminal,
+                title: "A hidden deck stays hidden",
+                body: "A deck you hid with HIDE stays hidden when you rotate "
+                    + "between landscape and portrait, or leave the app and "
+                    + "come back.",
+                tag: "iPhone",
+                platforms: [.phone],
+                mention: "a hidden deck that stays hidden"
+            ),
+            ReleaseNoteEntry(
+                id: "duofixes",
+                bank: .terminal,
+                title: "iPhone Duo fixes",
+                body: "On the open display, the file viewer's top bar clears "
+                    + "the clock, so CLOSE is no longer hidden. On the closed "
+                    + "display, the TMUX / HRDR panel opens beside the side "
+                    + "column and gets the full screen.",
+                tag: "iPhone Duo",
+                platforms: [.phone],
+                mention: "iPhone Duo fixes"
+            ),
+            ReleaseNoteEntry(
+                id: "newhost",
+                bank: .elsewhere,
+                title: "New hosts land at the top",
+                body: "A host you add, or bind with mpx, appears at the top "
+                    + "of the host list instead of the bottom.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: "new hosts at the top of the list"
+            ),
+            ReleaseNoteEntry(
+                id: "deckbuttons",
+                bank: .elsewhere,
+                title: "SHELL and the three-dot button answer every press",
+                body: "A host's SHELL and three-dot buttons on the deck "
+                    + "respond anywhere on them. A press near their top edge, "
+                    + "where Vision Pro often lands a pinch, used to do nothing.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: "deck buttons that answer every press"
+            ),
+        ],
+        highlights: [
+            ReleaseNoteHighlight(
+                id: "fullscreen",
+                covers: ["fullscreen"],
+                title: "Full screen for the terminal",
+                body: "Three-dot menu → Full Screen. One button in the corner "
+                    + "brings the chrome back.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all
+            ),
+            ReleaseNoteHighlight(
+                id: "herdrselect",
+                covers: ["herdrselect", "herdrdrag"],
+                title: "Select text in herdr panes",
+                body: "Selections stay inside the pane; long-press and drag "
+                    + "to let herdr select.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all
+            ),
+            ReleaseNoteHighlight(
+                id: "keepscreen",
+                covers: ["keepscreen"],
+                title: "Keep the screen on",
+                body: "Settings → Screen keeps a terminal lit past Auto-Lock.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.iOS
+            ),
+            ReleaseNoteHighlight(
+                id: "deckbuttons",
+                covers: ["deckbuttons"],
+                title: "Deck buttons answer every press",
+                body: "A pinch near the top of SHELL or the three-dot button "
+                    + "lands now.",
+                tag: nil,
+                platforms: [.vision]
+            ),
+            ReleaseNoteHighlight(
+                id: "textsize",
+                covers: ["textsize"],
+                title: "Step the text size in one go",
+                body: "Smaller / Larger Text keep the three-dot menu open.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all
+            ),
+        ]
+    )
+
+    // MARK: - 1.5
+
+    private static let v15 = ReleaseNotesRelease(
+        version: "1.5",
+        promise: "Talk to your agent through the message box, with background "
+            + "noise filtered out — and a layout that follows the device "
+            + "you hold.",
+        entries: [
+            ReleaseNoteEntry(
+                id: "duo",
+                bank: .terminal,
+                title: "The shell follows iPhone Duo",
+                body: "On the closed display the chips stack beside the clock, "
+                    + "on the camera's side in landscape. Folded as a book, the "
+                    + "deck takes the left page and the terminal the right; "
+                    + "folded as a laptop, the terminal sits above the fold and "
+                    + "the deck below. HIDE hands the whole display to the "
+                    + "terminal and stays hidden when you rotate. In Split View "
+                    + "a half behaves like an iPhone.",
+                tag: "iPhone Duo",
+                platforms: [.phone],
+                mention: nil
+            ),
+            ReleaseNoteEntry(
+                id: "landscape",
+                bank: .terminal,
+                title: "Small iPhones get the whole width in landscape",
+                body: "The deck rail steps aside whenever it would leave the "
+                    + "terminal too narrow, so SE-size phones get a full-width "
+                    + "terminal. Swipe from the edge to return to the deck.",
+                tag: "iPhone",
+                platforms: [.phone],
+                mention: "full-width landscape on small iPhones"
+            ),
+            ReleaseNoteEntry(
+                id: "singlewindow",
+                bank: .terminal,
+                title: "Single-window mode on iPad",
+                body: "Settings → Window mode → Single-window mode runs "
+                    + "Multiplex in one window, as on iPhone: the deck beside "
+                    + "the terminal, sessions as tabs. Off by default; it takes "
+                    + "effect the next time Multiplex launches.",
+                tag: "iPad",
+                platforms: [.pad],
+                mention: "single-window mode"
+            ),
+            ReleaseNoteEntry(
+                id: "composermic",
+                bank: .terminal,
+                title: "A mic in the message box",
+                body: "Tap the mic beside the send button and talk; words land "
+                    + "in the message as you speak. Sending mid-sentence waits "
+                    + "for the last words.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: "a mic in the message box"
+            ),
+            ReleaseNoteEntry(
+                id: "noisereduction",
+                bank: .terminal,
+                title: "Dictation filters out background noise",
+                body: "Settings → Voice input downloads a noise-reduction model "
+                    + "that cleans the microphone before dictation hears it. "
+                    + "Turn Noise reduction off there at any time.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: "noise reduction for dictation"
+            ),
+            ReleaseNoteEntry(
+                id: "airpods",
+                bank: .terminal,
+                title: "Dictation listens through AirPods",
+                body: "With AirPods or another Bluetooth headset connected, "
+                    + "its microphone does the listening instead of the "
+                    + "device's own.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: "AirPods dictation"
+            ),
+            ReleaseNoteEntry(
+                id: "hermes",
+                bank: .terminal,
+                title: "Hermes Agent is recognized again",
+                body: "Hosts with Hermes Agent's current installer get its "
+                    + "chips and deck label back.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: "Hermes Agent recognized again"
+            ),
+            ReleaseNoteEntry(
+                id: "claudetrust",
+                bank: .away,
+                title: "Claude Code's folder-trust question alerts you",
+                body: "Claude Code asking whether to trust a folder now raises "
+                    + "an agent alert, like its other prompts.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: "an alert for Claude Code's folder-trust question"
+            ),
+            ReleaseNoteEntry(
+                id: "notmux",
+                bank: .elsewhere,
+                title: "The NO TMUX hint reads across the tile",
+                body: "A NO TMUX or NO HERDR tile's hint wraps across the tile "
+                    + "instead of one character per line.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all,
+                mention: nil
+            ),
+        ],
+        highlights: [
+            ReleaseNoteHighlight(
+                id: "duo",
+                covers: ["duo"],
+                title: "The shell follows iPhone Duo",
+                body: "Closed, folded as a book or as a laptop — deck and "
+                    + "terminal take the layout the pose suggests.",
+                tag: "iPhone Duo",
+                platforms: [.phone]
+            ),
+            ReleaseNoteHighlight(
+                id: "singlewindow",
+                covers: ["singlewindow"],
+                title: "Single-window mode",
+                body: "Settings → Window mode puts the deck and your sessions "
+                    + "in one window, as on iPhone.",
+                tag: "iPad",
+                platforms: [.pad]
+            ),
+            ReleaseNoteHighlight(
+                id: "composermic",
+                covers: ["composermic"],
+                title: "A mic in the message box",
+                body: "Tap it and talk; words land as you speak, and send "
+                    + "waits for the last ones.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all
+            ),
+            ReleaseNoteHighlight(
+                id: "noisereduction",
+                covers: ["noisereduction"],
+                title: "Dictation filters out background noise",
+                body: "Download the model in Settings → Voice input.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all
+            ),
+            ReleaseNoteHighlight(
+                id: "landscape",
+                covers: ["landscape"],
+                title: "Full width in landscape",
+                body: "SE-size iPhones give the terminal the whole width; "
+                    + "swipe from the edge for the deck.",
+                tag: "iPhone",
+                platforms: [.phone]
+            ),
+            ReleaseNoteHighlight(
+                id: "airpods",
+                covers: ["airpods"],
+                title: "Dictation listens through AirPods",
+                body: "A connected Bluetooth headset's mic does the listening.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all
+            ),
+            ReleaseNoteHighlight(
+                id: "hermes",
+                covers: ["hermes"],
+                title: "Hermes Agent is recognized again",
+                body: "Its chips and deck label return on hosts with the "
+                    + "current installer.",
+                tag: nil,
+                platforms: ReleaseNotePlatform.all
+            ),
+        ]
+    )
 
     // MARK: - 1.4.2
 

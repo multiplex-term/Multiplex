@@ -221,6 +221,11 @@ final class TerminalSessionController {
     /// active-pane fallback.
     private(set) var pathPressScreenCell: (col: Int, row: Int)?
 
+    /// The grid this tab reports to the remote — the attached client's
+    /// screen as the backend lays it out, which herdr's content-relative
+    /// pane rects need to land on screen cells.
+    var screenSize: (cols: Int, rows: Int) { (cols: lastCols, rows: lastRows) }
+
     #if !os(visionOS)
     /// The terminal's app-owned dictation controls, from the pane's side:
     /// LISTENING while the microphone is open, or a short failure the user
@@ -281,9 +286,9 @@ final class TerminalSessionController {
             // screen coordinates, and a press up in scrollback names no
             // pane (the composite screen is the only pane-mapped surface).
             var cell: (col: Int, row: Int)?
-            if let terminal = view?.getTerminal() {
-                let screenRow = position.row - terminal.buffer.yDisp
-                if screenRow >= 0 && screenRow < terminal.rows {
+            if let state = view?.terminalStateSnapshot() {
+                let screenRow = position.row - state.viewportRow
+                if screenRow >= 0 && screenRow < state.dimensions.rows {
                     cell = (col: position.col, row: screenRow)
                 }
             }
@@ -298,6 +303,13 @@ final class TerminalSessionController {
             view.longPressMouseDragFilter = { _, content in
                 HerdrPaneBorder.isBorderCell(content)
             }
+            // herdr selects by mouse drag inside the pane and, for a client
+            // under SSH, copies over OSC 52 (`clipboardCopy`) — the selection
+            // iTerm and Ghostty users get. Local selection sees only the
+            // composited screen, so it sweeps whatever a TUI draws beside
+            // the text; a long press that raised the block and then travels
+            // hands the drag to herdr instead.
+            view.longPressDragSelectsRemotely = true
         }
         if !pendingOutput.isEmpty {
             view.feed(byteArray: pendingOutput[...])
@@ -357,13 +369,13 @@ final class TerminalSessionController {
         TerminalFocusArbiter.toggle(terminalView)
     }
 
-    #if !os(visionOS)
-    /// The keyboard lock as a named menu action. The rail key's hold gesture
-    /// stays the fast path, but nothing on screen announced it — a held key
-    /// is unfindable, so the same lock/unlock lives in the terminal's actions
-    /// menu. Lock hides while a hardware keyboard makes it redundant; an
-    /// already-held lock keeps Unlock available. Unlocking asks for the
-    /// keyboard back, exactly like the padlock's short press.
+    /// The keyboard lock as a named menu action. The rail / cluster key's
+    /// hold gesture stays the fast path, but nothing on screen announced it —
+    /// a held key is unfindable, so the same lock/unlock lives in the
+    /// terminal's actions menu. Lock hides while a hardware keyboard makes it
+    /// redundant (iPad/iPhone; visionOS has no monitor and always offers
+    /// it); an already-held lock keeps Unlock available. Unlocking asks for
+    /// the keyboard back, exactly like the padlock's short press.
     func toggleKeyboardLock() {
         guard let terminalView else { return }
         if KeyboardLock.shared.isLocked {
@@ -372,8 +384,6 @@ final class TerminalSessionController {
             TerminalFocusArbiter.lock(terminalView)
         }
     }
-
-    #endif
 
     /// Arrange Keys — the key rail's / cluster's reorder mode, per tab like
     /// the message box and never persisted (the ORDER is, in
@@ -644,7 +654,7 @@ final class TerminalSessionController {
         if let hint = AgentSignature.classifyTerminal(
             title: title,
             visibleLines: terminalScreenSnapshot().lines,
-            isAlternateScreen: terminalView?.getTerminal().isCurrentBufferAlternate ?? false,
+            isAlternateScreen: terminalView?.isAlternateBufferActive ?? false,
             previous: directShellAgent ?? terminalAgentHint
         ) {
             terminalAgentHint = hint
@@ -798,15 +808,11 @@ final class TerminalSessionController {
 
     private func terminalScreenSnapshot() -> (lines: [String], isAlternate: Bool) {
         guard let terminalView else { return ([], false) }
-        let terminal = terminalView.getTerminal()
-        let rows = max(0, terminal.getDims().rows)
-        let lines = (0..<rows).compactMap { row in
-            terminal.getLine(row: row)?.translateToString(
-                trimRight: true,
-                skipNullCellsFollowingWide: true
-            )
-        }
-        return (lines, terminal.isCurrentBufferAlternate)
+        // Copied reads: the terminal lives behind SwiftTerm's lock, and its
+        // parse runs on the feed thread.
+        let rows = max(0, terminalView.terminalDimensions.rows)
+        let lines = terminalView.visibleRowsText(0..<rows)
+        return (lines, terminalView.isAlternateBufferActive)
     }
 
     private func stopDirectShellMonitoring() {
@@ -1031,7 +1037,7 @@ final class TerminalSessionController {
                     else { return nil }
                     let round = switch backend {
                     case .tmux: TmuxProbe.parsePaneRects(output)
-                    case .herdr: HerdrProbe.parsePaneScreenRects(output)
+                    case .herdr: HerdrProbe.parsePaneScreenRects(output, screenSize: screenSize)
                     }
                     // No answer keeps the current no-clamp behavior;
                     // retrying could not distinguish a host without the
@@ -2027,7 +2033,7 @@ final class TerminalSessionController {
     @discardableResult
     func sendTalkback(submit: Bool) -> Bool {
         guard talkbackSendState == .ready else { return false }
-        let bracketed = terminalView?.getTerminal().bracketedPasteMode == true
+        let bracketed = terminalView?.terminalStateSnapshot().bracketedPasteMode == true
         let payload = TalkbackMessage.payload(
             body: talkback.text,
             paths: talkback.readyPaths,
@@ -2127,8 +2133,8 @@ final class TerminalSessionController {
     /// whether this pane claims the gesture. URLs confirm through the link
     /// sheet; path-shaped text (implicit detection matches those too) now
     /// confirms through the file-viewer sheet instead of falling to
-    /// selection; only what neither resolver accepts ($VAR/…, colon prose)
-    /// still declines into text selection.
+    /// selection; only what neither resolver accepts ($VAR/…, colon prose,
+    /// an agent's `/compact`) still declines into text selection.
     ///
     /// `rowFragments` is the match split at its hard-wrap seams (empty when
     /// it fit one row, or from callers without seam info — the debug hook,
@@ -2166,7 +2172,7 @@ final class TerminalSessionController {
             pendingActivation = .link(link)
             return true
         }
-        if let path = TerminalPathTarget.resolve(target) {
+        if let path = TerminalPathTarget.resolvePressed(target) {
             pendingActivation = .path(path)
             pathPressScreenCell = cell
             return true
@@ -2229,7 +2235,9 @@ final class TerminalSessionController {
             let output = (try? await connection.exec(
                 HerdrProbe.snapshotCommand(sessionName: sessionName)
             )) ?? ""
-            return HerdrProbe.parsePaneWorkingDirectory(output, atScreenCell: cell)
+            return HerdrProbe.parsePaneWorkingDirectory(
+                output, atScreenCell: cell, screenSize: screenSize
+            )
         case nil:
             return nil
         }
@@ -2270,6 +2278,21 @@ final class TerminalSessionController {
         self.connection = nil
         self.moshSession = nil
         Task { await transport?.close() }
+        // Closing is final — this path never runs on a tab move — so release
+        // the view's frame driver and renderer: SwiftTerm 2 leaves both to
+        // an explicit owner call.
+        if let terminalView {
+            Self.closeTerminalUI(terminalView)
+        }
+    }
+
+    /// `updateUiClosed()` answers false while a Metal surface still has GPU
+    /// work in flight; it must be retried until the renderer lets go.
+    private static func closeTerminalUI(_ view: TerminalView, attempt: Int = 0) {
+        guard !view.updateUiClosed(), attempt < 20 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(50)) {
+            closeTerminalUI(view, attempt: attempt + 1)
+        }
     }
 
     /// The RECONNECT chip. The user is driving now, so their attempt also

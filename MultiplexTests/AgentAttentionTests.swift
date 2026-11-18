@@ -338,6 +338,49 @@ final class AgentAttentionTests: XCTestCase {
             .needsYou(.permission))
     }
 
+    func testUnnumberedTrustPromptDetected() {
+        // v2.1.292 dropped the ordinals and focuses "No" first (live capture).
+        let trust = [
+            " Accessing workspace:",
+            " Claude Code'll be able to read, edit, and execute files here.",
+            " Security guide",
+            " ❯ No, exit",
+            "   Yes, I trust this folder",
+            " Enter to confirm · Esc to cancel",
+        ]
+        XCTAssertEqual(AgentAttention.classify(title: "claude", tail: trust), .needsYou(.permission))
+        // A `defaultToNo` permission prompt: same list, Q9's hint row.
+        let safety = [
+            " Do you want to proceed?",
+            " ❯ No",
+            "   Yes",
+            "     allow this once",
+            " Esc to cancel · Tab to amend",
+        ]
+        XCTAssertEqual(AgentAttention.classify(title: "✳ Share", tail: safety), .needsYou(.permission))
+    }
+
+    func testUnnumberedLookalikesStayIdle() {
+        // Live capture (v2.1.292): the dialog strings quoted in a prompt echo,
+        // the reply, and typed into the composer — each `❯` row is followed
+        // by `⏺` or the composer rule, never by the hint row.
+        let screen = [
+            #"❯ Reply with exactly these four lines and nothing else: "Do you want to proceed?" then "Yes, I"#,
+            #"  trust this folder" then "No, exit" then "Enter to confirm · Esc to cancel""#,
+            "⏺ Do you want to proceed?",
+            "  Yes, I trust this folder",
+            "  No, exit",
+            "  Enter to confirm · Esc to cancel",
+            "✻ Churned for 2s · done 2:41 PM",
+            "──────────────────────────────────────────",
+            "❯ Do you want to proceed? Enter to confirm",
+            "  Esc to cancel",
+            "──────────────────────────────────────────",
+            "  ⏸ manual mode on",
+        ]
+        XCTAssertEqual(AgentAttention.classify(title: "✳ Create probe2.txt", tail: screen), .idle)
+    }
+
     func testComposerAndTranscriptDoNotFalsePositive() {
         // Idle composer + status rail: `❯` alone and prompt echoes must not
         // read as an option list; "auto-allows" prose in the What's-new

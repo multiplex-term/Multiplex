@@ -70,6 +70,17 @@ routing, tab moves, keyboard avoidance, or secret fields.
   is connected (an already-held lock keeps UNLOCK reachable). State is
   app-wide (`KeyboardLock.shared`, arbiter-written, never persisted); `claim`
   re-applies it to whichever terminal takes focus.
+  **visionOS carries the same lock** (2026-11-14): the ornament cluster's
+  keyboard key holds into it and wears the latched padlock (a different
+  face, so the slab rebuilds — `TerminalKeyClusterContext` observes
+  `KeyboardLock`), `⋯` always offers it (no `HardwareKeyboardMonitor`
+  there), and the tip has no mic (no app-owned dictation) but ALWAYS
+  carries the unlock — the padlock key sits in an ornament below the
+  window. The Talkback rules are shared: locking closes the box, opening
+  one releases the lock. ⚠ Proven headlessly only as state and chrome
+  (`debug.kbdlock`, screenshot): the simulator bridges the Mac keyboard as
+  hardware and cannot hold a key, so whether the zero-size `inputView`
+  keeps the spatial keyboard down is device-verified only.
   Narrow tiers drop page keys, then symbols; `SingleWindowShellLayout`'s
   390/420 pt cutoffs must stay in lockstep with the measured `KeyBarRow`
   tiers (375 pt locked floor keeps RET; narrow locked phones move TMUX to
@@ -183,6 +194,36 @@ routing, tab moves, keyboard avoidance, or secret fields.
   rides the `⋯` (`guideIsDirectChip`). Proofs: `debug.arrangekeys`,
   `debug.arrangekeysmove`, `build.sh uitest ipad` (the visionOS sim lifts
   nothing; fake `UIDropSession` tests cover the coordinator).
+- **Full screen (`⋯` → Full Screen) is per-window state on
+  `TerminalWindowViewController`** (`isFullScreen`, never persisted).
+  - Chrome steps aside: rail, tab row, the Talkback card (the box stays
+    open), the side panel (a new summon or any ▤/⌗ tab ends the mode), the
+    key rail (`keyRailHidden`: zero height, CTRL latch dropped), and every
+    visionOS ornament but the agent strip.
+  - The agent strip stays, folded to its dot on entry; exit unfolds it only
+    if full screen folded it (a Talkback fold changes hands, never fights).
+  - One EXIT chip: iPad/iPhone a dimming ⤡ at the pane's top-trailing
+    corner; visionOS `⤡ EXIT` at the bottom-trailing corner on the opaque
+    floating-chrome ground, never dimmed (gaze cannot wake it).
+  - The pane fills the window inside its safe area
+    (`TerminalFullScreenInsets`: a phone's safe area, iPad through the
+    rail's top-strip and pill rules) and spends the home strip wherever the
+    windowed key rail does, keeping the rail's daylight. iOS hides the
+    status bar and home indicator (scene root → content → the shell's
+    terminal).
+  - iPhone Duo inner display: zero insets beside its 55 pt corners once the
+    bar hides, so the pane clears them with a band at top and bottom
+    (`bareCornerClearance`); side insets are rejected (24 pt a side costs
+    ~6 columns).
+  - iPhone Duo outer display keeps its side column (`keepsSideColumn`:
+    compact width + a `verticalBarEdge` side; a launch into closed landscape
+    never sees a hinge): status glyphs, the UMD column owning TMUX/HRDR, ⋯
+    reading Exit Full Screen. No cell sits beside the camera.
+  - The shell only lends frames (`resolve(terminalFullScreen:)`), so neither
+    side re-renders; the back swipe is off, going to the deck ends the mode,
+    and on the Duo the pane spans the fold like ◧ HIDE.
+  - The `⋯` row acts a turn later so the menu dismisses before its ornament
+    goes. ⚠ iPhone has no keyboard-dismiss key while the rail is away.
 - **Auxiliary tabs wear their whole bottom chrome in the ornament
   (2026-08-10)** — on classic visionOS windows the in-window ▤/⌗ rails are
   not mounted (`showsInWindowRail: false`); their end chips collided with
@@ -428,7 +469,16 @@ routing, tab moves, keyboard avoidance, or secret fields.
   in the fork): entry and every resize run one read-only control exec
   listing EVERY visible pane — tmux `list-panes -F` geometry (content
   cells, no inset), herdr the snapshot's layout rects border-inset by
-  the `viewport_rows` oracle — and the target is the pane under the gesture
+  the `viewport_rows` oracle and placed on screen against the tab's grid
+  (`layoutScreenOrigin`). ⚠ herdr 0.9 reports those rects relative to the
+  pane area, whose origin is (0, 0); the sidebar/rail and tab bar exist
+  only as the gap between `area` and the client grid. 0.7.5 reported screen
+  cells. Read as screen cells, 0.9's rects swept the collapsed rail's `│`
+  into an iPhone tester's copies and cut the pane's right edge (TestFlight,
+  2026-10-12). A `tab_bar_position = "bottom"` config is indistinguishable
+  from the snapshot and clamps one row low; an area overflowing the grid
+  (another client's viewport) clamps nothing; a zoomed layout clamps to the
+  focused pane across the area — and the target is the pane under the gesture
   that raised the block (the focused pane when no position rides along), so
   drags can't bleed across a split, Select All means the pane
   (not herdr's sidebar/tab bar), and extraction joins per-pane-row
@@ -477,11 +527,35 @@ routing, tab moves, keyboard avoidance, or secret fields.
   clicks exercise the UIKit road; no headless route can drive the GCMouse
   hardware callback or an iPad pointer. On herdr tabs the block adds
   MENU — one right-button press+release reported at the pressed cell
-  (`sendRemoteRightClick`; `Terminal.sendButtonReleaseEvent` names the
-  true button in SGR release, which the stock path masks to a *left* up)
+  (`sendRemoteRightClick`; the SGR release must name the true button —
+  a *left* up would dismiss the menu — which upstream's release encoding
+  does since SwiftTerm 1.99; pinned by `TerminalRemoteMouseTests`)
   so herdr's own pane menu, unreachable by touch, opens where the finger
   was. herdr-only on purpose: tmux's right-click menu would fight the
-  shortcut panel and the block itself. Selection covers the
+  shortcut panel and the block itself. **On herdr tabs a long press that
+  raised the block and then travels hands the drag to herdr**
+  (`longPressDragSelectsRemotely`, a fork patch; the press's phases are
+  public `longPressBegan/Moved/Ended` so the DEBUG hook drives the real
+  path): past a 10 pt slop — the long press recognizer's own movement
+  allowance; a ~6 pt iPhone cell would let a lift's wobble take the block —
+  the block gives way and one left-button press is reported at the cell the
+  finger went down on, then cell-quantized motion and a release on lift.
+  herdr selects inside the pane (its own sidebar never joins; its
+  scrollback can) and on release copies over OSC 52 into the device
+  pasteboard (`clipboardCopy`) — herdr's defaults `mouse_capture` +
+  `copy_on_select`, and its client writes OSC 52 only when it sees
+  `SSH_CONNECTION` or `SSH_TTY` (else it copies to the HOST's clipboard;
+  verified 0.9.3 and 0.9.5, sshd sets both). A pane app that tracks the
+  mouse itself owns the drag instead, and herdr forwards its OSC 52. This is
+  the selection iTerm/Ghostty users get: local selection sees only the
+  composited screen, so it sweeps whatever a TUI draws beside its text
+  (reported 2026-10-12 against Hermes's side panel). A press that lifts in
+  place keeps the block; select-text mode and tmux tabs are untouched (tmux
+  `mouse on` would start copy mode). mosh tabs work too (verified
+  2026-10-17, mosh 1.4.0): the herdr client under mosh-server inherits
+  `SSH_CONNECTION` from the SSH exec that launched it (no `SSH_TTY`; one
+  suffices), and the OSC 52 rides mosh's state sync into the clean-room
+  client. Local selection covers the
   visible screen only (herdr's scrollback lives host-side) and nothing
   freezes — a busy pane keeps drawing under the selection.
 - **"Back to deck" reuses the one deck scene**: `UIKitSceneRouting`
@@ -505,7 +579,9 @@ routing, tab moves, keyboard avoidance, or secret fields.
   survive). An emptied window dismisses via plain `dismiss()` — not
   `dismissWindow(id:value:)`, whose lagging committed-value matching
   leaves ghost windows. `onDisappear` closes remaining tabs, so a merge
-  empties the source first and never detaches moved tabs.
+  empties the source first and never detaches moved tabs. Closing (and
+  only closing) also releases the view's SwiftTerm frame driver
+  (`updateUiClosed()` in `detach()`) — a moved view keeps its own.
 - **Input is one ordered AsyncStream pump per shell**, not a Task per
   keystroke (which could reorder bytes). Citadel already sets
   `TCP_NODELAY`.
@@ -632,3 +708,11 @@ routing, tab moves, keyboard avoidance, or secret fields.
   device testing alone; if IME regresses, suspect a mutation path that
   reads the buffer without clearing filler first. Both constants are
   tuning knobs.
+
+## Key rail and the keyboard lock
+
+On a phone RET exists only while the keyboard is locked. A row on the regular
+faces keeps its unlocked tier when locked and narrows the faces 2 to 4 pt for
+the extra key (`returnOnlyWhileLocked`), so locking never drops `~`, `/`, or the
+page keys. The tight and floor tiers stay on the RET ladder, which
+`SingleWindowShellLayout`'s 390 / 420 cutoffs read.

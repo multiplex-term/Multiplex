@@ -167,7 +167,7 @@ enum TerminalGuide {
             figure: 8,
             bank: .keyboard,
             title: String(localized: "LOCK THE KEYBOARD"),
-            tag: "iPhone · iPad",
+            tag: nil,
             body: [
                 .text(String(localized: "Hold the ")),
                 .key("⌨"),
@@ -304,7 +304,7 @@ enum TerminalGuide {
             switch entry.id {
             case "edgeswipe":
                 context.platform == .phone
-            case "kbdlock", "dictate", "paste":
+            case "dictate", "paste":
                 context.platform != .vision
             case "resize", "panemenu":
                 context.backendIsHerdr

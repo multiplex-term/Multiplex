@@ -214,15 +214,18 @@ enum TmuxProbe {
     /// PID, so a queue walk over one ps snapshot avoids both another tmux
     /// process and awk's repeated whole-table closure. Do not add ps's `tty`
     /// column here: collecting it costs ~70-110 ms on macOS even though the
-    /// roots already give us stricter scope. Arguments are clipped to
-    /// argv[0]/argv[1] territory. POSIX ps/awk only; failure loses the
+    /// roots already give us stricter scope. argv[0] keeps only its
+    /// basename (all `AgentSignature.match` reads of it) before arguments
+    /// are clipped, so a deep interpreter path cannot push the argv[1]
+    /// territory past the clip. POSIX ps/awk only; failure loses the
     /// fallback signal, never direct comm/title detection.
     private static let psPaneSubtreeCommand =
         #"roots=$(printf '%s\n' "$panes" | awk '$1=="P"{printf "%s ",$7}'); "#
         + #"ps -eo pid=,ppid=,args= 2>/dev/null | awk -v roots="$roots" '"#
         + "BEGIN{n=split(roots,r,\" \");for(i=1;i<=n;i++)"
         + "if(r[i]!=\"\")q[++tail]=r[i]} "
-        + "NF>=3{pid=$1;parent=$2;a=$3;for(i=4;i<=NF;i++)a=a\" \"$i;"
+        + "NF>=3{pid=$1;parent=$2;a=$3;sub(/.*\\//,\"\",a);"
+        + "for(i=4;i<=NF;i++)a=a\" \"$i;"
         + "line[pid]=pid\" \"parent\" \"substr(a,1,120);"
         + "children[parent]=children[parent]\" \"pid} "
         + "END{while(head<tail){pid=q[++head];if(seen[pid]++)continue;"
@@ -478,13 +481,15 @@ enum TmuxProbe {
 
     /// Process rows for one pane TTY. This is separate from the one-second
     /// pane query and runs only on a pane/foreground-command change or short
-    /// cache expiry, not every tick.
+    /// cache expiry, not every tick. Rows get the subtree stage's argv[0]
+    /// basename + clip.
     static func paneProcessCommand(tty: String) -> String? {
         let terminal = tty.hasPrefix("/dev/") ? String(tty.dropFirst(5)) : tty
         guard !terminal.isEmpty else { return nil }
         return pathPrefix
             + "ps -t \(terminal.shellQuoted) -o pid=,ppid=,args= 2>/dev/null "
-            + "| cut -c1-120"
+            + "| awk 'NF>=3{a=$3;sub(/.*\\//,\"\",a);for(i=4;i<=NF;i++)a=a\" \"$i;"
+            + "print $1\" \"$2\" \"substr(a,1,120)}'"
     }
 
     static func parsePSRows(_ output: String) -> [PSRow] {

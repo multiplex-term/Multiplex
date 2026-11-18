@@ -68,7 +68,7 @@ final class HostStore {
     func add(_ host: Host) {
         var host = host
         host.updatedAt = .now
-        hosts.append(host)
+        hosts.insert(host, at: 0)
         save()
         mirror(host)
     }

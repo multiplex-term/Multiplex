@@ -13,9 +13,14 @@ final class TerminalSurfaceView: UIView {
         var theme: TerminalTheme
         var bottomChromeHeight: CGFloat = 0
         var contentSafeArea: UIEdgeInsets = .zero
+        /// `contentSafeArea` as the key rail reads it (iPhone Duo's closed
+        /// display: the rail runs through the side strip).
+        var keyRailSafeArea: UIEdgeInsets = .zero
         var railOwnsBottomSafeArea = false
         /// The key rail drops its bezel slab and top rule.
         var bareChrome = false
+        /// Full screen: the key rail steps aside and the grid takes its rows.
+        var keyRailHidden = false
         var isActive = true
         /// Which multiplexer owns the rail's shortcut key (TMUX/HRDR); nil
         /// drops the key — plain shells and auxiliary panes have no panel.
@@ -203,7 +208,7 @@ final class TerminalSurfaceView: UIView {
             },
             shortcutBackend: configuration.shortcutBackend
         )
-        keyBar.contentSafeArea = configuration.contentSafeArea
+        keyBar.contentSafeArea = configuration.keyRailSafeArea
         keyBar.spendsBottomStrip = configuration.railOwnsBottomSafeArea
         keyBar.bareChrome = configuration.bareChrome
         keyBar.keyCommandPlan = configuration.keyCommandPlan
@@ -276,6 +281,7 @@ final class TerminalSurfaceView: UIView {
         )
         coordinator.keyBarHeightConstraint = keyBarHeight
         coordinator.setRailOwnsBottomSafeArea(configuration.railOwnsBottomSafeArea)
+        coordinator.setKeyRailHidden(configuration.keyRailHidden)
         #endif
 
         // Experimental Metal renderer (visionOS scale + glass fixes live in
@@ -349,7 +355,9 @@ final class TerminalSurfaceView: UIView {
             Self.terminalInsets.bottom + configuration.bottomChromeHeight
         )
         coordinator.updateContentSafeArea(configuration.contentSafeArea)
+        coordinator.keyBar?.contentSafeArea = configuration.keyRailSafeArea
         coordinator.setRailOwnsBottomSafeArea(configuration.railOwnsBottomSafeArea)
+        coordinator.setKeyRailHidden(configuration.keyRailHidden)
         coordinator.keyBar?.bareChrome = configuration.bareChrome
         coordinator.keyBar?.keyCommandPlan = configuration.keyCommandPlan
         if fontChanged {
@@ -438,6 +446,7 @@ final class TerminalSurfaceView: UIView {
         #if !os(visionOS)
         weak var keyBar: TerminalKeyBar?
         private(set) var railOwnsBottomSafeArea = false
+        private(set) var keyRailHidden = false
         var keyBarHeightConstraint: NSLayoutConstraint?
         private weak var avoidingContainer: UIView?
         private var bottomConstraint: NSLayoutConstraint?
@@ -460,7 +469,11 @@ final class TerminalSurfaceView: UIView {
             for observer in keyboardObservers {
                 NotificationCenter.default.removeObserver(observer)
             }
-            cancelKeyboardSettleRemeasures()
+            // Inlined `cancelKeyboardSettleRemeasures()`: SwiftTerm 2's
+            // delegate protocol is @MainActor, so this coordinator is too,
+            // and its nonisolated deinit may read storage but not call
+            // isolated methods.
+            for item in keyboardSettleWorkItems { item.cancel() }
             #if DEBUG
             keyboardLogSettleWorkItem?.cancel()
             #endif
@@ -514,7 +527,24 @@ final class TerminalSurfaceView: UIView {
             else { return }
             railOwnsBottomSafeArea = owns
             keyBar?.spendsBottomStrip = owns
-            let height = TerminalKeyBar.barHeight(spendsBottomStrip: owns)
+            applyKeyBarHeight()
+        }
+
+        /// Full screen folds the rail to nothing; the grid's bottom rides the
+        /// rail's top, so it takes the rows in the same pass.
+        func setKeyRailHidden(_ hidden: Bool) {
+            guard hidden != keyRailHidden else { return }
+            keyRailHidden = hidden
+            if hidden { keyBar?.stepAside() }
+            keyBar?.isHidden = hidden
+            applyKeyBarHeight()
+        }
+
+        private func applyKeyBarHeight() {
+            let height = TerminalKeyBar.barHeight(
+                spendsBottomStrip: railOwnsBottomSafeArea,
+                hidden: keyRailHidden
+            )
             guard let constraint = keyBarHeightConstraint,
                   constraint.constant != height
             else { return }
@@ -534,7 +564,6 @@ final class TerminalSurfaceView: UIView {
         /// other, and hiding the deck rail hands the leading band to this
         /// pane. Both change the grid's clearance without rebuilding it.
         func updateContentSafeArea(_ safeArea: UIEdgeInsets) {
-            keyBar?.contentSafeArea = safeArea
             guard let leadingConstraint = terminalLeadingConstraint,
                   let trailingConstraint = terminalTrailingConstraint
             else { return }
@@ -569,7 +598,7 @@ final class TerminalSurfaceView: UIView {
             let baseTop = TerminalSurfaceView.terminalInsets.top
             let appliedNudge = max(0, topConstraint.constant - baseTop)
             let rawHeight = view.bounds.height + appliedNudge
-            let rows = view.getTerminal().rows
+            let rows = view.terminalDimensions.rows
             guard rows > 0 else { return }
             let cellHeight = view.getOptimalFrameSize().height / CGFloat(rows)
             guard cellHeight > 0 else { return }
@@ -833,8 +862,7 @@ final class TerminalSurfaceView: UIView {
 
 extension TerminalView {
     /// True while the user is actively typing into this terminal — read from
-    /// the same send-path stamp the fork's immediate-display window uses, so
-    /// every input road (IME commits, the key rail, kitty-encoded hardware
+    /// the fork's send-path input stamp, so every input road (IME commits, the key rail, kitty-encoded hardware
     /// keys, dictation chunks) counts, and none has to report separately.
     /// Chrome uses it to defer work that has no business running between
     /// keystrokes: the focused-pane agent probe and the gaze hover-region

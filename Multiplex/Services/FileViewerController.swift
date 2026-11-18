@@ -85,6 +85,9 @@ final class FileViewerController: AuxiliaryPaneController {
     /// did — the mosh re-ask (`anchorPaneDirectory`) aims at the pane under
     /// the finger with it; nil keeps the active/focused-pane answer.
     let anchorCell: (col: Int, row: Int)?
+    /// The anchor terminal's grid when `anchorCell` was taken — herdr's
+    /// pane rects only land on screen cells against the client's size.
+    let anchorScreenSize: (cols: Int, rows: Int)?
     /// The pressed path this tab was summoned to show, when it was.
     private let target: TerminalPathTarget?
     /// A file viewer keeps SOURCE | DIFF as a browsing mode: once DIFF is
@@ -109,6 +112,7 @@ final class FileViewerController: AuxiliaryPaneController {
         startDirectory: String?,
         anchorSession: SessionKey? = nil,
         anchorCell: (col: Int, row: Int)? = nil,
+        anchorScreenSize: (cols: Int, rows: Int)? = nil,
         target: TerminalPathTarget?,
         targetPresentation: FilePresentation = .source
     ) {
@@ -117,6 +121,7 @@ final class FileViewerController: AuxiliaryPaneController {
         self.startDirectory = startDirectory
         self.anchorSession = anchorSession
         self.anchorCell = anchorCell
+        self.anchorScreenSize = anchorScreenSize
         self.target = target
         self.targetPresentation = targetPresentation
         self.filePresentation = targetPresentation
@@ -500,7 +505,8 @@ final class FileViewerController: AuxiliaryPaneController {
               })
         else { return nil }
         return Self.parseAnchorDirectory(
-            output, backend: anchorSession.backend, atScreenCell: anchorCell
+            output, backend: anchorSession.backend,
+            atScreenCell: anchorCell, screenSize: anchorScreenSize
         )
     }
 
@@ -516,13 +522,16 @@ final class FileViewerController: AuxiliaryPaneController {
     static func parseAnchorDirectory(
         _ output: String,
         backend: Host.SessionBackend,
-        atScreenCell cell: (col: Int, row: Int)? = nil
+        atScreenCell cell: (col: Int, row: Int)? = nil,
+        screenSize: (cols: Int, rows: Int)? = nil
     ) -> String? {
         switch backend {
         case .tmux:
             TmuxProbe.parsePathAnchorDirectory(output, atScreenCell: cell)
         case .herdr:
-            HerdrProbe.parsePaneWorkingDirectory(output, atScreenCell: cell)
+            HerdrProbe.parsePaneWorkingDirectory(
+                output, atScreenCell: cell, screenSize: screenSize
+            )
         }
     }
 

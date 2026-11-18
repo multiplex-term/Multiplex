@@ -82,7 +82,7 @@ final class KeyChordEncodingTests: XCTestCase {
     func testKittyFlagsSwitchToCSIUEncodings() {
         let (terminal, _) = CapturingTerminalDelegate.makeTerminal()
         terminal.feed(byteArray: [0x1B, 0x5B, 0x3E, 0x31, 0x75][...]) // CSI > 1 u: disambiguate
-        XCTAssertFalse(terminal.getTerminal().keyboardEnhancementFlags.isEmpty)
+        XCTAssertFalse(terminal.keyboardEnhancementFlags.isEmpty)
         XCTAssertEqual(
             bytes(.enter, [.shift], on: terminal),
             Array("\u{1B}[13;2u".utf8),
