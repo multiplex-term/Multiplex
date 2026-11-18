@@ -50,7 +50,7 @@ actor TailscaleTunnel {
     /// Blocking FFI calls run here — the ts_ffi runtime serializes
     /// internally, so this is a concurrent queue used only to keep the
     /// blocking `block_on` off the Swift cooperative pool. A rejected-key
-    /// `ts_init` can occupy one of its threads indefinitely without wedging
+    /// startup can occupy one of its threads indefinitely without wedging
     /// unrelated calls.
     private let ffiQueue = DispatchQueue(
         label: "app.multiplexterm.multiplex.tailscale",
@@ -277,23 +277,19 @@ actor TailscaleTunnel {
         let hostname = TailscaleNodeHostname.format(deviceName: deviceName)
         let controlURL = configuration.controlURL.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        let device = try await withDeadline(on: deadlineQueue) {
+        return try await withDeadline(on: deadlineQueue) {
             try await performBlocking(on: ffiQueue) {
-                try initDevice(
+                let device = try initDevice(
                     authKey: configuration.authKey,
                     hostname: hostname,
                     controlURL: controlURL.isEmpty ? nil : controlURL,
                     keyState: keyState
                 )
+                // The address read belongs inside the deadline with ts_init:
+                // it blocks until the netmap arrives, and a rejected auth
+                // key never produces one.
+                return StartedNode(device: device, ips: readIPs(device: device))
             }
-        }
-
-        do {
-            let ips = try await performBlocking(on: ffiQueue) { readIPs(device: device) }
-            return StartedNode(device: device, ips: ips)
-        } catch {
-            await performBlockingIgnoringError(on: ffiQueue) { ts_deinit(device) }
-            throw error
         }
     }
 
@@ -434,33 +430,25 @@ actor TailscaleTunnel {
         }
     }
 
-    private static func performBlockingIgnoringError(
-        on queue: DispatchQueue,
-        _ operation: @escaping @Sendable () -> Void
-    ) async {
-        await withCheckedContinuation { continuation in
-            queue.async {
-                operation()
-                continuation.resume()
-            }
-        }
-    }
-
-    /// Races a startup that can hang on a rejected auth key (measured >60 s
-    /// in a supervision retry loop) against a deadline. On timeout the caller
-    /// is freed with an error; a late success is cleaned up with `ts_deinit`.
-    /// The underlying blocking thread may stay parked until the process ends
-    /// — one leaked concurrent-queue thread, never the whole tunnel.
+    /// Races a startup that hangs on a rejected auth key against a deadline.
+    /// The C ABI reports no auth verdict: as of v0.7.1 `ts_init` returns a
+    /// device in about 2 s either way, and `ts_ipv4_addr` then waits for a
+    /// netmap that a rejected key never gets (measured with an invalid key;
+    /// before v0.7.0 it was `ts_init` that hung). On timeout the caller is
+    /// freed with an error; a late success is cleaned up with `ts_deinit`.
+    /// The underlying blocking thread, and the idle device it borrows, may
+    /// stay parked until the process ends — one leaked concurrent-queue
+    /// thread, never the whole tunnel.
     private static func withDeadline(
         on deadlineQueue: DispatchQueue,
-        _ operation: @escaping @Sendable () async throws -> OpaquePointer
-    ) async throws -> OpaquePointer {
-        let gate = TailscaleStartupGate()
+        _ operation: @escaping @Sendable () async throws -> StartedNode
+    ) async throws -> StartedNode {
+        let gate = TailscaleStartupGate<StartedNode>()
         Task {
             do {
-                let device = try await operation()
-                if !gate.resolveSuccess(device) {
-                    ts_deinit(device)
+                let started = try await operation()
+                if !gate.resolveSuccess(started) {
+                    ts_deinit(started.device)
                 }
             } catch {
                 gate.resolveFailure(error)
@@ -534,15 +522,15 @@ struct TailscaleHandleRemote: TailscaleRelayRemote, @unchecked Sendable {
 /// failure, and deadline racers. Buffers a result that arrives before the
 /// awaiter has registered its continuation (the racing Task can win before
 /// `value()` runs).
-private final class TailscaleStartupGate: @unchecked Sendable {
+private final class TailscaleStartupGate<Value: Sendable>: @unchecked Sendable {
     private let lock = NSLock()
     private var finished = false
-    private var pending: Result<OpaquePointer, Error>?
-    private var continuation: CheckedContinuation<OpaquePointer, Error>?
+    private var pending: Result<Value, Error>?
+    private var continuation: CheckedContinuation<Value, Error>?
 
-    func value() async throws -> OpaquePointer {
+    func value() async throws -> Value {
         try await withCheckedThrowingContinuation { continuation in
-            let ready: Result<OpaquePointer, Error>? = lock.withLock {
+            let ready: Result<Value, Error>? = lock.withLock {
                 if let pending {
                     return pending
                 }
@@ -557,8 +545,8 @@ private final class TailscaleStartupGate: @unchecked Sendable {
 
     /// Returns false if the race was already decided (caller must deinit a
     /// late device).
-    func resolveSuccess(_ device: OpaquePointer) -> Bool {
-        resolve(.success(device))
+    func resolveSuccess(_ value: Value) -> Bool {
+        resolve(.success(value))
     }
 
     func resolveFailure(_ error: Error) {
@@ -569,8 +557,13 @@ private final class TailscaleStartupGate: @unchecked Sendable {
         _ = resolve(.failure(error))
     }
 
-    private func resolve(_ result: Result<OpaquePointer, Error>) -> Bool {
-        enum Outcome { case lost, buffered, resume(CheckedContinuation<OpaquePointer, Error>) }
+    private enum Outcome {
+        case lost
+        case buffered
+        case resume(CheckedContinuation<Value, Error>)
+    }
+
+    private func resolve(_ result: Result<Value, Error>) -> Bool {
         let outcome: Outcome = lock.withLock {
             guard !finished else { return .lost }
             finished = true

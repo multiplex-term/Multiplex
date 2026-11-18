@@ -9,8 +9,8 @@
 # -Zbuild-std while aarch64-apple-visionos remains tier 3.
 set -eu
 
-# v0.6.1
-PINNED_COMMIT=d34658bbb2eb4593ae6df959aa93e9ee1e0457c6
+# v0.7.1
+PINNED_COMMIT=a2a56c41b1db72d50d59d71d35c6669ff9639d14
 STABLE=1.98.1
 NIGHTLY=nightly-2026-09-17
 REPO_URL=https://github.com/tailscale/tailscale-rs
@@ -24,7 +24,6 @@ fi
 git -C "$WORK" fetch --quiet origin "$PINNED_COMMIT"
 git -C "$WORK" checkout --quiet "$PINNED_COMMIT"
 git -C "$WORK" checkout -- .
-git -C "$WORK" apply "$VENDOR/patches/ts_netmon-apple-mobile-cfg.patch"
 
 rustup toolchain install "$STABLE" --profile minimal 2>/dev/null || true
 rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios \
@@ -36,8 +35,9 @@ IPHONEOS_DEPLOYMENT_TARGET=17.0 cargo build -p ts_ffi --release --target aarch64
 
 # ts_ffi's build.rs writes the cbindgen header (git-ignored upstream), so it
 # exists only after the first build. It must match the vendored copy.
-if ! cmp -s "$WORK/ts_ffi/tailscale.h" "$VENDOR/include/tailscale.h"; then
-    echo "error: Vendor/tailscale-rs/include/tailscale.h differs from the pinned commit's ts_ffi/tailscale.h — reconcile before building" >&2
+FFI_HEADER="$WORK/crates/bindings/ts_ffi/tailscale.h"
+if ! cmp -s "$FFI_HEADER" "$VENDOR/include/tailscale.h"; then
+    echo "error: Vendor/tailscale-rs/include/tailscale.h differs from the pinned commit's $FFI_HEADER — reconcile before building" >&2
     exit 1
 fi
 

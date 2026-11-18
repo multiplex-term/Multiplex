@@ -7,10 +7,9 @@ Tailscale's Rust implementation as a `staticlib`, exposed to Swift as the
 spike on branch `tailscale-host-option` (PR #12); investigation record:
 `local-plan/tailscale-rs-investigation.md`.
 
-**Upstream status (v0.6.1)**: the `ts_tunnel` cryptography has had a
-third-party audit and upstream now recommends it from a security
-perspective; the `TS_RS_EXPERIMENT` env gate is gone (init logs a
-work-in-progress warning instead). Still pre-1.0 with no API stability,
+**Upstream status (v0.7.1)**: the `ts_tunnel` cryptography has had a
+third-party audit (v0.6.0) and upstream recommends it from a security
+perspective; init logs a work-in-progress warning. Still pre-1.0 with no API stability,
 **iOS is on upstream's unsupported-platform list** (we build it anyway, and
 visionOS rides the same code), no MagicDNS / peer lookup by name, and
 direct connections work "in many cases" — otherwise peers relay through
@@ -21,10 +20,10 @@ stay independently encrypted regardless.
 ## Provenance
 
 - Source: https://github.com/tailscale/tailscale-rs
-- Pinned: tag `v0.6.1` = `d34658bbb2eb4593ae6df959aa93e9ee1e0457c6`
-  (2026-09-17) + one local patch: `patches/ts_netmon-apple-mobile-cfg.patch`
-  (cfg-gates a `PlatformMon` re-export that doesn't exist on
-  iOS/visionOS — upstream-PR-able).
+- Pinned: tag `v0.7.1` = `a2a56c41b1db72d50d59d71d35c6669ff9639d14`
+  (2026-11-06), unpatched. The `ts_netmon` cfg patch carried through
+  v0.6.1 landed upstream in v0.7.0 (the `PlatformMon` re-export is now
+  gated to the platforms that have one).
 - Toolchains: Rust 1.98.1 (repo pin) for the iOS slices;
   **nightly-2026-09-17 + `-Zbuild-std=std,panic_abort`** for the two xros
   slices (`aarch64-apple-visionos{,-sim}` are still tier 3).
@@ -34,7 +33,7 @@ stay independently encrypted regardless.
 ## Layout
 
 - `include/tailscale.h` — cbindgen-generated C ABI from the pinned commit
-  (`ts_ffi`'s build.rs writes it; upstream git-ignores it);
+  (`crates/bindings/ts_ffi`'s build.rs writes it; upstream git-ignores it);
   `include/module.modulemap` wraps it as `CTailscaleRS`.
 - `lib/{ios-arm64,ios-simulator,xros-arm64,xros-simulator}/libtailscalers.a`
   — **git-ignored** (~17-44 MB). The ios-simulator slice is universal
@@ -53,9 +52,15 @@ Link needs beyond libSystem: `-framework CoreFoundation -liconv`
   union); `TailscaleTunnel` sets `sin_port`/`sin6_port` directly.
 - `ts_config.ephemeral` (since v0.5.0) defaults to false in Rust but a
   zeroed C struct also means false; the tunnel sets it explicitly.
-- `ts_init` can block indefinitely on a rejected auth key; the tunnel races
-  it against a 30 s deadline.
+- The ABI reports no auth verdict. With a rejected auth key `ts_init`
+  returns a device in about 2 s and `ts_ipv4_addr` then blocks for good,
+  waiting for a netmap that never comes (measured at v0.7.1 with an invalid
+  key; through v0.6.1 it was `ts_init` that hung). The Rust API gained an
+  `AuthKeyRejected` error in v0.7.0, but `ts_ffi` exposes no
+  `is_authorized`. The tunnel races `ts_init` and the address read
+  together against a 30 s deadline.
 
-When bumping the pin: re-run the script (it re-applies the patch — drop it
-once upstream merges), diff `tailscale.h` for ABI drift (pre-1.0 churn is
-expected), and re-check the investigation record's re-evaluate list (§7).
+When bumping the pin: re-run the script, diff `tailscale.h` for ABI drift
+(pre-1.0 churn is expected; v0.6.1 to v0.7.1 had none, only the move to
+`crates/bindings/ts_ffi`), re-run a rejected-key startup, and re-check the
+investigation record's re-evaluate list (§7).
