@@ -1,3 +1,7 @@
 NEW SINCE 1.5.2
+• Connect via Tailscale (experimental, Vision Pro included): SSH to a host through a Tailscale node built into Multiplex, no Tailscale app needed. Add a reusable auth key in Settings → Tailscale, then turn it on per host in Add Host. Mosh is unavailable on that path.
+
+PLEASE TRY
+1. Settings → Tailscale: paste a reusable auth key; the lamp should go RUNNING with a tailnet address. A Tailscale host should attach and type like any other; a second device should join as its own node.
 
 Feedback: screenshot in TestFlight

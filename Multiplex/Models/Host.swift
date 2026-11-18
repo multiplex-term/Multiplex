@@ -94,6 +94,10 @@ struct Host: Identifiable, Codable, Hashable {
     /// The credentials above still authenticate the SSH bootstrap that
     /// launches `mosh-server`; deck probing stays on SSH either way.
     var useMosh: Bool = false
+    /// Reach this host's SSH endpoint through the app's embedded userspace
+    /// Tailscale node (tailscale-rs backend). Works on all three platforms;
+    /// for v1 it cannot carry mosh's datagram transport.
+    var useTailscale: Bool = false
     /// The session backend the probe and attach paths use. Rides the synced
     /// record, and deliberately participates in
     /// `connectionModelConfiguration`: flipping it must tear down and
@@ -351,6 +355,7 @@ extension Host {
             (try container.decodeIfPresent([String].self, forKey: .secondaryBackends) ?? [])
                 .compactMap(SessionBackend.init(rawValue:))
         ).subtracting([sessionBackend])
+        useTailscale = try container.decodeIfPresent(Bool.self, forKey: .useTailscale) ?? false
         moshServerPath = try container.decodeIfPresent(String.self, forKey: .moshServerPath)
         moshPorts = try container.decodeIfPresent(String.self, forKey: .moshPorts)
         workingDirs = try container.decodeIfPresent([String].self, forKey: .workingDirs) ?? []

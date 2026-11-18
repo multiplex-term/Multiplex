@@ -1,0 +1,4 @@
+module CTailscaleRS {
+    header "tailscale.h"
+    export *
+}

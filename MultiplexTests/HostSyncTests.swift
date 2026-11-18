@@ -104,6 +104,7 @@ final class HostSyncTests: XCTestCase {
         // expects to keep seeing on the wall.
         XCTAssertTrue(host.isEnabled)
         XCTAssertFalse(host.useMosh)
+        XCTAssertFalse(host.useTailscale)
         XCTAssertNil(host.moshServerPath)
         XCTAssertNil(host.moshPorts)
         XCTAssertEqual(host.workingDirs, [])
@@ -134,6 +135,22 @@ final class HostSyncTests: XCTestCase {
 
         let decoded = try JSONDecoder().decode(Host.self, from: JSONEncoder().encode(original))
         XCTAssertEqual(decoded, original)
+    }
+
+    func testTailscaleFlagParticipatesInConnectionIdentity() {
+        let original = host("devbox")
+        var tailscale = original
+        tailscale.useTailscale = true
+        XCTAssertFalse(original.hasSameConnectionModelConfiguration(as: tailscale))
+    }
+
+    func testHostTailscaleFlagRoundTripsThroughRecordEncoding() throws {
+        var original = host("devbox", updatedAt: Date(timeIntervalSince1970: 1234))
+        original.useTailscale = true
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(Host.self, from: data)
+        XCTAssertEqual(decoded, original)
+        XCTAssertTrue(decoded.useTailscale)
     }
 
     func testHostRoundTripsThroughRecordEncoding() throws {

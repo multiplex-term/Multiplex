@@ -115,6 +115,18 @@ app.multiplexterm.multiplex`):
   persisted). `1` keeps the real authenticator; `held` refuses every
   attempt so the veil can be captured. Shipping toggle: Settings → App lock
   (`AppLockStore`).
+- `MULTIPLEX_SEED_TAILSCALE=1` — flips the seeded host to Connect via
+  Tailscale (mosh off). The flag persists on the simulator's host and
+  `seed.json` doesn't reset it, so finish with a `MULTIPLEX_SEED_TAILSCALE=0`
+  launch or the next plain `verify` dials a tailnet with no auth key.
+- `MULTIPLEX_TAILSCALE_FAKE_DIAL=1` — tailscale dials become plain TCP
+  sockets (no tailnet node), so the loopback relay → Citadel path runs
+  against the harness sshd without a tailnet.
+- `MULTIPLEX_TAILSCALE_AUTHKEY=tskey-…` — overrides the stored auth key
+  (never persisted) for a real embedded-node login; tailscale-rs logs to
+  stderr via `RUST_LOG`. An invalid key is the rejected-key check: the
+  terminal should end with "Tailscale startup timed out after 30 seconds"
+  rather than sit in LINKING (re-run it after bumping the tailscale-rs pin).
 - `MULTIPLEX_FORCE_SHELL=1|0` — force the single-window shell on/off.
   Default: iPhone always shell, iPad only when `UIWindowScene.isFullScreen`
   (Catalyst-only, so in practice never) or the Settings → Window mode

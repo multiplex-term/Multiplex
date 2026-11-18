@@ -53,6 +53,11 @@ final class SettingsUIKitTests: XCTestCase {
         #else
         let screen = ["Screen"]
         #endif
+        #if canImport(CTailscaleRS)
+        let tailscale = ["Tailscale"]
+        #else
+        let tailscale: [String] = []
+        #endif
         XCTAssertEqual(headers.compactMap(\.accessibilityLabel), [
             "Appearance",
             "Current theme",
@@ -63,6 +68,7 @@ final class SettingsUIKitTests: XCTestCase {
         ] + screen + [
             "Voice input",
             "Connection stats",
+        ] + tailscale + [
             "Agent alerts",
             "App lock",
             "Multiplex Pro",
