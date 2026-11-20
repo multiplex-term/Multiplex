@@ -73,13 +73,15 @@ extension ShellSideColumn {
 
     /// The side column from live traits, resolved once by the shell for
     /// both panes: the iOS 27.1 vertical-bar trait when the system reports
-    /// one, else `ShellRailPlacement`'s rule; placement from the display.
+    /// one, else `ShellRailPlacement`'s rule; placement from the display and
+    /// the system's glyph block in the resolved edge's strip.
     static func resolve(
         traits: UITraitCollection,
         isLandscape: Bool,
         foldable: Bool,
         leadingSafeArea: CGFloat,
-        trailingSafeArea: CGFloat
+        trailingSafeArea: CGFloat,
+        systemBlockBottom: (ShellRailEdge) -> CGFloat? = { _ in nil }
     ) -> ShellSideColumn {
         #if os(iOS)
         let edge = ShellRailPlacement.edge(
@@ -98,7 +100,8 @@ extension ShellSideColumn {
             placement: RailFit.columnPlacement(
                 compactWidth: traits.horizontalSizeClass == .compact,
                 landscape: isLandscape,
-                trailingEdge: edge == .trailing
+                trailingEdge: edge == .trailing,
+                systemBlockBottom: systemBlockBottom(edge)
             )
         )
         #else

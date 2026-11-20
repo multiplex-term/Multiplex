@@ -110,7 +110,14 @@ Measured on the 27.1 simulator with `MULTIPLEX_DUO_PROBE=1` (log category
   glyphs); closed portrait 160 (glyphs under the camera); closed landscape
   keeps 80 pt clear of the camera end (30…66 pt from the corner: top when
   leading, bottom when turned around) and 12 of the other, and the chips
-  gather at the camera's end. The shell hands `displayIsLandscape` down
+  gather at the camera's end. A Live Activity pushes the system glyphs
+  down the column (+44…46 pt each); the system reports the whole glyph
+  block as a `.occlusion` reserved region hanging from the strip's top
+  (closed portrait 84×174 at rest, 218 / 264 with one / two activities),
+  so the top is `max(resting inset, block bottom − 14)`
+  (`ShellSideColumn.systemBlockBottom`, `RailFit.systemBlockSlack`).
+  UIKit lays the shell out when the region changes; no watch needed. The
+  shell hands `displayIsLandscape` down
   (screen bounds lag a rotation's layout pass). Order: DECK, A−, A+,
   + TAB, FILE, TMUX (only when the key rail dropped it), ⋯, DETACH.
   `RailFit` (one rule for column and horizontal row) drops MERGE, GUIDE,

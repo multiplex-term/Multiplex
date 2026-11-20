@@ -1,3 +1,7 @@
 NEW SINCE 1.5.2
+• iPhone Duo: the side column's buttons now move down when a Live Activity (a delivery, a timer, a call) pushes the clock and Wi-Fi symbols down the column, instead of sitting under them. They move back up when it ends.
+
+PLEASE TRY
+1. On iPhone Duo, open or closed and upright, attach a session, then start a Live Activity in another app (a timer works) and come back: DECK and the buttons below it should start under the clock and Wi-Fi symbols, none hidden behind them. End the activity: the buttons should move back up.
 
 Feedback: screenshot in TestFlight
