@@ -29,6 +29,24 @@ final class KeyboardLock {
 /// UIKit has nothing to present, so taps cannot raise the software keyboard.
 private final class LockedKeyboardInputView: UIView {}
 
+#if !os(visionOS)
+/// Refuses Scribble while the keyboard is locked. The lock's zero-size input
+/// view only stops UIKit *presenting* a keyboard; a `UITextInput` view still
+/// takes Apple Pencil handwriting, so a Pencil stroke on a locked terminal
+/// would draw ink and type instead of tapping, selecting, or scrolling the
+/// way a finger does. Unlocked, Scribble stays available as text input.
+private final class LockedScribbleGate: NSObject, UIScribbleInteractionDelegate {
+    static let shared = LockedScribbleGate()
+
+    func scribbleInteraction(
+        _ interaction: UIScribbleInteraction,
+        shouldBeginAt location: CGPoint
+    ) -> Bool {
+        !KeyboardLock.shared.isLocked
+    }
+}
+#endif
+
 @MainActor
 enum TerminalFocusArbiter {
     private(set) static weak var current: TerminalView?
@@ -150,6 +168,17 @@ enum TerminalFocusArbiter {
         }
         guard summoning else { return }
         summon(view, force: true)
+    }
+
+    /// Every terminal view gets the gate at creation, not at claim: Scribble
+    /// focuses whichever `UITextInput` view the Pencil lands on, so a
+    /// terminal that never held the input session must refuse it too.
+    /// Idempotent — a tab adopted by another window keeps its one gate.
+    static func installScribbleGate(on view: TerminalView) {
+        #if !os(visionOS)
+        guard !view.interactions.contains(where: { $0 is UIScribbleInteraction }) else { return }
+        view.addInteraction(UIScribbleInteraction(delegate: LockedScribbleGate.shared))
+        #endif
     }
 
     private static func applyLockState(to view: TerminalView) {
