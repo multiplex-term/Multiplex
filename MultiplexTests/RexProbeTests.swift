@@ -104,6 +104,14 @@ final class RexProbeTests: XCTestCase {
 
         let editor = work.windows[0]
         XCTAssertEqual(editor.paneCount, 2)
+        // The REX key's list is terminals, not windows: one split window
+        // alone is already somewhere else to go, where a tmux session with
+        // the same shape has only itself.
+        var split = work
+        split.windows = [editor]
+        XCTAssertTrue(split.hasSwitchChoices)
+        split.backend = .tmux
+        XCTAssertFalse(split.hasSwitchChoices)
         XCTAssertEqual(editor.panes?.map(\.isActive), [true, false])
         XCTAssertEqual(editor.paneTitle, "vim README.md")
         XCTAssertEqual(editor.panes?.first?.command, "sleep")

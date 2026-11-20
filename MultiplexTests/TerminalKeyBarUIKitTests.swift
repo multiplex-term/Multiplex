@@ -142,6 +142,46 @@ final class TerminalKeyBarUIKitTests: XCTestCase {
         XCTAssertTrue(frames.allSatisfy { $0.width >= 24 })
     }
 
+    func testShortcutKeyLightsWhenTheSessionHasChoices() throws {
+        let bar = TerminalKeyBar(
+            terminal: TerminalView(frame: CGRect(x: 0, y: 0, width: 1024, height: 200)),
+            controller: nil,
+            performShortcut: { _ in },
+            finishTmuxCopyMode: {},
+            shortcutBackend: .rex,
+            orderStore: KeyBarOrderStore(defaults: try isolatedDefaults())
+        )
+        bar.frame = CGRect(x: 0, y: 0, width: 1024, height: TerminalKeyBar.barHeight)
+        bar.layoutIfNeeded()
+        func key() throws -> TerminalTallyKeyControl {
+            try XCTUnwrap(bar.renderedKeys.first {
+                $0.accessibilityIdentifier == "terminal.keybar.tmux"
+            })
+        }
+        let built = try key()
+        XCTAssertFalse(built.isLit)
+
+        // Re-inked in place: the same control, so a press in flight survives
+        // the probe tick that found the second terminal.
+        bar.shortcutHasChoices = true
+        XCTAssertTrue(built.isLit)
+        XCTAssertFalse(built.isLatched, "lit is not the latch's fill")
+
+        // A row rebuilt while lit (the keyboard lock adds RET) comes back lit.
+        bar.applyObservedState(TerminalKeyBarObservedState(
+            hardwareKeyboardConnected: false,
+            keyboardLocked: true,
+            isDictating: false,
+            talkbackOpen: false,
+            arranging: false,
+            order: KeyBarOrder.standard
+        ))
+        bar.layoutIfNeeded()
+        let rebuilt = try key()
+        XCTAssertFalse(rebuilt === built)
+        XCTAssertTrue(rebuilt.isLit)
+    }
+
     func testNativeRailBuildsTallyControlsWithoutAHostedView() throws {
         let terminal = TerminalView(
             frame: CGRect(x: 0, y: 0, width: 420, height: 200)

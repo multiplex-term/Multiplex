@@ -212,6 +212,14 @@ struct TmuxSession: Identifiable, Hashable, Codable {
     var paneCount: Int {
         windows.reduce(0) { $0 + $1.paneCount }
     }
+    /// The shortcut panel's switch list has somewhere else to go — what
+    /// lights the TMUX / HRDR / REX key. The list is windows (herdr:
+    /// workspaces, which the probe writes as windows), except on Rex, where
+    /// a tab is ONE terminal and the list is every terminal of the session:
+    /// a single split window already has a second row.
+    var hasSwitchChoices: Bool {
+        (backend == .rex ? paneCount : windowCount) > 1
+    }
 }
 
 extension TmuxSession {

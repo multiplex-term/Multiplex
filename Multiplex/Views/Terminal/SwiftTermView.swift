@@ -25,6 +25,8 @@ final class TerminalSurfaceView: UIView {
         /// Which multiplexer owns the rail's shortcut key (TMUX/HRDR); nil
         /// drops the key — plain shells and auxiliary panes have no panel.
         var shortcutBackend: Host.SessionBackend?
+        /// The session has several windows to switch between: the key lights.
+        var shortcutHasChoices = false
         /// The tier's Key Commands cap and paywall route for the rail's
         /// hold-CTRL panel.
         var keyCommandPlan: KeyCommandPlan = .unrestricted
@@ -212,6 +214,7 @@ final class TerminalSurfaceView: UIView {
         keyBar.spendsBottomStrip = configuration.railOwnsBottomSafeArea
         keyBar.bareChrome = configuration.bareChrome
         keyBar.keyCommandPlan = configuration.keyCommandPlan
+        keyBar.shortcutHasChoices = configuration.shortcutHasChoices
         coordinator.keyBar = keyBar
         addSubview(view)
         addSubview(keyBar)
@@ -360,6 +363,7 @@ final class TerminalSurfaceView: UIView {
         coordinator.setKeyRailHidden(configuration.keyRailHidden)
         coordinator.keyBar?.bareChrome = configuration.bareChrome
         coordinator.keyBar?.keyCommandPlan = configuration.keyCommandPlan
+        coordinator.keyBar?.shortcutHasChoices = configuration.shortcutHasChoices
         if fontChanged {
             coordinator.terminalMetricsDidChange()
         }

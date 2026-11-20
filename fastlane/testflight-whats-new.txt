@@ -1,5 +1,6 @@
 NEW SINCE 1.5.2
 • Deck and terminal: a host that runs Rex (superlogical.com/rex) can now show its Rex sessions as tiles, and a tile attaches the Rex terminal as a tab. When the host is holding Rex sessions a + REX chip appears on its rail; press it to start showing them, or check REX in Host Settings under Backends. Each tile shows the session's windows, the last lines of the screen in front, any agent it finds, and RUNNING or NEEDS YOU. Pressing a tile opens the terminal the session is showing, with its screen, colors and scrollback; a session with several terminals offers the others under Open Terminal in the tile's menu, and the REX key in a Rex tab switches the tab to another terminal of the session. New Session and + TAB can create a Rex session while a Rex server is running on the host (Multiplex does not start one); a host's default backend stays tmux or herdr.
+• Terminal: the TMUX, HRDR or REX key now lights up when the session has more than one window to switch between (for Rex, more than one terminal), so you can tell there is somewhere else to go without opening the panel.
 
 PLEASE TRY
 1. On a host that runs Rex with at least one session open (a Mac with the Rex app works), wait for the + REX chip on the host's rail, press it and confirm: the Rex sessions should appear as tinted tiles beside the tmux ones, each with its window names and the last lines of its screen. Add or rename a window in Rex: the tile should follow within a few seconds.
@@ -13,5 +14,6 @@ PLEASE TRY
 9. Lock the device for a minute with a Rex tab open, then return: the tab should reconnect by itself.
 10. Open Host Settings and find Backends: REX should be checkable, and New sessions run on should never list it. Uncheck it: the Rex tiles should go away.
 11. Open a Rex terminal where an agent such as Claude Code is running: the Agent Bar should show that agent's keys. Bring another window of the same session to the front in Rex: the bar should stay, because the tab is still on the agent's terminal.
+12. Attach a tmux session that has one window: the TMUX key should look like the other keys. Add a second window from the TMUX panel: within a few seconds the key should turn brighter with a stronger border, and go back when that window is closed. A Rex tab should do the same with the REX key when its session gains a second terminal.
 
 Feedback: screenshot in TestFlight

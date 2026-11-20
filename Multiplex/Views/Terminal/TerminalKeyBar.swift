@@ -23,6 +23,16 @@ final class TerminalTallyKeyControl: UIControl, UIDragInteractionDelegate {
             refreshAppearance()
         }
     }
+    /// State without a latch: the key has something to show (the shortcut
+    /// key of a session with several windows). Primary ink and the signal
+    /// border — the UMD chips' `prominent` — and never the latch's fill,
+    /// which says the key is ON.
+    var isLit = false {
+        didSet {
+            guard isLit != oldValue else { return }
+            refreshAppearance()
+        }
+    }
     var faceInset: CGFloat = 0 {
         didSet { setNeedsLayout() }
     }
@@ -376,7 +386,9 @@ final class TerminalTallyKeyControl: UIControl, UIDragInteractionDelegate {
     private func refreshAppearance() {
         accessibilityTraits = isLatched ? [.button, .selected] : .button
         alpha = isDraggedAway ? 0.3 : isEnabled ? 1 : 0.45
-        let foreground = isLatched ? UIKitChassis.chassis : UIKitChassis.signal2
+        let foreground = isLatched
+            ? UIKitChassis.chassis
+            : isLit ? UIKitChassis.signal : UIKitChassis.signal2
         textLabel.textColor = foreground
         symbolView.tintColor = foreground
         // PROTOTYPE(GLASS): resting key faces take the chip treatment —
@@ -393,7 +405,7 @@ final class TerminalTallyKeyControl: UIControl, UIDragInteractionDelegate {
             ? UIKitChassis.signal2
             : isHighlighted || isDropTarget ? UIKitChassis.bezelHi : restingFace
         // The drop target wears the signal border a tab cell does.
-        faceView.tallyBorderColor = isLatched || isDropTarget
+        faceView.tallyBorderColor = isLatched || isLit || isDropTarget
             ? UIKitChassis.signal2
             : UIKitChassis.bezelHi
     }
@@ -1166,6 +1178,17 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback, KeyBarDropSurface 
         }
     }
 
+    /// The tab's session has more than one window to switch between
+    /// (`TmuxSession.hasSwitchChoices`): the shortcut key lights. Re-inked
+    /// in place — the wall probe moves this, and a rebuilt row would drop a
+    /// press in flight.
+    var shortcutHasChoices = false {
+        didSet {
+            guard shortcutHasChoices != oldValue else { return }
+            shortcutKeyControl?.isLit = shortcutHasChoices
+        }
+    }
+
     private weak var terminal: TerminalView?
     private weak var controller: TerminalSessionController?
     private let performShortcut: (ShortcutPanelItem) -> Void
@@ -1546,7 +1569,9 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback, KeyBarDropSurface 
             switch slot {
             case .control: ctrlKeyControl = control
             case .talkback: talkKeyControl = control
-            case .shortcuts: shortcutKeyControl = control
+            case .shortcuts:
+                shortcutKeyControl = control
+                control.isLit = shortcutHasChoices
             default: break
             }
         }

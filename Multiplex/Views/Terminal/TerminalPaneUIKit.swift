@@ -23,6 +23,9 @@ struct TerminalPaneConfiguration {
     /// hold-CTRL panel (iPad/iPhone; the visionOS cluster gets it from the
     /// window directly).
     var keyCommandPlan: KeyCommandPlan = .unrestricted
+    /// The tab's session has several windows to switch between: the key
+    /// rail's shortcut key lights (`TmuxSession.hasSwitchChoices`).
+    var shortcutHasChoices = false
     var close: () -> Void
 }
 
@@ -240,6 +243,7 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
             keyRailHidden: configuration.keyRailHidden,
             isActive: configuration.isActive && configuration.focusAllowed,
             shortcutBackend: configuration.controller?.route.sessionBackend,
+            shortcutHasChoices: configuration.shortcutHasChoices,
             keyCommandPlan: configuration.keyCommandPlan
         )
     }

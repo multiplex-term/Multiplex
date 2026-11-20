@@ -984,36 +984,44 @@ final class TerminalWindowViewController: UIViewController,
         else { return nil }
         return notice
     }
-    private var detectedAgent: AgentKind? {
-        guard let activeTab else { return nil }
-        guard let sessionName = activeTab.sessionName else {
-            return activeController?.directShellAgent
-        }
+    /// The wall probe's record of a tab's session; nil for a plain shell.
+    private func probedSession(for tab: TerminalRoute) -> TmuxSession? {
         // Any backend this host MONITORS can answer — on a mixed host the
         // probe carries both, and a tab on the secondary deserves its agent
         // chips too. A tab whose backend the host no longer monitors gets
         // nothing rather than a same-named record from the other one.
-        guard let host = store.host(id: activeTab.hostID),
-              let backend = activeTab.sessionBackend,
+        guard let sessionName = tab.sessionName,
+              let host = store.host(id: tab.hostID),
+              let backend = tab.sessionBackend,
               host.monitors(backend)
         else { return nil }
         let sessions = hub.model(for: host).sessions(on: backend)
+        // A Rex session is found by id: a Rex label is not an identity, and
+        // is respelled when another session takes the same one.
+        if let rex = tab.rexTarget {
+            return sessions.first { $0.tmuxID == rex.sessionID }
+        }
+        return sessions.first { $0.name == sessionName }
+    }
+    private var detectedAgent: AgentKind? {
+        guard let activeTab else { return nil }
+        guard activeTab.sessionName != nil else {
+            return activeController?.directShellAgent
+        }
+        let session = probedSession(for: activeTab)
         // A Rex tab is ONE terminal of its session, and not necessarily the
         // one the session is fronting — Open Terminal, Switch Terminal, or
         // the Rex app showing another window — so the strip is that
-        // terminal's (`TmuxSession.agent(inPane:)`). Found by id: a Rex
-        // label is not an identity, and is respelled when another session
-        // takes the same one.
+        // terminal's (`TmuxSession.agent(inPane:)`).
         if let rex = activeTab.rexTarget {
-            return sessions.first { $0.tmuxID == rex.sessionID }?
-                .agent(inPane: activeController?.rexBlockID ?? rex.blockID)
+            return session?.agent(inPane: activeController?.rexBlockID ?? rex.blockID)
         }
         // One expression serves tmux and herdr on purpose: a herdr tile IS
         // a whole session, and the probe writes its live focus into the
         // record (active window = focused workspace, active pane = the
         // session's one focus every client mirrors) — so following
         // `activeAgent` follows a workspace switch inside the TUI too.
-        return sessions.first { $0.name == sessionName }?.activeAgent
+        return session?.activeAgent
     }
     private var resolvedTerminalTheme: TerminalTheme {
         // Prefer the pinned choice over the live traits: the observation
@@ -2611,6 +2619,7 @@ extension TerminalWindowViewController {
             isActive: isActive,
             focusAllowed: terminalFocusAllowed,
             keyCommandPlan: keyCommandPlan,
+            shortcutHasChoices: probedSession(for: tab)?.hasSwitchChoices == true,
             close: { [weak self] in self?.closeTab(tab.id) }
         )
     }
@@ -2944,6 +2953,7 @@ extension TerminalWindowViewController {
             fullScreenActive: fullScreenColumn,
             extraNewTabTarget: extraNewTabTarget,
             shortcutBackend: activeTab?.sessionBackend,
+            shortcutHasChoices: activeTab.flatMap(probedSession(for:))?.hasSwitchChoices == true,
             style: vertical ? .verticalColumn : profile.style,
             deckControl: shell?.deckControl ?? .back,
             availableWidth: vertical ? column.width : umdAvailableWidth,
