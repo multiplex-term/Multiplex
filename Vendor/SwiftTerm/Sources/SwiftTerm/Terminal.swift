@@ -1344,6 +1344,14 @@ open class Terminal {
             clearProgramStatus()
             resetNormalBuffer()
             activateNormalBuffer(clearAlt: false)
+            // Multiplex patch: a full reset empties the alternate screen
+            // too. It is otherwise emptied only on the way out of it
+            // (1047/1049), and `fillViewportRows` leaves a buffer that
+            // already has rows alone — so after RIS during a full-screen
+            // program, the next program to enter the alternate screen was
+            // drawn over the last one's cells.
+            clearKittyImages(in: altBuffer, isAlternateBuffer: true)
+            altBuffer.clear ()
             resetSemanticPromptState(clearingScreenMarks: true)
         } else {
             normalBuffer.resize(newCols: cols, newRows: rows)

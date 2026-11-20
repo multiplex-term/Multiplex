@@ -318,6 +318,63 @@ enum RexWire {
         default: "reason \(reason)"
         }
     }
+
+    // MARK: Picking a held stream up again
+
+    /// Where to resume a held stream whose first `offset` bytes are known
+    /// to be in a rendering already — `offset` itself, unless that cut
+    /// falls inside an escape sequence or a multi-byte character, in which
+    /// case its start. Resumed mid-sequence, the rest of it is drawn as
+    /// text (`8;5;12m`); backing up repeats at most one sequence instead.
+    ///
+    /// Also asked of a cut at the very end: the bytes that complete an
+    /// unfinished sequence are then the next to arrive.
+    static func resumeOffset(in data: Data, from offset: Int) -> Int {
+        let bytes = [UInt8](data)
+        let cut = min(max(0, offset), bytes.count)
+        guard cut > 0 else { return 0 }
+        let floor = max(0, cut - resumeLookback)
+        if let escape = bytes[floor..<cut].lastIndex(of: 0x1B),
+           !isCompleteSequence(bytes[escape..<cut]) {
+            return escape
+        }
+        // A character split across the cut: back to its lead byte.
+        var lead = cut - 1
+        while lead > max(0, cut - 4), bytes[lead] & 0xC0 == 0x80 { lead -= 1 }
+        let length: Int = switch bytes[lead] {
+        case 0xC0...0xDF: 2
+        case 0xE0...0xEF: 3
+        case 0xF0...0xF7: 4
+        default: 1
+        }
+        return lead + length > cut ? lead : cut
+    }
+
+    /// How far back a cut looks for the escape it may have split. Longer
+    /// than any sequence but a window title or a hyperlink, and one of
+    /// those cut in two is a title lost, not characters on the screen.
+    private static let resumeLookback = 256
+
+    /// Whether `sequence`, which starts at an ESC and holds no other,
+    /// already has its final byte.
+    private static func isCompleteSequence(_ sequence: ArraySlice<UInt8>) -> Bool {
+        let body = sequence.dropFirst()
+        guard let introducer = body.first else { return false }
+        let rest = body.dropFirst()
+        switch introducer {
+        case UInt8(ascii: "["):
+            return rest.contains { (0x40...0x7E).contains($0) }
+        case UInt8(ascii: "]"), UInt8(ascii: "P"), UInt8(ascii: "_"),
+             UInt8(ascii: "^"), UInt8(ascii: "X"):
+            // A string ends at BEL, or at an ST whose own ESC would have
+            // been the last one found.
+            return rest.contains(0x07)
+        case 0x20...0x2F:
+            return rest.contains { $0 >= 0x30 }
+        default:
+            return true
+        }
+    }
 }
 
 /// Splits a Rex terminal stream into what the terminal emulator should draw

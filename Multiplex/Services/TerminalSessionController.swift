@@ -167,6 +167,18 @@ final class TerminalSessionController {
     private var handoffWatch: ShellHandoff.UpdatePromptWatch?
     private var lastCols = 80
     private var lastRows = 24
+    /// Rex only: the grid of the terminal on show while another client
+    /// owns its size (`RexSession`'s `onGrid`). The pane lays the emulator
+    /// out at it; nil is the pane's own grid.
+    private(set) var gridPin: TerminalGrid?
+    /// The pane's side of `gridPin`. It must have the emulator at the new
+    /// grid by the time it returns — the screen drawn next is for it.
+    var onGridPinChanged: (() -> Void)?
+    /// The last grid the pane measured for itself: what this tab asks a
+    /// terminal to be. `lastCols`/`lastRows` are whatever the emulator has,
+    /// which under a pin is somebody else's size.
+    private var ownSize: TerminalSize?
+    private var isSettlingGridPin = false
     private var started = false
     private var transportGeneration = 0
     /// Session-volume counters drained by the stats pump. Written on the
@@ -432,6 +444,8 @@ final class TerminalSessionController {
     private func beginTransportRun() {
         transportGeneration &+= 1
         let generation = transportGeneration
+        // A new run attaches at this tab's own size.
+        setGridPin(nil)
         let output = TerminalOutputCoalescer { [weak self] bytes in
             guard let self, self.transportGeneration == generation else { return }
             self.feed(bytes)
@@ -497,7 +511,7 @@ final class TerminalSessionController {
                 await transport.close()
                 return
             }
-            let openedSize = TerminalSize(cols: lastCols, rows: lastRows)
+            let openedSize = ownSize ?? TerminalSize(cols: lastCols, rows: lastRows)
             let onData: @Sendable (Data) -> Void = { data in
                 output.append(data)
             }
@@ -513,7 +527,17 @@ final class TerminalSessionController {
             if let rex {
                 try await rex.open(
                     cols: openedSize.cols, rows: openedSize.rows,
-                    onData: onData, onClose: onClose)
+                    onData: onData, onClose: onClose,
+                    onGrid: { [weak self] grid in
+                        await MainActor.run { [weak self] in
+                            guard let self, self.transportGeneration == generation
+                            else { return }
+                            // What was written for the old grid is parsed
+                            // at the old grid.
+                            output.flush()
+                            self.setGridPin(grid)
+                        }
+                    })
                 // Which terminal an unnamed attach landed on is the
                 // session's answer, known only now.
                 rexBlockID = await rex.blockID ?? rexBlockID
@@ -931,9 +955,29 @@ final class TerminalSessionController {
         startResizePump(for: transport)
         // Layout may have changed while the handshake/open call was awaiting;
         // reconcile once with the newest geometry before normal coalescing.
-        if lastCols != size.cols || lastRows != size.rows {
+        if gridPin == nil, lastCols != size.cols || lastRows != size.rows {
             resizeContinuation?.yield(TerminalSize(cols: lastCols, rows: lastRows))
         }
+    }
+
+    /// Gives the emulator another client's grid, or its own back.
+    ///
+    /// The pane changes the text size and the frame to do it, and each of
+    /// those makes SwiftTerm report a grid on the way — none of them the
+    /// tab's own, so none is sent on. Once the pane has settled back on its
+    /// own grid, that one is: the window may have been resized meanwhile.
+    private func setGridPin(_ grid: TerminalGrid?) {
+        guard grid != gridPin else { return }
+        gridPin = grid
+        isSettlingGridPin = true
+        onGridPinChanged?()
+        isSettlingGridPin = false
+        // With no pane to lay out, the emulator is still at the grid it
+        // was given and `ownSize` already holds the tab's last own one.
+        guard grid == nil, onGridPinChanged != nil else { return }
+        let own = TerminalSize(cols: lastCols, rows: lastRows)
+        ownSize = own
+        if status == .live { resizeContinuation?.yield(own) }
     }
 
     private func stopTransportPumps() {
@@ -1830,8 +1874,12 @@ final class TerminalSessionController {
         guard cols != lastCols || rows != lastRows else { return }
         lastCols = cols
         lastRows = rows
+        // A grid taken from another client is the emulator's, not this
+        // tab's ask: the far side is never told it.
+        let isOwn = gridPin == nil && !isSettlingGridPin
+        if isOwn { ownSize = TerminalSize(cols: cols, rows: rows) }
         guard status == .live else { return }
-        resizeContinuation?.yield(TerminalSize(cols: cols, rows: rows))
+        if isOwn { resizeContinuation?.yield(TerminalSize(cols: cols, rows: rows)) }
         // A resize relayouts the multiplexer's panes, so a select-text clamp
         // fetched for the old geometry is wrong — refetch (the generation
         // counter drops the stale answer if resizes storm).

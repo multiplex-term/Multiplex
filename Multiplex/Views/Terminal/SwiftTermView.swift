@@ -121,7 +121,10 @@ final class TerminalSurfaceView: UIView {
         TerminalFocusArbiter.installScribbleGate(on: view)
         view.renderUpdatesEnabled = configuration.isActive
         apply(configuration.theme, to: view)
-        if view.font.pointSize != configuration.fontSize {
+        coordinator.preferredFontSize = configuration.fontSize
+        // An adopted view showing another client's grid keeps the text
+        // size that grid was fitted at; the first layout fits it here.
+        if controller.gridPin == nil, view.font.pointSize != configuration.fontSize {
             view.font = .monospacedSystemFont(
                 ofSize: configuration.fontSize,
                 weight: .regular
@@ -163,6 +166,14 @@ final class TerminalSurfaceView: UIView {
         #if os(visionOS)
         addSubview(view)
         view.translatesAutoresizingMaskIntoConstraints = false
+        let terminalTrailing = view.trailingAnchor.constraint(
+            equalTo: trailingAnchor,
+            constant: -Self.terminalInsets.right
+        )
+        let terminalBottom = view.bottomAnchor.constraint(
+            equalTo: bottomAnchor,
+            constant: -Self.terminalInsets.bottom
+        )
         NSLayoutConstraint.activate([
             view.topAnchor.constraint(
                 equalTo: topAnchor,
@@ -172,15 +183,10 @@ final class TerminalSurfaceView: UIView {
                 equalTo: leadingAnchor,
                 constant: Self.terminalInsets.left
             ),
-            view.trailingAnchor.constraint(
-                equalTo: trailingAnchor,
-                constant: -Self.terminalInsets.right
-            ),
-            view.bottomAnchor.constraint(
-                equalTo: bottomAnchor,
-                constant: -Self.terminalInsets.bottom
-            ),
+            terminalTrailing,
+            terminalBottom,
         ])
+        coordinator.installGridEdges(trailing: terminalTrailing, bottom: terminalBottom)
         // Gaze hover for links: the overlay is a subview of the terminal
         // (its touches keep feeding the terminal's own pan recognizers) and
         // survives merge/split with it — reuse the one already riding an
@@ -283,6 +289,7 @@ final class TerminalSurfaceView: UIView {
             terminalLeadingConstraint: terminalLeading,
             terminalTrailingConstraint: terminalTrailing
         )
+        coordinator.installGridEdges(trailing: terminalTrailing, bottom: terminalBottom)
         coordinator.keyBarHeightConstraint = keyBarHeight
         coordinator.setRailOwnsBottomSafeArea(configuration.railOwnsBottomSafeArea)
         coordinator.setKeyRailHidden(configuration.keyRailHidden)
@@ -308,6 +315,11 @@ final class TerminalSurfaceView: UIView {
         }
 
         controller.bind(view)
+        // Replace, never stack: a moved tab's hook still names the pane it
+        // left.
+        controller.onGridPinChanged = { [weak coordinator] in
+            coordinator?.applyGridPin(synchronously: true)
+        }
         if configuration.isActive {
             DispatchQueue.main.async {
                 TerminalFocusArbiter.claim(view)
@@ -340,12 +352,20 @@ final class TerminalSurfaceView: UIView {
             }
         }
         #endif
-        let fontChanged = view.font.pointSize != configuration.fontSize
+        // While the grid is another client's the text size is whatever
+        // fits it; the tab's own size comes back with its own grid.
+        let fontChanged = coordinator.preferredFontSize != configuration.fontSize
+            || (controller.gridPin == nil && view.font.pointSize != configuration.fontSize)
+        coordinator.preferredFontSize = configuration.fontSize
         if fontChanged {
-            view.font = .monospacedSystemFont(
-                ofSize: configuration.fontSize,
-                weight: .regular
-            )
+            if controller.gridPin == nil {
+                view.font = .monospacedSystemFont(
+                    ofSize: configuration.fontSize,
+                    weight: .regular
+                )
+            } else {
+                coordinator.applyGridPin(synchronously: false)
+            }
         }
         if coordinator.appliedTheme != configuration.theme {
             apply(configuration.theme, to: view)
@@ -376,6 +396,8 @@ final class TerminalSurfaceView: UIView {
         #if !os(visionOS)
         coordinator.containerDidLayout()
         #endif
+        // The pane changed size under a grid that is not its own: fit again.
+        coordinator.applyGridPin(synchronously: false)
     }
 
     /// Colors change live — SwiftTerm's setters queue a full redraw, so an
@@ -446,6 +468,128 @@ final class TerminalSurfaceView: UIView {
 
         init(controller: TerminalSessionController) {
             self.controller = controller
+        }
+
+        // MARK: Another client's grid (Rex)
+
+        /// The tab's own text size — what the emulator goes back to when
+        /// the grid is its own again.
+        var preferredFontSize: CGFloat = 0
+        /// The two edges a foreign grid pulls in, and where they rest
+        /// without one. Everything else that moves these edges (bottom
+        /// chrome, side safe areas) writes the resting value and calls
+        /// `applyGridEdges`, so the two never overwrite each other.
+        private var gridTrailingConstraint: NSLayoutConstraint?
+        private var gridBottomConstraint: NSLayoutConstraint?
+        private var restingTrailing: CGFloat = 0
+        private var restingBottom: CGFloat = 0
+        /// Room left beside and below a fitted grid (negative when even
+        /// the smallest text cannot fit it and it runs off the pane).
+        private var gridSlack = CGSize.zero
+        /// What the current fit was solved for; an unchanged pane is not
+        /// solved again on every layout pass.
+        private var gridFitKey: GridFitKey?
+
+        private struct GridFitKey: Equatable {
+            var grid: TerminalGrid
+            var available: CGSize
+            var preferred: CGFloat
+        }
+
+        func installGridEdges(trailing: NSLayoutConstraint, bottom: NSLayoutConstraint) {
+            gridTrailingConstraint = trailing
+            gridBottomConstraint = bottom
+            restingTrailing = trailing.constant
+            restingBottom = bottom.constant
+            gridSlack = .zero
+            gridFitKey = nil
+        }
+
+        private func applyGridEdges() {
+            let trailing = restingTrailing - gridSlack.width
+            let bottom = restingBottom - gridSlack.height
+            if gridTrailingConstraint?.constant != trailing {
+                gridTrailingConstraint?.constant = trailing
+            }
+            if gridBottomConstraint?.constant != bottom {
+                gridBottomConstraint?.constant = bottom
+            }
+        }
+
+        /// Lays the emulator out at the grid of a terminal another client
+        /// owns the size of (`TerminalSessionController.gridPin`), or back
+        /// at the pane's own.
+        ///
+        /// SwiftTerm measures its grid from its frame and its font, so the
+        /// grid is given by giving it exactly that frame: the text shrinks
+        /// until the grid fits the pane (`TerminalGridFit`), and the room
+        /// left over is taken off the trailing and bottom edges. Nothing
+        /// in the fork changes, and its frame-is-the-grid arithmetic —
+        /// scrolling, hit testing, the caret — stays true.
+        ///
+        /// `synchronously` is for the controller's call: the screen that
+        /// follows is drawn for this grid, so the grid has to be in place
+        /// when it returns. From a layout pass it only asks for another.
+        func applyGridPin(synchronously: Bool) {
+            guard let view = terminalView, let container = view.superview,
+                  gridTrailingConstraint != nil, preferredFontSize > 0
+            else { return }
+            func relayout() {
+                if synchronously { container.layoutIfNeeded() } else { container.setNeedsLayout() }
+            }
+            func setFontSize(_ size: CGFloat) {
+                guard abs(view.font.pointSize - size) > 0.01 else { return }
+                view.font = .monospacedSystemFont(ofSize: size, weight: .regular)
+            }
+            guard let grid = controller.gridPin else {
+                guard gridFitKey != nil || gridSlack != .zero else { return }
+                gridFitKey = nil
+                gridSlack = .zero
+                setFontSize(preferredFontSize)
+                applyGridEdges()
+                relayout()
+                return
+            }
+            if synchronously { container.layoutIfNeeded() }
+            let available = CGSize(
+                width: view.bounds.width + gridSlack.width,
+                height: view.bounds.height + gridSlack.height)
+            guard available.width > 0, available.height > 0 else { return }
+            let key = GridFitKey(grid: grid, available: available, preferred: preferredFontSize)
+            guard key != gridFitKey else { return }
+            let scale = max(view.traitCollection.displayScale, 1)
+            func cell() -> CGSize? {
+                let dimensions = view.terminalDimensions
+                guard dimensions.cols > 0, dimensions.rows > 0 else { return nil }
+                let optimal = view.getOptimalFrameSize()
+                return CGSize(
+                    width: optimal.width / CGFloat(dimensions.cols),
+                    height: optimal.height / CGFloat(dimensions.rows))
+            }
+            guard let measured = cell(), view.font.pointSize > 0 else { return }
+            var size = TerminalGridFit.fontSize(
+                for: grid, in: available,
+                cellPerPoint: CGSize(
+                    width: measured.width / view.font.pointSize,
+                    height: measured.height / view.font.pointSize),
+                preferred: preferredFontSize)
+            setFontSize(size)
+            // Cell size is only nearly linear in font size (it is snapped
+            // to pixels): check the real cell and step down.
+            while let fitted = cell(),
+                  size > TerminalGridFit.minimumFontSize,
+                  !TerminalGridFit.fits(grid, cell: fitted, in: available, displayScale: scale) {
+                size = max(TerminalGridFit.minimumFontSize, size - 0.5)
+                setFontSize(size)
+            }
+            guard let fitted = cell() else { return }
+            let frame = TerminalGridFit.frameSize(for: grid, cell: fitted, displayScale: scale)
+            gridSlack = CGSize(
+                width: available.width - frame.width,
+                height: available.height - frame.height)
+            gridFitKey = key
+            applyGridEdges()
+            relayout()
         }
 
         #if !os(visionOS)
@@ -558,10 +702,10 @@ final class TerminalSurfaceView: UIView {
         }
 
         func updateBottomChromeHeight(_ height: CGFloat) {
-            guard let constraint = terminalBottomConstraint,
-                  constraint.constant != -height
+            guard terminalBottomConstraint != nil, restingBottom != -height
             else { return }
-            constraint.constant = -height
+            restingBottom = -height
+            applyGridEdges()
             avoidingContainer?.layoutIfNeeded()
         }
 
@@ -570,17 +714,18 @@ final class TerminalSurfaceView: UIView {
         /// pane. Both change the grid's clearance without rebuilding it.
         func updateContentSafeArea(_ safeArea: UIEdgeInsets) {
             guard let leadingConstraint = terminalLeadingConstraint,
-                  let trailingConstraint = terminalTrailingConstraint
+                  terminalTrailingConstraint != nil
             else { return }
             let leadingConstant = TerminalSurfaceView.terminalInsets.left
                 + safeArea.left
             let trailingConstant = -(TerminalSurfaceView.terminalInsets.right
                 + safeArea.right)
             guard leadingConstraint.constant != leadingConstant
-                    || trailingConstraint.constant != trailingConstant
+                    || restingTrailing != trailingConstant
             else { return }
             leadingConstraint.constant = leadingConstant
-            trailingConstraint.constant = trailingConstant
+            restingTrailing = trailingConstant
+            applyGridEdges()
             avoidingContainer?.layoutIfNeeded()
         }
 

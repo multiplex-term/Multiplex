@@ -109,6 +109,12 @@ struct RexSocket: Sendable {
 /// - **The last client to type owns the size**, as with tmux's latest-client
 ///   rule. Another client (the Rex app) can claim the block back; the next
 ///   keystroke here claims it again and re-sizes it.
+/// - **The emulator's grid is the terminal's, not always this tab's.** A
+///   terminal has one size, its owner's. While another client owns it the
+///   stream says what that size is (`resize`), and the emulator is given
+///   that grid (`onGrid`) and its screen drawn again — output laid out for
+///   170 columns and parsed at 132 left stray characters all over the tab
+///   (user-reported, reproduced with a stand-in client holding the block).
 /// - **Only what a person does is written.** `write` is what claims, so
 ///   nothing may reach it that the emulator said by itself. The server
 ///   parses the terminal's output too and answers its queries there; the
@@ -184,6 +190,14 @@ actor RexSession: TerminalTransport {
     /// the bootstrap was rendered during a full-screen program.
     private var exitWatch: AlternateScreenExitWatch?
     private var lastOutput = ContinuousClock.now
+    /// The grid the terminal has while it is someone else's to size — what
+    /// the stream last said. nil while its size is this tab's own.
+    private var terminalGrid: TerminalGrid?
+    /// What the emulator was last told (`onGrid`); nil is its own grid.
+    private var shownGrid: TerminalGrid?
+    /// One redraw at a time: each waits for the one before it.
+    private var drawing: Task<Void, Never>?
+    private var isResyncing = false
     /// `attaching` until `open` returns; `closed` is final, whichever side
     /// ended it.
     private enum Phase { case attaching, live, closed }
@@ -200,6 +214,7 @@ actor RexSession: TerminalTransport {
 
     private var onData: (@Sendable (Data) -> Void)?
     private var onClose: (@Sendable (String?) -> Void)?
+    private var onGrid: (@Sendable (TerminalGrid?) async -> Void)?
 
     init(
         openPipe: @escaping @Sendable () async throws -> RemotePipe,
@@ -231,13 +246,20 @@ actor RexSession: TerminalTransport {
     /// Attaches and returns once the terminal's current screen has been
     /// handed to `onData`. `onClose` fires at most once, later, when the
     /// block or the link ends on its own (nil for a clean end).
+    ///
+    /// `onGrid` names the grid the emulator must have before the bytes that
+    /// follow are drawn: another client's while that client owns the
+    /// terminal's size, nil for the tab's own again. It is awaited — the
+    /// screen is not sent until it returns.
     func open(
         cols: Int, rows: Int,
         onData: @Sendable @escaping (Data) -> Void,
-        onClose: @Sendable @escaping (String?) -> Void
+        onClose: @Sendable @escaping (String?) -> Void,
+        onGrid: @Sendable @escaping (TerminalGrid?) async -> Void = { _ in }
     ) async throws {
         self.onData = onData
         self.onClose = onClose
+        self.onGrid = onGrid
         size = (cols, rows)
         do {
             try await attach()
@@ -350,6 +372,9 @@ actor RexSession: TerminalTransport {
         stream = nil
         reached.subtract([.dataWelcome, .live])
         held = Data()
+        // The size on record is the terminal being left's; the new stream
+        // opens by saying its own.
+        terminalGrid = nil
         exitWatch = nil
         pendingInput = ""
         input = RexInputEncoder()
@@ -366,25 +391,122 @@ actor RexSession: TerminalTransport {
         }
     }
 
+    /// How much of the held stream a redraw draws after the rendering.
+    private enum Replay {
+        /// All of it. The attach's rule: nothing says where in the held
+        /// bytes the rendering was taken, so it errs toward repeating.
+        case everything
+        /// Only what arrived after the rendering was asked for. Whatever
+        /// came before that is in the rendering for certain, and the redraw
+        /// that asks for this has waited for the terminal to go quiet.
+        case sinceRequest
+    }
+
     /// Renders the terminal's current screen into the emulator, then lets
     /// the stream through. Stream output is held from the moment this is
     /// called (the attach holds it from the start) to the moment the
     /// rendering has been drawn, so nothing is drawn UNDER a rendering that
     /// was taken later, and nothing that arrived meanwhile is dropped.
-    private func drawScreen(blockID: String) async {
+    ///
+    /// Redraws run one at a time. Two at once shared one hold: the first to
+    /// finish let the stream through, and the second then wiped whatever
+    /// had been drawn since its own rendering was taken.
+    private func drawScreen(blockID: String, replay: Replay = .everything) async {
         held = held ?? Data()
+        let generation = dataGeneration
+        let previous = drawing
+        let task = Task {
+            await previous?.value
+            await self.performDraw(blockID: blockID, replay: replay, generation: generation)
+        }
+        drawing = task
+        await task.value
+    }
+
+    private func performDraw(blockID: String, replay: Replay, generation: Int) async {
+        // A switch since this was asked for: the screen now belongs to
+        // another terminal, whose own redraw follows.
+        guard phase != .closed, generation == dataGeneration else { return }
+        held = held ?? Data()
+        await adoptTerminalGrid()
+        let asked = held?.count ?? 0
         // Two reads that depend on nothing of each other's, so they share
         // one round trip.
         async let alternate = isOnAlternateScreen(blockID: blockID)
         async let rendering = bootstrapScreen(blockID: blockID)
         let (onAlternateScreen, screen) = await (alternate, rendering)
-        guard phase != .closed else { return }
+        guard phase != .closed, generation == dataGeneration else { return }
         // RIS first: a resumed tab still shows what the last run drew.
         onData?(Data([0x1B, 0x63]) + screen)
         exitWatch = onAlternateScreen ? AlternateScreenExitWatch() : nil
-        let pending = held
+        let pending = held ?? Data()
         held = nil
-        if let pending, !pending.isEmpty { deliver(pending) }
+        let rest = replay == .everything
+            ? pending
+            : pending.dropFirst(RexWire.resumeOffset(in: pending, from: asked))
+        if !rest.isEmpty { deliver(Data(rest)) }
+        // The size changed again while the rendering was on its way.
+        if terminalGrid != shownGrid, !isResyncing {
+            held = Data()
+            Task { await self.resync() }
+        }
+    }
+
+    // MARK: - Another client's size
+
+    /// The stream said what size the terminal is. While this client owns
+    /// the block that is the tab's own size and nothing changes; otherwise
+    /// it is whatever its owner made it, and the emulator has to follow.
+    private func noteTerminalSize(cols: Int, rows: Int, owner: String?) {
+        let isOwn = (owner != nil && owner == clientID) || (cols == size.cols && rows == size.rows)
+        terminalGrid = isOwn ? nil : TerminalGrid(cols: cols, rows: rows)
+        // While the screen is still to be drawn (attach, switch, a redraw
+        // already holding) that redraw reads the grid itself.
+        guard terminalGrid != shownGrid, held == nil else { return }
+        // Everything from here on was written for the new size.
+        held = Data()
+        Task { await self.resync() }
+    }
+
+    /// Gives the emulator the terminal's grid and draws the screen again at
+    /// it, once the burst a resize sets off has passed — the program
+    /// repaints on SIGWINCH, and a rendering taken mid-repaint would have
+    /// the rest of it drawn on top a second time.
+    ///
+    /// It redraws even when the size has gone back by then: what was
+    /// written in between was laid out for a grid the emulator never had.
+    private func resync() async {
+        guard !isResyncing else { return }
+        isResyncing = true
+        defer { isResyncing = false }
+        repeat {
+            held = held ?? Data()
+            await waitForQuiet()
+            // A switch draws the new terminal itself, and the hold is its.
+            guard phase != .closed, !isSwitching, let blockID else { return }
+            await drawScreen(blockID: blockID, replay: .sinceRequest)
+        } while phase != .closed && !isSwitching && terminalGrid != shownGrid
+    }
+
+    private func adoptTerminalGrid() async {
+        while terminalGrid != shownGrid, phase != .closed {
+            let grid = terminalGrid
+            await onGrid?(grid)
+            shownGrid = grid
+        }
+    }
+
+    /// Returns once the terminal has written nothing for a moment, or
+    /// after the cap for one that never stops.
+    private func waitForQuiet() async {
+        let started = ContinuousClock.now
+        while phase != .closed {
+            try? await Task.sleep(for: .milliseconds(60))
+            let now = ContinuousClock.now
+            if now - lastOutput >= .milliseconds(120) || now - started >= .milliseconds(800) {
+                break
+            }
+        }
     }
 
     /// Stream output on its way to the emulator. The one place that also
@@ -409,14 +531,7 @@ actor RexSession: TerminalTransport {
     /// terminal has gone quiet, leaves nothing in the window to repeat. A
     /// terminal that never goes quiet is redrawn anyway after the cap.
     private func redrawOnceQuiet(blockID: String) async {
-        let started = ContinuousClock.now
-        while phase != .closed {
-            try? await Task.sleep(for: .milliseconds(60))
-            let now = ContinuousClock.now
-            if now - lastOutput >= .milliseconds(120) || now - started >= .milliseconds(800) {
-                break
-            }
-        }
+        await waitForQuiet()
         guard phase != .closed else { return }
         await drawScreen(blockID: blockID)
     }
@@ -726,11 +841,17 @@ actor RexSession: TerminalTransport {
             for event in events {
                 switch event {
                 case .output(let output):
-                    if held == nil { deliver(output) } else { held?.append(output) }
-                case .resize, .childExited:
-                    // The size is this tab's own while it owns the block,
-                    // and a program's exit closes the block, which arrives
-                    // as the stream's close. Neither needs acting on here.
+                    if held == nil {
+                        deliver(output)
+                    } else {
+                        held?.append(output)
+                        lastOutput = .now
+                    }
+                case .resize(let cols, let rows, let owner):
+                    noteTerminalSize(cols: cols, rows: rows, owner: owner)
+                case .childExited:
+                    // A program's exit closes the block, which arrives as
+                    // the stream's close.
                     break
                 }
             }

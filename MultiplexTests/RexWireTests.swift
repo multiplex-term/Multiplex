@@ -359,6 +359,61 @@ final class RexWireTests: XCTestCase {
         XCTAssertNil(RexWire.parseDataReply(Data()))
     }
 
+    // MARK: - Picking a held stream up again
+
+    func testACleanCutResumesWhereItWasMade() {
+        let data = Data("one\r\n\u{1B}[31mtwo\u{1B}[0m\r\nthree".utf8)
+        // After a line, after a finished sequence, in plain text.
+        for offset in [5, 10, 13, 17, 21] {
+            XCTAssertEqual(RexWire.resumeOffset(in: data, from: offset), offset, "\(offset)")
+        }
+        XCTAssertEqual(RexWire.resumeOffset(in: data, from: 0), 0)
+        // Out of range is clamped, not trapped on.
+        XCTAssertEqual(RexWire.resumeOffset(in: data, from: -4), 0)
+        XCTAssertEqual(RexWire.resumeOffset(in: data, from: 999), data.count)
+        XCTAssertEqual(RexWire.resumeOffset(in: Data(), from: 3), 0)
+    }
+
+    func testACutInsideAnEscapeSequenceBacksUpToItsStart() {
+        // "ab" ESC [ 3 8 ; 5 ; 1 2 m "cd": the sequence starts at 2 and its
+        // final byte is at 11.
+        let data = Data("ab\u{1B}[38;5;12mcd".utf8)
+        for offset in 3...11 {
+            XCTAssertEqual(RexWire.resumeOffset(in: data, from: offset), 2, "\(offset)")
+        }
+        XCTAssertEqual(RexWire.resumeOffset(in: data, from: 12), 12)
+        // The same question of a cut at the very end of what has arrived.
+        XCTAssertEqual(RexWire.resumeOffset(in: data.prefix(9), from: 9), 2)
+
+        // A lone ESC, a charset designator missing its final byte, and an
+        // OSC still waiting for its terminator.
+        XCTAssertEqual(RexWire.resumeOffset(in: Data("ab\u{1B}".utf8), from: 3), 2)
+        XCTAssertEqual(RexWire.resumeOffset(in: Data("ab\u{1B}(B".utf8), from: 4), 2)
+        XCTAssertEqual(RexWire.resumeOffset(in: Data("ab\u{1B}(B".utf8), from: 5), 5)
+        let title = Data("ab\u{1B}]0;title\u{07}cd".utf8)
+        XCTAssertEqual(RexWire.resumeOffset(in: title, from: 8), 2)
+        XCTAssertEqual(RexWire.resumeOffset(in: title, from: 11), 2)
+        XCTAssertEqual(RexWire.resumeOffset(in: title, from: 12), 12)
+        // An ST's own ESC: the string before it is whole, the ST is not.
+        let hyperlink = Data("\u{1B}]8;;x\u{1B}\\y".utf8)
+        XCTAssertEqual(RexWire.resumeOffset(in: hyperlink, from: 7), 6)
+        XCTAssertEqual(RexWire.resumeOffset(in: hyperlink, from: 8), 8)
+    }
+
+    func testACutInsideACharacterBacksUpToItsLeadByte() {
+        // "a" + 測 (3 bytes) + "b" + 😀 (4 bytes).
+        let data = Data("a測b😀".utf8)
+        XCTAssertEqual(RexWire.resumeOffset(in: data, from: 1), 1)
+        XCTAssertEqual(RexWire.resumeOffset(in: data, from: 2), 1)
+        XCTAssertEqual(RexWire.resumeOffset(in: data, from: 3), 1)
+        XCTAssertEqual(RexWire.resumeOffset(in: data, from: 4), 4)
+        XCTAssertEqual(RexWire.resumeOffset(in: data, from: 5), 5)
+        for offset in 6...8 {
+            XCTAssertEqual(RexWire.resumeOffset(in: data, from: offset), 5, "\(offset)")
+        }
+        XCTAssertEqual(RexWire.resumeOffset(in: data, from: 9), 9)
+    }
+
     // MARK: - Terminal stream
 
     private func expectedEvents() -> [RexTerminalStream.Event] {

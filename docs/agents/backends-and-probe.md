@@ -527,8 +527,61 @@ HerdrProbe, RexProbe, session creation/targeting, or file attach/drop.
     which is why the pump never had to care.
   - **The last client to type owns the size** (tmux's latest-client
     rule): the Rex app can claim the block back (`block_owner_changed`);
-    the next keystroke here claims and re-sizes it. Until then the tab
-    shows another client's size — Multiplex does not letterbox.
+    the next keystroke here claims and re-sizes it. Until then the
+    terminal has the other client's size, and the tab draws it AT that
+    size (next bullet).
+  - ⚠ **The emulator's grid follows the terminal's, not the pane's.** A
+    terminal has one size, its owner's; the stream says what it is
+    (`resize`, with the owner). Ignored — the first shape, "Multiplex does
+    not letterbox" — the tab parsed output laid out for 170 columns at 132
+    and filled with stray characters the moment the Rex app held the
+    terminal at another size (reproduced with a stand-in client; and since
+    the tab stopped answering queries, above, nothing claims the size back
+    until someone types). Now a size that is another client's
+    (`RexSession.noteTerminalSize`: not this client's, not this tab's own
+    dimensions) is followed:
+    - `RexSession` holds the stream from that `resize` on, waits for the
+      repaint a SIGWINCH sets off to go quiet (the alternate-screen wait:
+      120 ms, capped at 800), has the emulator take the grid (`onGrid`,
+      awaited), then draws the screen again from `format`. Held bytes
+      that arrived before the rendering was asked for are in it and are
+      NOT drawn again (`Replay.sinceRequest`; `RexWire.resumeOffset`
+      keeps the cut off the middle of an escape sequence or a character)
+      — replaying them, the attach's rule, drew the program's repaint
+      twice. The attach keeps its own rule: it has no quiet wait to lean
+      on.
+    - Redraws run one at a time (`drawScreen` chains them). Two sharing
+      one hold let the first release the stream under the second.
+    - The pane gives SwiftTerm the grid by giving it the FRAME
+      (`TerminalSurfaceView.Coordinator.applyGridPin`, `TerminalGridFit`,
+      pure + tested): text shrinks in half points, never below 5 pt and
+      never above the tab's own, until the grid fits; what is left over
+      comes off the trailing and bottom edges. The fork is untouched and
+      its frame-is-the-grid arithmetic stays true. A fork-side "pinned
+      grid" was rejected: the view's scroll geometry, hit testing and
+      caret all divide the frame by the cell.
+    - The grids SwiftTerm reports on the way (`sizeChanged` for each font
+      and frame step) are not this tab's ask and are never sent
+      (`TerminalSessionController.gridPin`, `isSettlingGridPin`); the
+      tab's own last grid is kept (`ownSize`) for the next attach.
+    - It ends when this client owns the block again — typing claims it,
+      or the other client leaves and the server hands it back — because
+      the stream then reports a size whose owner is this client.
+    - Only FOLLOWING: the tab never takes the size back by itself. That
+      was the flicker.
+    - To re-measure: a second control connection that `own_block(take)`s
+      and resizes to something larger than the pane, then type in the
+      terminal from that side (`rex send`). The tab must match `rex
+      capture` cell for cell. Not exercised: the real Rex app as the
+      other client, and a tab whose pane is off screen when the size
+      changes hands (its emulator is laid out when it next appears, after
+      the rendering was drawn).
+  - ⚠ **Every redraw is RIS + a rendering, and RIS has to empty BOTH
+    screens.** Upstream SwiftTerm's did not empty the alternate one, so
+    the REX key's switch from one full-screen program to another (two
+    agents — the common case) drew the second over the first; fixed in
+    the fork (`swiftterm-fork.md`, `TerminalFullResetTests`). A shell on
+    either side hid it, which is why the first switch tests passed.
   - ⚠ **Nothing the emulator says by itself reaches a Rex terminal**
     (`TerminalSessionController.sendTerminalReport`). The server keeps the
     terminal and answers its queries there — measured with no client

@@ -25,6 +25,11 @@ final class RexSessionTests: XCTestCase {
         private var closes: [String?] = []
 
         func data(_ chunk: Data) { lock.withLock { chunks.append(chunk) } }
+        /// The emulator's grid changing hands, in line with what is drawn.
+        func grid(_ grid: TerminalGrid?) {
+            let text = grid.map { "GRID \($0.cols)x\($0.rows)" } ?? "GRID own"
+            lock.withLock { chunks.append(Data(text.utf8)) }
+        }
         func closed(_ reason: String?) { lock.withLock { closes.append(reason) } }
         var text: [String] { lock.withLock { chunks.map { String(decoding: $0, as: UTF8.self) } } }
         var closeReasons: [String?] { lock.withLock { closes } }
@@ -36,7 +41,8 @@ final class RexSessionTests: XCTestCase {
         try await session.open(
             cols: cols, rows: rows,
             onData: { sink.data($0) },
-            onClose: { sink.closed($0) }
+            onClose: { sink.closed($0) },
+            onGrid: { sink.grid($0) }
         )
     }
 
@@ -266,6 +272,102 @@ final class RexSessionTests: XCTestCase {
         await session.close()
     }
 
+    // MARK: - Another client's size
+
+    func testAnotherClientsSizeIsGivenToTheEmulatorBeforeTheScreenIsDrawnAgain() async throws {
+        let server = FakeRexServer()
+        let session = makeSession(server)
+        let sink = Sink()
+        try await open(session, sink: sink)
+        XCTAssertEqual(sink.text, ["\u{1B}cSCREEN"])
+
+        // The Rex app takes the terminal at its own size, and the program
+        // repaints for it straight away.
+        server.screen = "WIDE"
+        server.sendResize(cols: 170, rows: 50, owner: "client:rex-app")
+        server.sendOutput("REPAINT")
+        await eventually { sink.text.last == "\u{1B}cWIDE" }
+        // The grid first, then the screen at it — and the repaint, which
+        // arrived before the rendering was asked for and so is in it, is
+        // not drawn a second time on top.
+        XCTAssertEqual(sink.text, ["\u{1B}cSCREEN", "GRID 170x50", "\u{1B}cWIDE"])
+        // Following is all it does: the size is not asked back.
+        XCTAssertEqual(server.calls.filter { $0 == "session.own_block" }.count, 1)
+        XCTAssertEqual(
+            server.calls.filter { $0.hasPrefix("com.superlogical.terminal.resize") }.count, 1)
+
+        server.sendOutput("later")
+        await eventually { sink.text.last == "later" }
+
+        // Typing here takes the terminal back; the stream then says it is
+        // this tab's size again and the emulator returns to its own grid.
+        server.screen = "OWN"
+        server.sendResize(cols: 100, rows: 30, owner: server.clientID)
+        await eventually { sink.text.last == "\u{1B}cOWN" }
+        XCTAssertEqual(Array(sink.text.suffix(2)), ["GRID own", "\u{1B}cOWN"])
+        await session.close()
+    }
+
+    func testThisTabsOwnResizesNeverMoveTheEmulatorsGrid() async throws {
+        let server = FakeRexServer()
+        let session = makeSession(server)
+        let sink = Sink()
+        try await open(session, sink: sink)
+
+        // A window drag: the stream reports sizes this client set, some of
+        // them already overtaken by the next one.
+        try await session.resize(cols: 120, rows: 40)
+        server.sendResize(cols: 110, rows: 35, owner: server.clientID)
+        server.sendResize(cols: 120, rows: 40, owner: server.clientID)
+        // Another client that happens to want this tab's size changes
+        // nothing either.
+        server.sendResize(cols: 120, rows: 40, owner: "client:rex-app")
+        server.sendOutput("after")
+        await eventually { sink.text.last == "after" }
+        try await Task.sleep(for: .milliseconds(400))
+
+        XCTAssertEqual(sink.text, ["\u{1B}cSCREEN", "after"])
+        XCTAssertEqual(
+            server.calls.filter { $0 == "com.superlogical.terminal.format" }.count, 1)
+        await session.close()
+    }
+
+    func testASizeThatGoesBackBeforeTheRedrawIsStillDrawnAgainAtTheTabsOwnGrid() async throws {
+        let server = FakeRexServer()
+        let session = makeSession(server)
+        let sink = Sink()
+        try await open(session, sink: sink)
+
+        // Taken and given back inside the quiet wait. The emulator's grid
+        // has nowhere to go, but what the program wrote in between was
+        // laid out for 170 columns: it is replaced, not drawn.
+        server.screen = "BACK"
+        server.sendResize(cols: 170, rows: 50, owner: "client:rex-app")
+        server.sendOutput("one")
+        server.sendResize(cols: 100, rows: 30, owner: server.clientID)
+        server.sendOutput("two")
+        await eventually { sink.text.count == 2 }
+        try await Task.sleep(for: .milliseconds(300))
+
+        XCTAssertEqual(sink.text, ["\u{1B}cSCREEN", "\u{1B}cBACK"])
+        XCTAssertEqual(
+            server.calls.filter { $0 == "com.superlogical.terminal.format" }.count, 2)
+        await session.close()
+    }
+
+    func testATerminalAlreadyAtAnotherClientsSizeIsAttachedAtThatGrid() async throws {
+        let server = FakeRexServer()
+        // The claim did not hold: by the time the stream opens the Rex app
+        // has the terminal again.
+        server.openingSize = (170, 50, "client:rex-app")
+        let session = makeSession(server)
+        let sink = Sink()
+        try await open(session, sink: sink)
+
+        XCTAssertEqual(sink.text, ["GRID 170x50", "\u{1B}cSCREEN"])
+        await session.close()
+    }
+
     // MARK: - Full-screen programs
 
     func testATabAttachedDuringAFullScreenProgramRedrawsWhenItExits() async throws {
@@ -461,6 +563,8 @@ private final class FakeRexServer: @unchecked Sendable {
     var earlyOutput = ""
     var screen = "SCREEN"
     var screenKind = "primary"
+    /// The size the stream opens by stating, and whose it is.
+    var openingSize: (cols: Int, rows: Int, owner: String) = (100, 30, "client:me")
     let nonce: UInt64 = 0x1122_3344_5566_7788
     let clientID = "client:me"
 
@@ -489,6 +593,19 @@ private final class FakeRexServer: @unchecked Sendable {
 
     func sendOutput(_ text: String) {
         lock.withLock { dataFeed }?.yield(Self.frame(0x2, Data(text.utf8)))
+    }
+
+    /// The stream's own word that the terminal changed size, and whose
+    /// size it now is.
+    func sendResize(cols: Int, rows: Int, owner: String) {
+        lock.withLock { dataFeed }?.yield(Self.frame(
+            0x2, Data(Self.resizeMessage(nonce: nonce, cols: cols, rows: rows, owner: owner).utf8)))
+    }
+
+    static func resizeMessage(nonce: UInt64, cols: Int, rows: Int, owner: String) -> String {
+        "\u{1B}_rex1;\(nonce);"
+            + #"{"type":"resize","cols":\#(cols),"rows":\#(rows),"owner":"\#(owner)"}"#
+            + "\u{1B}\\"
     }
 
     func closeData(code: UInt16, reason: String) {
@@ -728,12 +845,13 @@ private final class FakeRexServer: @unchecked Sendable {
             feed.yield(FakeRexServer.frame(0x2, Data(welcome)))
             // A snapshot the emulator must never see, the `resize` that ends
             // it, and whatever the program printed straight away.
-            let marker = "\u{1B}_rex1;\(server.nonce);"
-            let resize = #"{"type":"resize","cols":100,"rows":30,"owner":"client:me"}"#
+            let opening = server.openingSize
             feed.yield(FakeRexServer.frame(
                 0x2,
                 Data("GHOSTSNP\u{1}\u{0}binary snapshot".utf8)
-                    + Data((marker + resize + "\u{1B}\\").utf8)
+                    + Data(FakeRexServer.resizeMessage(
+                        nonce: server.nonce, cols: opening.cols, rows: opening.rows,
+                        owner: opening.owner).utf8)
                     + Data(server.earlyOutput.utf8)))
         }
 
