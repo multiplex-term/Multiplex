@@ -65,6 +65,33 @@ final class RailFitTests: XCTestCase {
         XCTAssertTrue(placement(compact: true, landscape: true, trailing: true).anchoredToBottom, "camera bottom")
     }
 
+    func testALiveActivityPushesTheColumnBelowTheSystemGlyphs() {
+        func top(compact: Bool, landscape: Bool, block: CGFloat?) -> CGFloat {
+            RailFit.columnPlacement(
+                compactWidth: compact, landscape: landscape, trailingEdge: true, systemBlockBottom: block
+            ).top
+        }
+        XCTAssertEqual(top(compact: true, landscape: false, block: 174), 160, "the resting block moves nothing")
+        XCTAssertEqual(top(compact: true, landscape: false, block: 218), 204, "one Live Activity")
+        XCTAssertEqual(top(compact: false, landscape: true, block: 100), 120, "never above the resting inset")
+        XCTAssertEqual(top(compact: false, landscape: true, block: 190), 176)
+        XCTAssertEqual(top(compact: true, landscape: true, block: 264), 12, "closed landscape: camera strip only")
+    }
+
+    func testTheSystemBlockIsTheOcclusionHangingFromTheTopOfTheStrip() {
+        let bounds = CGRect(x: 0, y: 0, width: 466, height: 678)
+        let camera = CGRect(x: 399.7, y: 29.3, width: 37, height: 37)
+        let block = CGRect(x: 382, y: 0, width: 84, height: 218.3)
+        func bottom(_ occlusions: [CGRect], edge: ShellRailEdge, strip: CGFloat = 84) -> CGFloat? {
+            ShellSideColumn.systemBlockBottom(occlusions: occlusions, edge: edge, strip: strip, in: bounds)
+        }
+        XCTAssertEqual(bottom([camera, block], edge: .trailing), 218.3)
+        XCTAssertNil(bottom([camera], edge: .trailing), "the camera alone is not the block")
+        XCTAssertNil(bottom([camera, block], edge: .leading), "the other strip")
+        XCTAssertNil(bottom([camera, block], edge: .top))
+        XCTAssertNil(bottom([camera, block], edge: .trailing, strip: 0))
+    }
+
     private func items(_ offered: [RailItem], height: CGFloat) -> [RailItem] {
         RailFit.columnItems(offered: offered, capacity: RailFit.capacity(availableHeight: height))
     }

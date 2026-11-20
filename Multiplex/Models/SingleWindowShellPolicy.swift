@@ -434,6 +434,31 @@ struct ShellSideColumn: Equatable {
     }
 }
 
+extension ShellSideColumn {
+    /// Where the system's glyph block ends in the strip on `edge`: the
+    /// occlusion regions hanging from the window's top inside that strip
+    /// (the clock and radio glyphs, pushed down by a Live Activity). The
+    /// camera alone, floating in the strip, is not the block.
+    static func systemBlockBottom(
+        occlusions: [CGRect],
+        edge: ShellRailEdge,
+        strip: CGFloat,
+        in bounds: CGRect
+    ) -> CGFloat? {
+        guard edge != .top, strip > 0 else { return nil }
+        let stripFrame = CGRect(
+            x: edge == .trailing ? bounds.maxX - strip : bounds.minX,
+            y: bounds.minY,
+            width: strip,
+            height: bounds.height
+        )
+        return occlusions
+            .filter { $0.minY <= bounds.minY + 1 && $0.intersects(stripFrame) }
+            .map { $0.maxY - bounds.minY }
+            .max()
+    }
+}
+
 /// iPhone Duo stacks the system's bars in a side column; the shell's rail is
 /// app-owned, so it follows the same edge by its own rule.
 enum ShellRailPlacement {

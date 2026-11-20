@@ -620,6 +620,30 @@ final class TerminalKeyBarUIKitTests: XCTestCase {
         )
     }
 
+    func testALockedKeyboardRefusesPencilScribbleOnTheTerminal() throws {
+        let terminal = TerminalView(frame: CGRect(x: 0, y: 0, width: 300, height: 200))
+        TerminalFocusArbiter.installScribbleGate(on: terminal)
+        TerminalFocusArbiter.installScribbleGate(on: terminal)
+        let gates = terminal.interactions.compactMap { $0 as? UIScribbleInteraction }
+        XCTAssertEqual(gates.count, 1, "an adopted tab keeps a single gate")
+        let gate = try XCTUnwrap(gates.first)
+        let delegate = try XCTUnwrap(gate.delegate)
+        func allowsScribble() -> Bool {
+            delegate.scribbleInteraction?(gate, shouldBeginAt: CGPoint(x: 20, y: 20)) ?? true
+        }
+        XCTAssertTrue(allowsScribble(), "unlocked, the Pencil may still write")
+
+        // A different terminal takes the lock: the gate reads the app-wide
+        // state, so a view that never held the input session refuses too.
+        let focused = TerminalView(frame: CGRect(x: 0, y: 0, width: 300, height: 200))
+        TerminalFocusArbiter.lock(focused)
+        defer { TerminalFocusArbiter.unlock(focused, summoning: false) }
+        XCTAssertFalse(allowsScribble(), "locked, a Pencil stroke is a touch, not ink")
+
+        TerminalFocusArbiter.unlock(focused, summoning: false)
+        XCTAssertTrue(allowsScribble())
+    }
+
     private func descendants(in root: UIView) -> [UIView] {
         root.subviews + root.subviews.flatMap(descendants(in:))
     }

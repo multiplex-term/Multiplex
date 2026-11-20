@@ -1168,6 +1168,17 @@ final class SingleWindowShellViewController: UIViewController {
         #endif
     }
 
+    /// The system's occlusion regions in shell coordinates (iOS 27.1): the
+    /// camera and the side column's glyph block.
+    private func currentOcclusionRegions() -> [CGRect] {
+        #if os(iOS)
+        if #available(iOS 27.1, *), testLayoutInput == nil {
+            return shellRootView.reservedRegions(kind: .occlusion).map(\.frame)
+        }
+        #endif
+        return []
+    }
+
     /// The shell's frame on its screen; nil off-screen or on visionOS.
     private var windowFrameOnScreen: CGRect? {
         #if os(iOS)
@@ -1363,7 +1374,15 @@ final class SingleWindowShellViewController: UIViewController {
             isLandscape: isLandscape,
             foldable: isFoldable,
             leadingSafeArea: windowSafeArea.left,
-            trailingSafeArea: windowSafeArea.right
+            trailingSafeArea: windowSafeArea.right,
+            systemBlockBottom: { [self] edge in
+                ShellSideColumn.systemBlockBottom(
+                    occlusions: currentOcclusionRegions(),
+                    edge: edge,
+                    strip: edge == .trailing ? windowSafeArea.right : windowSafeArea.left,
+                    in: shellRootView.bounds
+                )
+            }
         )
         let closedDisplay = displayIsClosed
         let cornerClearance = SingleWindowShellLayout.bottomCornerClearance(

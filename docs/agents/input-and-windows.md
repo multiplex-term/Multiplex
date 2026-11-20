@@ -722,6 +722,17 @@ routing, tab moves, keyboard avoidance, or secret fields.
 
 ## Key rail and the keyboard lock
 
+The lock also refuses Apple Pencil Scribble (`LockedScribbleGate`, a
+`UIScribbleInteraction` whose delegate answers `shouldBeginAt` from
+`KeyboardLock`). The zero-size `inputView` only stops UIKit presenting a
+keyboard; a `UITextInput` view still takes handwriting, so a locked terminal
+kept drawing ink and typing instead of letting the Pencil tap, select, and
+scroll. `SwiftTermView.installTerminal` installs the gate on EVERY terminal
+view, not at claim — Scribble focuses whichever text view the Pencil lands
+on, including one that never held the input session. Unlocked, Scribble
+stays on as text input. Unit-tested at the delegate; no simulator route
+drives a Pencil, so the on-glass behavior is device-verified only.
+
 On a phone RET exists only while the keyboard is locked. A row on the regular
 faces keeps its unlocked tier when locked and narrows the faces 2 to 4 pt for
 the extra key (`returnOnlyWhileLocked`), so locking never drops `~`, `/`, or the

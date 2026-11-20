@@ -118,6 +118,7 @@ final class TerminalSurfaceView: UIView {
             view.inputAccessoryView = nil
             #endif
         }
+        TerminalFocusArbiter.installScribbleGate(on: view)
         view.renderUpdatesEnabled = configuration.isActive
         apply(configuration.theme, to: view)
         if view.font.pointSize != configuration.fontSize {
