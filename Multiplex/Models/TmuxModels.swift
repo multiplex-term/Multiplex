@@ -188,6 +188,18 @@ struct TmuxSession: Identifiable, Hashable, Codable {
     var activeAgent: AgentKind? {
         activeWindow?.activeAgent
     }
+    /// The agent a tab's helper strip speaks for. A tab that shows the
+    /// whole session (tmux, herdr) follows `activeAgent`: its multiplexer
+    /// draws whichever pane is in front. A tab that IS one pane — a Rex tab
+    /// is one terminal — names it, and gets that pane's agent wherever the
+    /// session's focus has gone since: the Rex app fronting another window
+    /// must not take the strip off a tab still showing the agent. A named
+    /// pane the record does not list has no agent to report.
+    func agent(inPane paneID: String?) -> AgentKind? {
+        guard let paneID else { return activeAgent }
+        return windows.lazy.flatMap { $0.panes ?? [] }
+            .first { $0.tmuxID == paneID }?.agent
+    }
     /// Every detected agent pane, including background splits and inactive
     /// windows. FleetWall uses this broader view; helper chips intentionally
     /// continue to use `activeAgent`.
@@ -199,6 +211,14 @@ struct TmuxSession: Identifiable, Hashable, Codable {
     }
     var paneCount: Int {
         windows.reduce(0) { $0 + $1.paneCount }
+    }
+    /// The shortcut panel's switch list has somewhere else to go — what
+    /// lights the TMUX / HRDR / REX key. The list is windows (herdr:
+    /// workspaces, which the probe writes as windows), except on Rex, where
+    /// a tab is ONE terminal and the list is every terminal of the session:
+    /// a single split window already has a second row.
+    var hasSwitchChoices: Bool {
+        (backend == .rex ? paneCount : windowCount) > 1
     }
 }
 

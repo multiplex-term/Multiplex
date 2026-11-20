@@ -125,13 +125,50 @@ struct ShortcutPanelContent: Equatable, Sendable {
         switchNoun: String(localized: "workspace")
     )
 
+    /// Rex has no prefix-key client — Multiplex IS the client — so its panel
+    /// carries no shortcut rows at all. What it carries is the one thing a
+    /// Rex tab cannot otherwise do from inside itself: a tab shows ONE
+    /// terminal of its session, and this lists the others and switches the
+    /// tab to one in place (`RexSession.switchBlock`). The header's trailing
+    /// slot says so where the others state their prefix.
+    static let rex = ShortcutPanelContent(
+        headerTitle: "REX TERMINALS",
+        prefixLabel: "SWITCHES THIS TAB",
+        sections: [],
+        switchSectionTitle: String(localized: "Switch Terminal"),
+        switchSectionAccessibilityIdentifier: "rexTerminalSection",
+        switchChoiceAccessibilityPrefix: "rexTerminal.",
+        switchNoun: String(localized: "terminal")
+    )
+
     /// The panel for one terminal tab's backend; nil hides the chrome
     /// entirely (plain shells, viewports, the file viewer).
     static func content(for backend: Host.SessionBackend?) -> ShortcutPanelContent? {
         switch backend {
         case .tmux: .tmux
         case .herdr: .herdr
+        case .rex: .rex
         case nil: nil
+        }
+    }
+}
+
+extension Host.SessionBackend {
+    /// The face of the rail / bar key that opens this backend's panel. One
+    /// source for the three places that draw it.
+    var shortcutKeyCaption: String {
+        switch self {
+        case .tmux: "TMUX"
+        case .herdr: "HRDR"
+        case .rex: "REX"
+        }
+    }
+
+    var shortcutKeyAccessibilityLabel: String {
+        switch self {
+        case .tmux: String(localized: "Show tmux shortcuts")
+        case .herdr: String(localized: "Show herdr shortcuts")
+        case .rex: String(localized: "Show Rex terminals")
         }
     }
 }

@@ -83,6 +83,11 @@ enum GlassPrototype {
     static let herdrStrataMaterial = UIColor(
         red: 203 / 255, green: 166 / 255, blue: 247 / 255, alpha: 0.10
     )
+    /// The strata step in Rex's cool blue (`TallyPalette.rexBezel` carries
+    /// the rationale) — the same one-step lift as the mauve above.
+    static let rexStrataMaterial = UIColor(
+        red: 137 / 255, green: 196 / 255, blue: 255 / 255, alpha: 0.09
+    )
     /// Hairlines and resting borders (replaces `bezelHi`).
     static let lineMaterial = UIColor(white: 1, alpha: 0.11)
     /// Active borders (lit spine segment, active tab). Part of the frozen
@@ -115,6 +120,9 @@ enum GlassPrototype {
     static let strata = material(strataMaterial, fallback: TallyPalette.bezel)
     static let herdrStrata = material(
         herdrStrataMaterial, fallback: TallyPalette.herdrBezel
+    )
+    static let rexStrata = material(
+        rexStrataMaterial, fallback: TallyPalette.rexBezel
     )
     static let line = material(lineMaterial, fallback: TallyPalette.bezelHi)
     static let lineHi = material(lineHiMaterial, fallback: TallyPalette.bezelHi)

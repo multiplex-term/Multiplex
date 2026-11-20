@@ -72,12 +72,19 @@ final class TerminalSessionController {
     private var selectTextClampGeneration = 0
     private var selectTextClampTask: Task<Void, Never>?
 
+    /// Whether this tab's bytes ride mosh — THE transport question, asked
+    /// here by everything that depends on the answer (the run, scrollback,
+    /// FILE, the bar's MOSH badge). The host's preference, except on a Rex
+    /// tab: it has no PTY for mosh-server to run, so it rides SSH whatever
+    /// the host prefers.
+    var ridesMosh: Bool { host.useMosh && route.rexTarget == nil }
+
     /// Local scrollback for this tab's terminal view; nil disables it.
     /// A transport capability, so it lives beside the transport choice:
     /// mosh syncs ONE live screen and anything archived above it is junk
     /// (stale frames from scroll-op diffs, resync resets, and resizes) —
     /// full record in docs/agents/mosh.md.
-    var localScrollbackLines: Int? { host.useMosh ? nil : 5000 }
+    var localScrollbackLines: Int? { ridesMosh ? nil : 5000 }
 
     /// The HISTORY surface: user prompts read from the agent's own session
     /// file on the host (see `AgentSessionHistory`). Present while the panel
@@ -129,8 +136,17 @@ final class TerminalSessionController {
     /// windows — the adopting window re-parents this same view, so what's on
     /// screen survives a merge/split. Released with the controller on close.
     private(set) var terminalView: TerminalView?
-    /// The byte pipe under this tab — SSH PTY or mosh session.
+    /// The byte pipe under this tab — SSH PTY, mosh session, or Rex client.
     private var transport: (any TerminalTransport)?
+    /// The transport as the Rex client it is on a Rex tab; nil on any other.
+    private var rexSession: RexSession? { transport as? RexSession }
+    /// The terminal a Rex tab is showing: learned when the attach settles
+    /// on one, changed by its REX panel's Switch Terminal. nil until then,
+    /// and on every other kind of tab. Two readers: the next transport run
+    /// prefers it over the route's own block, so a reconnect comes back to
+    /// the terminal the user was on; and the window reads the tab's agent
+    /// from it — the session's fronted terminal is somebody else's choice.
+    private(set) var rexBlockID: String?
     /// SSH path only: the exec/SFTP surface (pane cwd, file drops). nil on
     /// mosh tabs — their bootstrap SSH connection is transient by design.
     private var connection: SSHConnection?
@@ -151,6 +167,18 @@ final class TerminalSessionController {
     private var handoffWatch: ShellHandoff.UpdatePromptWatch?
     private var lastCols = 80
     private var lastRows = 24
+    /// Rex only: the grid of the terminal on show while another client
+    /// owns its size (`RexSession`'s `onGrid`). The pane lays the emulator
+    /// out at it; nil is the pane's own grid.
+    private(set) var gridPin: TerminalGrid?
+    /// The pane's side of `gridPin`. It must have the emulator at the new
+    /// grid by the time it returns — the screen drawn next is for it.
+    var onGridPinChanged: (() -> Void)?
+    /// The last grid the pane measured for itself: what this tab asks a
+    /// terminal to be. `lastCols`/`lastRows` are whatever the emulator has,
+    /// which under a pin is somebody else's size.
+    private var ownSize: TerminalSize?
+    private var isSettlingGridPin = false
     private var started = false
     private var transportGeneration = 0
     /// Session-volume counters drained by the stats pump. Written on the
@@ -416,6 +444,8 @@ final class TerminalSessionController {
     private func beginTransportRun() {
         transportGeneration &+= 1
         let generation = transportGeneration
+        // A new run attaches at this tab's own size.
+        setGridPin(nil)
         let output = TerminalOutputCoalescer { [weak self] bytes in
             guard let self, self.transportGeneration == generation else { return }
             self.feed(bytes)
@@ -435,13 +465,18 @@ final class TerminalSessionController {
         generation: Int,
         output: TerminalOutputCoalescer
     ) async {
-        if host.useMosh {
+        if ridesMosh {
             await runMosh(generation: generation, output: output)
         } else {
             await runSSH(generation: generation, output: output)
         }
     }
 
+    /// The tab's own SSH connection, carrying one of two things: a PTY
+    /// running the route's remote command, or — on a Rex tab — no PTY at
+    /// all, just two byte pipes to the Rex server with `RexSession`
+    /// speaking its protocol over them. Either way the connection stays
+    /// this tab's exec surface.
     private func runSSH(
         generation: Int,
         output: TerminalOutputCoalescer
@@ -453,62 +488,97 @@ final class TerminalSessionController {
             await connection.close()
             return
         }
+        let rex = route.rexTarget.map { target in
+            RexSession(
+                connection: connection,
+                sessionID: target.sessionID,
+                blockID: rexBlockID ?? target.blockID,
+                clientVersion: Bundle.main.object(
+                    forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+            )
+        }
+        // Closing a Rex session closes the connection under it, so this is
+        // the one thing every exit below has to close.
+        let transport: any TerminalTransport = rex ?? connection
         self.connection = connection
-        transport = connection
+        self.transport = transport
         do {
             try await connection.connect()
             try Task.checkCancellation()
             guard transportGeneration == generation,
                   self.connection === connection
             else {
-                await connection.close()
+                await transport.close()
                 return
             }
-            let openedSize = TerminalSize(cols: lastCols, rows: lastRows)
-            // Armed before the PTY opens so the first output chunk is already
-            // scanned; an rc-time oh-my-zsh update prompt swallows the
-            // injected handoff line and needs a re-type (ShellHandoff).
-            handoffWatch = route.remoteCommand == nil
-                ? nil
-                : ShellHandoff.UpdatePromptWatch()
-            try await connection.openShell(
-                command: route.remoteCommand,
-                cols: openedSize.cols,
-                rows: openedSize.rows,
-                onData: { data in
-                    output.append(data)
-                },
-                onClose: { [weak self] reason in
-                    Task { @MainActor [weak self] in
-                        self?.handleClose(
-                            reason: reason,
-                            generation: generation,
-                            output: output
-                        )
-                    }
+            let openedSize = ownSize ?? TerminalSize(cols: lastCols, rows: lastRows)
+            let onData: @Sendable (Data) -> Void = { data in
+                output.append(data)
+            }
+            let onClose: @Sendable (String?) -> Void = { [weak self] reason in
+                Task { @MainActor [weak self] in
+                    self?.handleClose(
+                        reason: reason,
+                        generation: generation,
+                        output: output
+                    )
                 }
-            )
+            }
+            if let rex {
+                try await rex.open(
+                    cols: openedSize.cols, rows: openedSize.rows,
+                    onData: onData, onClose: onClose,
+                    onGrid: { [weak self] grid in
+                        await MainActor.run { [weak self] in
+                            guard let self, self.transportGeneration == generation
+                            else { return }
+                            // What was written for the old grid is parsed
+                            // at the old grid.
+                            output.flush()
+                            self.setGridPin(grid)
+                        }
+                    })
+                // Which terminal an unnamed attach landed on is the
+                // session's answer, known only now.
+                rexBlockID = await rex.blockID ?? rexBlockID
+            } else {
+                // Armed before the PTY opens so the first output chunk is
+                // already scanned; an rc-time oh-my-zsh update prompt
+                // swallows the injected handoff line and needs a re-type
+                // (ShellHandoff).
+                handoffWatch = route.remoteCommand == nil
+                    ? nil
+                    : ShellHandoff.UpdatePromptWatch()
+                try await connection.openShell(
+                    command: route.remoteCommand,
+                    cols: openedSize.cols, rows: openedSize.rows,
+                    onData: onData, onClose: onClose)
+            }
             try Task.checkCancellation()
             guard transportGeneration == generation,
                   self.connection === connection
             else {
-                await connection.close()
+                await transport.close()
                 return
             }
-            startTransportPumps(for: connection, openedAt: openedSize)
+            startTransportPumps(for: transport, openedAt: openedSize)
             markLive()
             startDirectShellMonitoring()
+            #if DEBUG
+            if rex != nil { debugAutoSwitchRexTerminal() }
+            #endif
         } catch {
-            await connection.close()
+            await transport.close()
             guard transportGeneration == generation,
                   self.connection === connection
             else { return }
             captureKeyPassphraseChallenge(from: error)
-            let message = (error as? SSHConnectionError)?.userMessage(host: host)
+            let message = (error as? RexSession.Failure)?.message
+                ?? (error as? SSHConnectionError)?.userMessage(host: host)
                 ?? String(localized: "Couldn't reach \(host.name). \(error.localizedDescription)")
             status = .ended(message)
             self.connection = nil
-            transport = nil
+            self.transport = nil
             outputCoalescer = nil
             handoffWatch = nil
             considerAutomaticResume()
@@ -885,9 +955,29 @@ final class TerminalSessionController {
         startResizePump(for: transport)
         // Layout may have changed while the handshake/open call was awaiting;
         // reconcile once with the newest geometry before normal coalescing.
-        if lastCols != size.cols || lastRows != size.rows {
+        if gridPin == nil, lastCols != size.cols || lastRows != size.rows {
             resizeContinuation?.yield(TerminalSize(cols: lastCols, rows: lastRows))
         }
+    }
+
+    /// Gives the emulator another client's grid, or its own back.
+    ///
+    /// The pane changes the text size and the frame to do it, and each of
+    /// those makes SwiftTerm report a grid on the way — none of them the
+    /// tab's own, so none is sent on. Once the pane has settled back on its
+    /// own grid, that one is: the window may have been resized meanwhile.
+    private func setGridPin(_ grid: TerminalGrid?) {
+        guard grid != gridPin else { return }
+        gridPin = grid
+        isSettlingGridPin = true
+        onGridPinChanged?()
+        isSettlingGridPin = false
+        // With no pane to lay out, the emulator is still at the grid it
+        // was given and `ownSize` already holds the tab's last own one.
+        guard grid == nil, onGridPinChanged != nil else { return }
+        let own = TerminalSize(cols: lastCols, rows: lastRows)
+        ownSize = own
+        if status == .live { resizeContinuation?.yield(own) }
     }
 
     private func stopTransportPumps() {
@@ -896,6 +986,25 @@ final class TerminalSessionController {
     }
 
     // MARK: Terminal view events
+
+    /// What the emulator said by itself — an answer to a query in the
+    /// output (device attributes, cursor position, a color), or a report of
+    /// its own focus or size — rather than anything a person did.
+    ///
+    /// On a PTY that is input like any other: this emulator is the only
+    /// terminal the program has. A Rex terminal lives on the Rex server,
+    /// which parses the same output and answers it there, so none of it is
+    /// forwarded. Forwarding did two things, both measured: the program
+    /// read every answer twice, and — since a write is what claims a Rex
+    /// terminal's size (`RexSession`) — a tab nobody was touching took the
+    /// terminal back from whoever was using it in Rex, each time the
+    /// program asked something. A program that asks on every resize made
+    /// that a loop: the two clients traded the size for as long as the
+    /// other kept claiming it.
+    func sendTerminalReport(_ data: Data) {
+        guard route.rexTarget == nil else { return }
+        sendInput(data)
+    }
 
     func sendInput(_ data: Data) {
         guard status == .live else { return }
@@ -1008,10 +1117,16 @@ final class TerminalSessionController {
         else { return }
         selectTextClampGeneration &+= 1
         let generation = selectTextClampGeneration
-        let command = switch backend {
+        // nil where there is no pane-rect query to make: a Rex tab shows
+        // exactly one terminal block, so a selection has no sibling panes
+        // to be clamped away from. (The `.rex` arms further down only keep
+        // those switches total.)
+        let command: String? = switch backend {
         case .tmux: TmuxProbe.paneRectsCommand(sessionName: sessionName)
         case .herdr: HerdrProbe.snapshotCommand(sessionName: sessionName)
+        case .rex: nil
         }
+        guard let command else { return }
         // Cancellation ends a superseded fetch at its next sleep — resize
         // re-enters here on every keyboard show/hide, and the generation
         // check alone would let each stale task finish its execs first.
@@ -1038,6 +1153,7 @@ final class TerminalSessionController {
                     let round = switch backend {
                     case .tmux: TmuxProbe.parsePaneRects(output)
                     case .herdr: HerdrProbe.parsePaneScreenRects(output, screenSize: screenSize)
+                    case .rex: [PaneScreenRectEntry]()
                     }
                     // No answer keeps the current no-clamp behavior;
                     // retrying could not distinguish a host without the
@@ -1069,6 +1185,8 @@ final class TerminalSessionController {
                 await executeControlCommand(HerdrProbe.focusPaneDirectionCommand(
                     sessionName: sessionName, direction: direction
                 ))
+            case .rex:
+                return
             }
         }
     }
@@ -1149,6 +1267,7 @@ final class TerminalSessionController {
         switch route.sessionBackend {
         case .tmux: await loadTmuxWindowList()
         case .herdr: await loadHerdrWorkspaceList()
+        case .rex: await loadRexTerminalList()
         case nil: nil
         }
     }
@@ -1157,8 +1276,51 @@ final class TerminalSessionController {
         switch route.sessionBackend {
         case .tmux: selectTmuxWindow(choice)
         case .herdr: selectHerdrWorkspace(choice)
+        case .rex: selectRexTerminal(choice)
         case nil: break
         }
+    }
+
+    #if DEBUG
+    private static var debugRexSwitchFired = false
+
+    /// `MULTIPLEX_AUTO_REX_SWITCH=<n>` — the headless stand-in for pressing
+    /// the REX panel's nth Switch Terminal row (simctl has no tap). It goes
+    /// through the same two entry points the panel uses, six seconds after
+    /// the first Rex tab goes live, once per process.
+    private func debugAutoSwitchRexTerminal() {
+        guard !Self.debugRexSwitchFired,
+              let raw = ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_REX_SWITCH"],
+              let position = Int(raw), position > 0
+        else { return }
+        Self.debugRexSwitchFired = true
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(6))
+            guard let self, let choices = await self.loadRexTerminalList(),
+                  choices.indices.contains(position - 1)
+            else { return }
+            self.selectRexTerminal(choices[position - 1])
+        }
+    }
+    #endif
+
+    /// The REX panel's Switch Terminal rows: every terminal of this tab's
+    /// session, asked of the server over the tab's own control connection.
+    func loadRexTerminalList() async -> [TmuxWindowChoice]? {
+        guard status == .live, let rexSession else { return nil }
+        return await rexSession.terminalChoices()
+    }
+
+    /// Point this tab at another terminal of its session, in place. Unlike
+    /// tmux and herdr, where the remote client redraws itself, the tab's
+    /// own transport does the switching (`RexSession.switchBlock`). The
+    /// choice is remembered for this controller's life so a reconnect comes
+    /// back to the terminal the user was on, not the one the tab opened
+    /// with.
+    func selectRexTerminal(_ choice: TmuxWindowChoice) {
+        guard status == .live, let rexSession else { return }
+        rexBlockID = choice.tmuxID
+        Task { await rexSession.switchBlock(to: choice.tmuxID) }
     }
 
     /// The shortcut panel's window list, read through the control path so
@@ -1712,8 +1874,12 @@ final class TerminalSessionController {
         guard cols != lastCols || rows != lastRows else { return }
         lastCols = cols
         lastRows = rows
+        // A grid taken from another client is the emulator's, not this
+        // tab's ask: the far side is never told it.
+        let isOwn = gridPin == nil && !isSettlingGridPin
+        if isOwn { ownSize = TerminalSize(cols: cols, rows: rows) }
         guard status == .live else { return }
-        resizeContinuation?.yield(TerminalSize(cols: cols, rows: rows))
+        if isOwn { resizeContinuation?.yield(TerminalSize(cols: cols, rows: rows)) }
         // A resize relayouts the multiplexer's panes, so a select-text clamp
         // fetched for the old geometry is wrong — refetch (the generation
         // counter drops the stale answer if resizes storm).
@@ -1739,7 +1905,7 @@ final class TerminalSessionController {
     /// foreground cwd could be resolved. The chrome's FILE rule and the
     /// Talkback paperclip both read this.
     var canUploadFiles: Bool {
-        !host.useMosh && route.sessionBackend != nil
+        !ridesMosh && route.sessionBackend != nil
     }
 
     static let uploadUnavailableMessage =
@@ -1906,6 +2072,16 @@ final class TerminalSessionController {
                 HerdrProbe.snapshotCommand(sessionName: sessionName)
             )) ?? ""
             guard let cwd = HerdrProbe.parseFocusedPaneWorkingDirectory(snapshot)
+            else { return (nil, false) }
+            let check = (try? await connection.exec(
+                TmuxProbe.gitWorktreeCheckCommand(directory: cwd)
+            )) ?? ""
+            return (cwd, TmuxProbe.parseDropDestination(check).insideGitWorktree)
+        case .rex:
+            // Rex answers over the tab's own control connection rather than
+            // an exec, and — like herdr — hands the path home as data, so
+            // the corral check is its own exec with it respliced.
+            guard let cwd = await rexSession?.workingDirectory()
             else { return (nil, false) }
             let check = (try? await connection.exec(
                 TmuxProbe.gitWorktreeCheckCommand(directory: cwd)
@@ -2238,6 +2414,9 @@ final class TerminalSessionController {
             return HerdrProbe.parsePaneWorkingDirectory(
                 output, atScreenCell: cell, screenSize: screenSize
             )
+        case .rex:
+            // One tab is one terminal, so the pressed cell is always its.
+            return await rexSession?.workingDirectory()
         case nil:
             return nil
         }

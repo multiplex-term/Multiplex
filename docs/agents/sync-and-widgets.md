@@ -12,6 +12,23 @@ Load-bearing decisions split from AGENTS.md.
   distinguishes "new local → publish" from "peer deleted → drop". No
   change notification exists — deck and terminal roots re-merge on
   scenePhase `.active`.
+  - ⚠ **A test store's mirror is inside its test boundary**
+    (`HostRecordMirror`). `HostStore(directory:)` isolated `hosts.json`
+    for years while still mirroring every added host into the simulator's
+    REAL Keychain; the app adopted them on its next launch, and by
+    2026-11-16 the test simulators held 100 and 86 `box` / `devbox` hosts
+    (which is also why a deck screenshot showed NO SIGNAL tiles instead of
+    the seeded host). An injected directory now defaults to a private
+    in-memory mirror; a test that needs to read what a store mirrored
+    passes its own `.inMemory()`. Exactly one test touches the real
+    Keychain (`testTheKeychainMirrorRoundTripsARecord`), with a payload
+    that is deliberately not a decodable `Host`, so even a killed run
+    cannot add one. To clear a simulator that already accumulated hosts:
+    `xcrun simctl keychain <udid> reset`, then launch once — the merge
+    reads "mirrored here, gone from the cloud" as a peer's delete and
+    drops them (`simctl uninstall` alone does not: the mirror re-adopts).
+    Secrets a test saves through Add Host still land in the Keychain as
+    orphaned items; they are per-host-id and never become hosts.
 - **Widgets/Shortcuts add no background execution and must stay that
   way**: they declare no background mode of their own and must not grow
   one (the app's single `fetch` mode belongs to the agent-alert refresh —

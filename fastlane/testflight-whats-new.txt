@@ -1,9 +1,24 @@
 NEW SINCE 1.5.2
 • iPhone Duo: the side column's buttons now move down when a Live Activity (a delivery, a timer, a call) pushes the clock and Wi-Fi symbols down the column, instead of sitting under them. They move back up when it ends.
 • iPad: with the keyboard locked, Apple Pencil no longer writes on the terminal. A stroke now taps, selects, and scrolls like a finger. Unlocked, the Pencil still handwrites text.
+• Deck and terminal: a host that runs Rex (superlogical.com/rex) can now show its Rex sessions as tiles, and a tile attaches the Rex terminal as a tab. When the host has Rex sessions a + REX chip appears on its rail; press it, or check REX in Host Settings under Backends. A session's other terminals are under Open Terminal in the tile's menu, and the REX key in a Rex tab switches between them. New Session and + TAB can create a Rex session while a Rex server is running on the host; a host's default backend stays tmux or herdr. While the Rex app holds a terminal at another size, the tab shows it at that size, in smaller text if needed, until you type in the tab.
+• Terminal: the TMUX, HRDR or REX key now lights up when the session has more than one window (for Rex, terminal) to switch between.
 
 PLEASE TRY
 1. On iPhone Duo, open or closed and upright, attach a session, then start a Live Activity in another app (a timer works) and come back: DECK and the buttons below it should start under the clock and Wi-Fi symbols, none hidden behind them. End the activity: the buttons should move back up.
 2. On iPad with Apple Pencil, hold the keyboard key to lock it, then drag the Pencil across the terminal: it should scroll or select, with no handwriting ink and no text typed. Unlock: writing with the Pencil should type again.
+3. On a host running Rex with a session open (the Mac app works), press the + REX chip on the host's rail: the Rex sessions should appear as tinted tiles with window names and the last lines of the screen.
+4. Press a Rex tile: a terminal should open showing what that Rex terminal shows, colors and earlier output included. Type a command: it should run, and Rex should show it.
+5. Open vim in a Rex terminal, then attach it from the deck: the tab should show it. Quit vim: the earlier output should come back, with one prompt.
+6. Long-press the tile of a Rex session with a split or second window and choose Open Terminal: the chosen terminal should open as its own tab.
+7. Exit the shell in an attached Rex terminal: the tab should end with RECONNECT and CLOSE TAB, not an error.
+8. Start an agent in a Rex terminal, then let it ask a question: the tile should show RUNNING, then NEEDS YOU.
+9. In a Rex tab on a session with several terminals, press the REX key and choose another: the tab should switch to it. Switch between two terminals that each run an agent or vim: nothing of the first should be left on the second.
+10. Press + NEW SESSION and choose REX under Runs on: a new Rex session should open as a tab and appear in Rex. + TAB then New Session in a Rex tab should start in the same directory. With no Rex server running, it should say so.
+11. Lock the device for a minute with a Rex tab open: on return the tab should reconnect by itself.
+12. In Host Settings under Backends, uncheck REX: the Rex tiles should go away. New sessions run on should never list REX.
+13. Open a Rex terminal running an agent: the Agent Bar should show its keys, and stay when another window of the session comes to the front in Rex.
+14. Attach a tmux session with one window, then add a second from the TMUX panel: the TMUX key should turn brighter, and go back when the window is closed.
+15. Open the same Rex terminal in Rex on the Mac and in a Rex tab, then work on the Mac without touching the tab: the Mac's terminal should keep its size and not flicker, and the tab should show the same screen at the Mac's size, never garbled. Type in the tab: it should take the size and its own text size back.
 
 Feedback: screenshot in TestFlight

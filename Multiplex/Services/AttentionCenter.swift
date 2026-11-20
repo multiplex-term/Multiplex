@@ -71,10 +71,13 @@ final class AttentionCenter {
     /// Probe-plane event — any session on any host, attached or not.
     func handle(_ alert: AttentionAlert) {
         guard isActive else { return drop(alert.sessionName, "locked") }
+        // The ALERT's backend, not the host's primary: a secondary backend's
+        // session shares names with the primary's, and a focused tmux `work`
+        // tab must not swallow the alert of a Rex or herdr `work`.
         guard !isFocused(
             hostID: alert.host.id,
             sessionName: alert.sessionName,
-            backend: alert.host.sessionBackend
+            backend: alert.backend
         ) else { return drop(alert.sessionName, "focused") }
         post(alert)
     }

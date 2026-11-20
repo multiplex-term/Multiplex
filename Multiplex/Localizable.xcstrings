@@ -193,6 +193,28 @@
         }
       }
     },
+    "%@ reported “%@” without the id needed to attach it. Try again after the next refresh." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ reported “%2$@” without the id needed to attach it. Try again after the next refresh."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@が報告した「%2$@」には、アタッチに必要なIDがありません。次の更新後にもう一度お試しください。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 回報的「%2$@」缺少連接所需的 ID。請在下次重新整理後再試一次。"
+          }
+        }
+      }
+    },
     ", %lld times" : {
       "localizations" : {
         "ja" : {
@@ -1644,6 +1666,374 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "+ 新增工作階段"
+          }
+        }
+      }
+    },
+    "A Rex tile opens one terminal: the one its session is showing. New Rex sessions need Rex already running on the host, so Rex is never the default." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rexタイルは、そのセッションが表示しているターミナルを1つ開きます。新しいRexセッションを作成するには、ホストでRexがすでに実行されている必要があるため、Rexが新規セッションのデフォルトの実行先になることはありません。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rex 方塊會開啟一個終端機：也就是該工作階段目前顯示的那一個。主機上必須已有 Rex 在執行，才能建立新的 Rex 工作階段，因此 Rex 不會是新工作階段的預設後端。"
+          }
+        }
+      }
+    },
+    "All of them are shown, each tile marked with the backend it came from. Every extra backend adds a probe of its own to each deck refresh." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "すべてが表示され、各タイルにはどのバックエンド由来かが示されます。バックエンドが1つ増えるごとに、Deckの更新のたびにプローブが1回増えます。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全部都會顯示，每個方塊都標示它來自哪個後端。每多一個後端，Deck 每次重新整理就會多一次探測。"
+          }
+        }
+      }
+    },
+    "Couldn't attach the Rex session. %@" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rexセッションにアタッチできませんでした。%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法連接 Rex 工作階段。%@"
+          }
+        }
+      }
+    },
+    "Couldn't Open Session" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "セッションを開けませんでした"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法開啟工作階段"
+          }
+        }
+      }
+    },
+    "Couldn't reach the Rex server. %@" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rexサーバーに接続できませんでした。%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法連上 Rex 伺服器。%@"
+          }
+        }
+      }
+    },
+    "Open Terminal" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ターミナルを開く"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟終端機"
+          }
+        }
+      }
+    },
+    "Package installs, ~/.local/bin, and the Rex app on a Mac are already on the probe's PATH." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "パッケージによるインストール、~/.local/bin、MacのRexアプリはすでにプローブのPATHに含まれています。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "套件安裝、~/.local/bin 與 Mac 上的 Rex App 已在偵測用的 PATH 上。"
+          }
+        }
+      }
+    },
+    "rex answered with exit status %@" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "rexが終了ステータス%@を返しました"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "rex 以結束狀態 %@ 回應"
+          }
+        }
+      }
+    },
+    "Rex closed the terminal stream: %@." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rexがターミナルストリームを閉じました：%@。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rex 關閉了終端機串流：%@。"
+          }
+        }
+      }
+    },
+    "terminal %lld" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ターミナル%lld"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "終端機 %lld"
+          }
+        }
+      }
+    },
+    "The connection to the Rex server ended." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rexサーバーとの接続が終了しました。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "與 Rex 伺服器的連線已結束。"
+          }
+        }
+      }
+    },
+    "The connection to the Rex server was lost." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rexサーバーとの接続が失われました。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "與 Rex 伺服器的連線已中斷。"
+          }
+        }
+      }
+    },
+    "The Rex server answered the stream handshake unreadably." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rexサーバーからのストリームハンドシェイクの応答を読み取れませんでした。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rex 伺服器對串流交握的回應無法讀取。"
+          }
+        }
+      }
+    },
+    "The Rex server closed the connection before answering." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rexサーバーが応答する前に接続を閉じました。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rex 伺服器在回應前就關閉了連線。"
+          }
+        }
+      }
+    },
+    "The Rex server did not answer in time." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rexサーバーが時間内に応答しませんでした。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rex 伺服器未在時限內回應。"
+          }
+        }
+      }
+    },
+    "The Rex server issued no usable stream ticket." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rexサーバーが有効なストリームチケットを発行しませんでした。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rex 伺服器沒有發出可用的串流票證。"
+          }
+        }
+      }
+    },
+    "The Rex server refused the connection (%@)." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rexサーバーが接続を拒否しました（%@）。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rex 伺服器拒絕了連線（%@）。"
+          }
+        }
+      }
+    },
+    "The Rex server refused the terminal stream: %@." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rexサーバーがターミナルストリームを拒否しました：%@。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rex 伺服器拒絕了終端機串流：%@。"
+          }
+        }
+      }
+    },
+    "The Rex server refused: %@" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rexサーバーが拒否しました：%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rex 伺服器拒絕了要求：%@"
+          }
+        }
+      }
+    },
+    "This Rex session has no terminal to open." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このRexセッションには開けるターミナルがありません。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這個 Rex 工作階段沒有可開啟的終端機。"
+          }
+        }
+      }
+    },
+    "This Rex session no longer exists." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このRexセッションはもう存在しません。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這個 Rex 工作階段已不存在。"
+          }
+        }
+      }
+    },
+    "unreadable rex probe response" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "rexの応答を読み取れません"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法讀取的 rex 探測回應"
+          }
+        }
+      }
+    },
+    "window %lld" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ウインドウ%lld"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "視窗 %lld"
           }
         }
       }
@@ -9450,6 +9840,28 @@
         }
       }
     },
+    "No %@ server is running on %@, and Multiplex doesn’t start one. Start %@ there, then try again." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "No %1$@ server is running on %2$@, and Multiplex doesn’t start one. Start %3$@ there, then try again."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%2$@で%1$@サーバーが実行されておらず、Multiplexは起動しません。ホストで%3$@を起動してから、もう一度お試しください。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%2$@ 上沒有執行中的 %1$@ 伺服器，而 Multiplex 不會代為啟動。請先在主機上啟動 %3$@，然後再試一次。"
+          }
+        }
+      }
+    },
     "No answer from %@ after %lld seconds — check the address and port, and that the host is reachable from this network." : {
       "localizations" : {
         "en" : {
@@ -13300,6 +13712,22 @@
         }
       }
     },
+    "Show Rex terminals" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rexのターミナルを表示"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "顯示 Rex 終端機"
+          }
+        }
+      }
+    },
     "Show only changed files" : {
       "localizations" : {
         "ja" : {
@@ -14365,6 +14793,22 @@
         }
       }
     },
+    "Switch Terminal" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ターミナルを切り替え"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切換終端機"
+          }
+        }
+      }
+    },
     "Switch this host to the herdr backend" : {
       "localizations" : {
         "ja" : {
@@ -14479,6 +14923,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "標籤頁"
+          }
+        }
+      }
+    },
+    "terminal" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ターミナル"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "終端機"
           }
         }
       }

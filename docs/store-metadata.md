@@ -105,6 +105,21 @@ Free surface added 2026-08-02 (unreleased; ships with the next binary):
 | Honest limits | No herdr API reports attached-client count or creation time, so those claims are omitted. The Claude HISTORY panel stays hidden on herdr tabs (herdr exposes no transcript identity), and tmux Copy Mode stays tmux's own — herdr tabs instead carry the shared Select Text mode, their own HRDR shortcut panel, and the same FILE attach/drop. Widget/Shortcut shell attach and Open Agent both work — an agent launch mints a herdr session, or lands inside an existing one as a new tab in the focused workspace / a new workspace |
 | Tier / privacy | Free, like tmux. No new permission or collection: probes and attaches still travel directly over the user's SSH connection. This does not change the Pro allocation, StoreKit catalog, paywall, IAP screenshot, or public screenshot set |
 
+## Rex sessions
+
+Free surface added 2026-11-16 (unreleased; ships with the next binary):
+
+| Item | Facts |
+| --- | --- |
+| What it is | Rex (superlogical.com/rex) sessions on a host appear on the deck as tiles beside its tmux / herdr ones, and a tile attaches a Rex terminal as a tab. Rex ships no terminal client, so Multiplex speaks Rex's own protocol over the user's SSH connection — no PTY, no extra port |
+| Selection | Never assumed. The deck rail offers `+ REX` when the host is holding Rex sessions, and Host Settings ▸ Backends lists it as a checkable backend. It is never a host's DEFAULT backend (the app does not start a Rex server, so it cannot promise a new session on an idle host), and Add Host ▸ BIND does not offer it |
+| Wall model | One tile per Rex **session**, its windows (tabs) on the window spine and its terminal blocks as panes. The miniature is the fronted block's screen. Programs that report status through OSC 7501 drive RUNNING / NEEDS YOU directly; others are read from their title and screen like a tmux tile. Tiles take their own tint on the host, and VoiceOver hears "on rex" |
+| Attach/close | A tile press attaches the terminal the session is showing; the tile menu's **Open Terminal** opens any other terminal of the session as its own tab. One tab is one terminal — a window's split layout is not drawn; the tab's **REX** key lists the session's terminals and switches the tab to another. The screen, colors, cursor and scrollback are restored on attach, and a tab whose link was lost to suspension re-attaches when the app returns. Delete Session closes the session. Widgets, Shortcuts, `multiplex://` links and alert banners can open a Rex session |
+| New sessions | The New Session sheet's "Runs on" bar, a Rex tab's `+ TAB`, and the widget / Shortcut / `multiplex://…&backend=rex` agent launch create a Rex session — one shell terminal, in the chosen working directory (a `+ TAB` sibling starts where the tab's session is), with the setup script and launch line typed as on tmux. Only while a Rex server is running on the host: otherwise the app says so and creates nothing. No launch lands INSIDE an existing Rex session (a named Rex target gets a fresh session instead) |
+| Requirements | Rex with a running server on the SSH host (measured against 0.1.0-preview.19, API revision 14 — Rex is in beta, and the attach relies on a Rex CLI command Rex does not document). The app never starts a Rex server |
+| Honest limits | Rex cannot be a host's default backend, and nothing is created while no Rex server is running. The last client to type decides the terminal's size, so a Rex window showing the same terminal resizes with the tab. A Rex tab has no prefix-key list, Copy Mode or HISTORY; mosh hosts attach Rex tabs over SSH. Very large scrollback (over about 3 MB rendered) attaches with a plain-text tail instead of the full history |
+| Tier / privacy | Free, like the other backends; attention alerts stay Pro. No new permission or collection: the probe and the attach travel over the user's SSH connection. This does not change the Pro allocation, StoreKit catalog, paywall, IAP screenshot, or public screenshot set. The store listing copy does not mention Rex yet |
+
 ## Widgets, Shortcuts, and the URL scheme
 
 Free surfaces added 2026-07-18 (unreleased; ships with the next binary):

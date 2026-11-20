@@ -41,6 +41,9 @@ UIKit scene runtime (MultiplexSceneDelegate + UIKitSceneRootViewController;
     DeckSnapshotStore  last-known wall state per host (device-local) — cold
                      launches paint instantly; attention is never cached
     TmuxProbe        tmux list/capture/ps command builders + parsers (pure)
+    RexProbe         Rex on the deck: one `rex do` Lua exec → one JSON
+                     document of sessions, statuses, fronted screen; and
+                     the Rex mint, one exec of the same shape (pure)
     AgentSignature   classifies a pane's CLI agent; helper command sets (pure)
   AppLockStore       optional biometric app lock (device-local, free): locks
                      at launch + didEnterBackground (never resign-active);
@@ -98,13 +101,19 @@ UIKit scene runtime (MultiplexSceneDelegate + UIKitSceneRootViewController;
                          analyzer or SFSpeechRecognizer behind AudioDenoiser
                          (RNNoise, Vendor/rnnoise) when the model is on;
                          RNNoiseModelStore downloads + SHA-256-pins it
-    TerminalTransport    the tab's byte pipe; picked by host.useMosh
-                         (exec + SFTP stay SSH-only capabilities)
+    TerminalTransport    the tab's byte pipe; picked by the route (a Rex
+                         tab) then host.useMosh (exec + SFTP stay SSH-only
+                         capabilities)
     SessionResumePolicy  pure: suspension damage vs user-ended session
     SSHConnection (actor)  Citadel → SwiftNIO SSH; exec channel (probe,
                      mosh bootstrap, drops) + PTY shell ⇄ SwiftTerm
     MoshSession (actor)  UDP socket + MoshTransportEngine; bootstrapped
                      over a throwaway SSHConnection
+    RexSession (actor)   a Rex terminal block: Rex has no client to run in
+                     a PTY, so the tab speaks its WebSocket API over two
+                     SSHConnection.openPipe byte pipes (control + data)
+      WebSocketCodec / RexWire  RFC 6455 client codec and the Rex control,
+                     data-handshake and terminal-stream formats (pure)
       Mosh/*         clean-room mosh stack, pure + unit-tested against
                      RFC 7253 / real mosh-server
   TerminalFocusArbiter  app-wide single owner of keyboard focus

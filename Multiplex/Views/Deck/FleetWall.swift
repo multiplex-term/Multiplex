@@ -678,10 +678,14 @@ final class FleetWallViewController: UIViewController {
                 self?.focusOrAttach(host, session: session)
             },
             openDuplicateSession: { [weak self] session in
-                self?.open(TerminalRoute(
-                    hostID: host.id,
-                    mode: .attach(host: host, session: session)
-                ))
+                self?.open(
+                    TerminalRoute.Mode.attach(host: host, session: session),
+                    of: session, on: host)
+            },
+            openSessionPane: { [weak self] session, window, pane in
+                self?.open(
+                    TerminalRoute.Mode.attach(session: session, window: window, pane: pane),
+                    of: session, on: host)
             },
             requestNewSession: { [weak self] in self?.presentNewSession(on: host) },
             requestNewHerdrTab: { [weak self] session in
@@ -744,16 +748,21 @@ final class FleetWallViewController: UIViewController {
     /// press that changes what a host COSTS to monitor, and the copy states
     /// that plainly rather than letting the deck quietly get more expensive.
     private func confirmBackendOffer(_ backend: Host.SessionBackend, for host: Host) {
-        let name = backend.rawValue
-        let primary = host.sessionBackend.rawValue
+        let name = backend.displayName
+        let primary = host.sessionBackend.displayName
+        var message = String(localized: """
+            \(host.name) is running \(name) as well as \(primary). \
+            Showing both \(HostGuide.secondBackendCost).
+
+            New sessions still start on \(primary).
+            """)
+        // Say what a tile of this backend does, where it differs.
+        if backend == .rex {
+            message += "\n\n" + HostGuide.rexSessionsNote
+        }
         let alert = UIAlertController(
             title: String(localized: "Also Show \(name) Sessions"),
-            message: String(localized: """
-                \(host.name) is running \(name) as well as \(primary). \
-                Showing both \(HostGuide.secondBackendCost).
-
-                New sessions still start on \(primary).
-                """),
+            message: message,
             preferredStyle: .alert
         )
         alert.addAction(UIAlertAction(
@@ -893,7 +902,33 @@ final class FleetWallViewController: UIViewController {
         ) {
             return
         }
-        open(TerminalRoute(hostID: host.id, mode: .attach(host: host, session: session)))
+        open(TerminalRoute.Mode.attach(host: host, session: session), of: session, on: host)
+    }
+
+    /// Opens `session` in `mode`, or says why it cannot be opened when the
+    /// record had no mode to offer.
+    private func open(_ mode: TerminalRoute.Mode?, of session: TmuxSession, on host: Host) {
+        guard let mode else {
+            presentCannotOpen(session, on: host)
+            return
+        }
+        open(TerminalRoute(hostID: host.id, mode: mode))
+    }
+
+    /// A tile whose record cannot be attached — a Rex session the probe
+    /// reported without a usable id. Rare, but a tile that ignores its
+    /// press reads as a broken one, so it answers.
+    private func presentCannotOpen(_ session: TmuxSession, on host: Host) {
+        let alert = UIAlertController(
+            title: String(localized: "Couldn't Open Session"),
+            message: String(localized: """
+                \(host.name) reported “\(session.name)” without the id \
+                needed to attach it. Try again after the next refresh.
+                """),
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: String(localized: "OK"), style: .cancel))
+        present(alert, animated: true)
     }
 
     private func presentNewSession(on host: Host) {
@@ -957,18 +992,7 @@ final class FleetWallViewController: UIViewController {
     private func presentCreateSessionFailure(
         on host: Host, model: HostConnectionModel
     ) {
-        let message: String
-        switch model.sessionCreateFailure {
-        case .backendMissing(let backend):
-            message = HostGuide.backendMissingMessage(backend, hostName: host.name)
-        case nil:
-            if case .failed(let reason) = model.phase {
-                message = reason
-            } else {
-                message = String(
-                    localized: "Couldn't create the session on \(host.name).")
-            }
-        }
+        let message = model.sessionCreateFailureMessage(hostName: host.name)
         let alert = UIAlertController(
             title: String(localized: "Couldn't Create Session"),
             message: message,
@@ -1090,7 +1114,10 @@ final class FleetWallViewController: UIViewController {
         // itself refuses to delete (it parks as a stopped tile instead).
         // The copy carries both truths because the app deliberately
         // doesn't know which session is the default.
-        let message = host.sessionBackend == .herdr
+        // The SESSION's backend: on a mixed host the tile being deleted
+        // need not be the primary's, and the copy describes what its own
+        // multiplexer will do.
+        let message = session.backend == .herdr
             ? String(localized: """
                 Stops “\(session.name)” on \(host.name) and everything running in it, \
                 and deletes its saved state (herdr keeps its default session on disk, stopped).
@@ -1560,6 +1587,8 @@ private struct FleetHostSectionConfiguration {
     var openShell: () -> Void
     var openSession: (TmuxSession) -> Void
     var openDuplicateSession: (TmuxSession) -> Void
+    /// One named terminal of a Rex session, as its own tab.
+    var openSessionPane: (TmuxSession, TmuxWindow, TmuxPane) -> Void
     var requestNewSession: () -> Void
     var requestNewHerdrTab: (TmuxSession) -> Void
     var requestDeleteSession: (TmuxSession) -> Void
@@ -1937,8 +1966,10 @@ private final class FleetHostSectionView: UIView {
                     session: session,
                     lines: snapshot.miniatures[session.id] ?? [],
                     attention: snapshot.attention[session.id],
+                    // Rex tiles take it too: a program that reports no
+                    // status is read from its title, exactly as tmux's is.
                     usesTmuxAttentionFallback: snapshot.hasLiveProbe
-                        && session.backend == .tmux,
+                        && session.backend != .herdr,
                     hasOpenTab: snapshot.openSessions.contains(session.id),
                     sessionBackend: session.backend,
                     showsBackendIdentity: host.showsBackendIdentity,
@@ -1989,6 +2020,9 @@ private final class FleetHostSectionView: UIView {
                                 animations: move
                             )
                         }
+                    },
+                    openPane: { [weak self] window, pane in
+                        self?.configuration.openSessionPane(session, window, pane)
                     }
                 ))
                 items.append(FleetGridItem(id: key, view: tile))
@@ -2985,6 +3019,10 @@ struct FleetSessionTileConfiguration {
     let copyHandoffCommand: () -> Void
     let delete: () -> Void
     let droppedSession: (String) -> Void
+    /// Opens ONE terminal of the session as its own tab — the Rex tile's
+    /// Open Terminal rows. A `var` with a default so the tiles of every
+    /// other backend, and their tests, construct exactly as before.
+    var openPane: (TmuxWindow, TmuxPane) -> Void = { _, _ in }
 
     /// Whether the session is attached right now — the LIVE lamp's one
     /// authority, resolved per backend by `SessionBackend.isSessionLive`.
@@ -3110,6 +3148,24 @@ final class FleetSessionTileView: FleetPressView,
                     configuration.attachNewWindow()
                 },
             ]
+            // A Rex tab shows one terminal, and a press opens the one the
+            // session is fronting. The others are reached here — only when
+            // there ARE others, so a one-terminal session's menu is as short
+            // as any tile's.
+            if configuration.sessionBackend == .rex,
+               configuration.session.paneCount > 1 {
+                let rows = configuration.session.windows.flatMap { window in
+                    (window.panes ?? []).map { pane in
+                        UIAction(
+                            title: RexProbe.terminalMenuTitle(window: window, pane: pane)
+                        ) { _ in
+                            configuration.openPane(window, pane)
+                        }
+                    }
+                }
+                children.append(UIMenu(
+                    title: String(localized: "Open Terminal"), children: rows))
+            }
             if configuration.sessionBackend == .herdr {
                 // The terminal window's + TAB row, reachable from the deck;
                 // one title source so the surfaces can't drift.
@@ -3119,9 +3175,14 @@ final class FleetSessionTileView: FleetPressView,
                     configuration.newHerdrTab()
                 })
             }
-            children.append(UIAction(title: String(localized: "Copy Command for Handoff")) { _ in
-                configuration.copyHandoffCommand()
-            })
+            // Only where there IS a command to hand over: Rex has no
+            // terminal client, so no line opens its session in a shell.
+            if SessionHandoff.command(session: configuration.session) != nil {
+                children.append(
+                    UIAction(title: String(localized: "Copy Command for Handoff")) { _ in
+                        configuration.copyHandoffCommand()
+                    })
+            }
             children.append(
                 UIAction(
                     title: String(localized: "Delete Session…"),
@@ -4042,7 +4103,10 @@ struct NewSessionFormState {
     var defaultNameBase: String { Self.defaultNameBase(for: backend) }
 
     private static func defaultNameBase(for backend: Host.SessionBackend) -> String {
-        backend == .herdr ? "session" : "main"
+        switch backend {
+        case .tmux: "main"
+        case .herdr, .rex: "session"
+        }
     }
 
     /// The backend's own namer: the prefill must match what the mint will
@@ -4055,6 +4119,7 @@ struct NewSessionFormState {
         return switch backend {
         case .tmux: TmuxProbe.uniqueSessionName(base: base, existing: existing)
         case .herdr: HerdrProbe.uniqueSessionName(base: base, existing: existing)
+        case .rex: RexProbe.uniqueSessionLabel(base: base, existing: existing)
         }
     }
 
