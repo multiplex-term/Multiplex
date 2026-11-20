@@ -8,6 +8,9 @@ import XCTest
 @MainActor
 final class CapturingTerminalDelegate: NSObject, TerminalViewDelegate {
     var sent: [[UInt8]] = []
+    /// Set to keep what the terminal says by itself out of `sent`, the way
+    /// a host does whose far side answers queries on its own.
+    var reports: [[UInt8]]?
 
     /// A fresh terminal view wired to a fresh capturing delegate.
     static func makeTerminal() -> (TerminalView, CapturingTerminalDelegate) {
@@ -22,6 +25,9 @@ final class CapturingTerminalDelegate: NSObject, TerminalViewDelegate {
     func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
     func send(source: TerminalView, data: ArraySlice<UInt8>) {
         sent.append(Array(data))
+    }
+    func sendTerminalReport(source: TerminalView, data: ArraySlice<UInt8>) {
+        if reports == nil { sent.append(Array(data)) } else { reports?.append(Array(data)) }
     }
     func scrolled(source: TerminalView, position: Double) {}
     func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {}

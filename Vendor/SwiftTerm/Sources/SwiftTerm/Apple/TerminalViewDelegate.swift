@@ -183,10 +183,25 @@ public protocol TerminalViewDelegate: AnyObject {
     /// Updates can be combined before delivery. Text is untrusted plain text.
     func programStatusChanged(source: TerminalView, records: [TerminalProgramStatus])
 
+    /// Multiplex patch: bytes the terminal produced by itself rather than a
+    /// person — an answer to a query in the output it was fed (device
+    /// attributes, cursor position, a color), or a report of its own focus,
+    /// visibility, size or color scheme. What a person typed, clicked or
+    /// pasted arrives through `send`.
+    ///
+    /// Defaults to `send`, which is right wherever this terminal is the
+    /// only one the program has. A host whose far side keeps a terminal of
+    /// its own and answers there must not forward these as well.
+    func sendTerminalReport(source: TerminalView, data: ArraySlice<UInt8>)
+
 }
 
 public extension TerminalViewDelegate {
     func programStatusChanged(source: TerminalView, records: [TerminalProgramStatus]) {}
+
+    func sendTerminalReport(source: TerminalView, data: ArraySlice<UInt8>) {
+        send(source: source, data: data)
+    }
 }
 #endif
 

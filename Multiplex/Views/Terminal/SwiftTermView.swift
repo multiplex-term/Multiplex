@@ -803,6 +803,16 @@ final class TerminalSurfaceView: UIView {
             }
         }
 
+        /// The fork's second road (`sendTerminalReport`): what the emulator
+        /// said by itself, kept apart from what a person did so the
+        /// controller can decide whether this tab's far side wants it.
+        func sendTerminalReport(source: TerminalView, data: ArraySlice<UInt8>) {
+            let bytes = Data(data)
+            MainActor.assumeIsolated {
+                controller.sendTerminalReport(bytes)
+            }
+        }
+
         func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
             MainActor.assumeIsolated {
                 controller.terminalResized(cols: newCols, rows: newRows)

@@ -2851,6 +2851,24 @@ open class Terminal {
     /// paste, and programmatic input.
     public func sendUserInput(_ data: ArraySlice<UInt8>) {
         registerUserInput(data)
+        sendAsUserInput(data)
+    }
+
+    /// Multiplex patch: true while the bytes being handed to the delegate
+    /// are a person's — a mouse event, a prompt click, input routed through
+    /// `sendUserInput` — and false for everything the terminal says by
+    /// itself: an answer to a query in its output, or a report of its own
+    /// focus, visibility, size or color scheme.
+    ///
+    /// Both kinds leave through the one `send(source:data:)`, so a delegate
+    /// that must tell them apart reads this inside that call. A host whose
+    /// far side already runs a terminal (a multiplexer server that answers
+    /// queries itself) forwards the first kind and not the second.
+    public private(set) var isSendingUserInput = false
+
+    private func sendAsUserInput(_ data: ArraySlice<UInt8>) {
+        isSendingUserInput = true
+        defer { isSendingUserInput = false }
         tdel?.send(source: self, data: data)
     }
 
@@ -3301,7 +3319,7 @@ open class Terminal {
     }
 
     private func sendRepeatedSemanticSequence(_ data: [UInt8]) {
-        tdel?.send(source: self, data: data[...])
+        sendAsUserInput(data[...])
     }
 
     // MARK: OSC 133 stream handling (R2, R4)
@@ -8640,8 +8658,9 @@ open class Terminal {
      */
     public func sendEvent (buttonFlags: Int, x: Int, y: Int, pixelX: Int, pixelY: Int)
     {
-        sendResponse(mouseEventBytes(buttonFlags: buttonFlags, x: x, y: y,
-                                     pixelX: pixelX, pixelY: pixelY))
+        // Multiplex patch: a mouse event is the person's, not a response.
+        sendAsUserInput(mouseEventBytes(buttonFlags: buttonFlags, x: x, y: y,
+                                        pixelX: pixelX, pixelY: pixelY)[...])
     }
 
     /// Encodes a response without invoking the delegate. Owners can copy it
@@ -8658,9 +8677,10 @@ open class Terminal {
 
     private func sendMousePacket(buttonFlags: Int, release: Bool, originalButton: Int,
                                  x: Int, y: Int, pixelX: Int, pixelY: Int) {
-        sendResponse(mousePacketBytes(buttonFlags: buttonFlags, release: release,
-                                      originalButton: originalButton, x: x, y: y,
-                                      pixelX: pixelX, pixelY: pixelY))
+        // Multiplex patch: a mouse event is the person's, not a response.
+        sendAsUserInput(mousePacketBytes(buttonFlags: buttonFlags, release: release,
+                                         originalButton: originalButton, x: x, y: y,
+                                         pixelX: pixelX, pixelY: pixelY)[...])
     }
 
     private func mousePacketBytes(buttonFlags: Int, release: Bool, originalButton: Int,

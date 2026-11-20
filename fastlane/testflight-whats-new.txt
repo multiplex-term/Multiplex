@@ -15,5 +15,6 @@ PLEASE TRY
 10. Open Host Settings and find Backends: REX should be checkable, and New sessions run on should never list it. Uncheck it: the Rex tiles should go away.
 11. Open a Rex terminal where an agent such as Claude Code is running: the Agent Bar should show that agent's keys. Bring another window of the same session to the front in Rex: the bar should stay, because the tab is still on the agent's terminal.
 12. Attach a tmux session that has one window: the TMUX key should look like the other keys. Add a second window from the TMUX panel: within a few seconds the key should turn brighter with a stronger border, and go back when that window is closed. A Rex tab should do the same with the REX key when its session gains a second terminal.
+13. Open the same Rex terminal in Rex on the Mac and in a Rex tab, then work in it on the Mac without touching the tab: the Mac's terminal should keep its size and not flicker. Typing in the tab should still take the size.
 
 Feedback: screenshot in TestFlight

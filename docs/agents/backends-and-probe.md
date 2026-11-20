@@ -529,6 +529,35 @@ HerdrProbe, RexProbe, session creation/targeting, or file attach/drop.
     rule): the Rex app can claim the block back (`block_owner_changed`);
     the next keystroke here claims and re-sizes it. Until then the tab
     shows another client's size — Multiplex does not letterbox.
+  - ⚠ **Nothing the emulator says by itself reaches a Rex terminal**
+    (`TerminalSessionController.sendTerminalReport`). The server keeps the
+    terminal and answers its queries there — measured with no client
+    attached: `CSI c` and `CSI 6n` both came back to the program. SwiftTerm
+    reads the same output and answers too, and that answer used to go out
+    as a `write`: the program read every reply twice, and because a write
+    is what claims, a tab nobody was touching took the terminal's size
+    back whenever the program asked something. A program that asks on
+    every resize closed the loop — reported as the same terminal in the
+    Rex app flickering, and reproduced with a stand-in client that
+    reclaims when it loses the block: 82 owner changes in 0.6 s before,
+    1 (the stand-in's own) after. So on a Rex tab the emulator's answers
+    AND its reports (focus, in-band size, color scheme) are dropped;
+    mouse events and prompt clicks are a person's and still go.
+    - Focus reports go with the rest on purpose. Only this client knows
+      its own focus, but so does every other client of the terminal, and
+      a tab that reported "unfocused" as the user looked away would say
+      it for a terminal still in use in Rex. Whether the Rex app reports
+      focus itself is unmeasured.
+    - The split is a fork seam (`Terminal.isSendingUserInput`,
+      `TerminalViewDelegate.sendTerminalReport`, see
+      `swiftterm-fork.md`): both kinds used to leave SwiftTerm through
+      the one `send`.
+    - To re-measure: a script in the terminal that prints `CSI 6n` from a
+      `WINCH` trap and logs its stdin, then a second control connection
+      that `own_block(take)`s and resizes. The server's log lists every
+      `terminal.write` — with the tab idle there must be none.
+    - Still claimed without a keystroke: the attach itself, so an
+      automatic reconnect takes the size once.
   - ⚠ **Say goodbye before cancelling the readers** (`teardown`).
     Cancelling a reader tears its pipe down, and a connection that just
     drops is kept by the server for 60 s — its client listed "connection

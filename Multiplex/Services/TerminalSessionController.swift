@@ -943,6 +943,25 @@ final class TerminalSessionController {
 
     // MARK: Terminal view events
 
+    /// What the emulator said by itself — an answer to a query in the
+    /// output (device attributes, cursor position, a color), or a report of
+    /// its own focus or size — rather than anything a person did.
+    ///
+    /// On a PTY that is input like any other: this emulator is the only
+    /// terminal the program has. A Rex terminal lives on the Rex server,
+    /// which parses the same output and answers it there, so none of it is
+    /// forwarded. Forwarding did two things, both measured: the program
+    /// read every answer twice, and — since a write is what claims a Rex
+    /// terminal's size (`RexSession`) — a tab nobody was touching took the
+    /// terminal back from whoever was using it in Rex, each time the
+    /// program asked something. A program that asks on every resize made
+    /// that a loop: the two clients traded the size for as long as the
+    /// other kept claiming it.
+    func sendTerminalReport(_ data: Data) {
+        guard route.rexTarget == nil else { return }
+        sendInput(data)
+    }
+
     func sendInput(_ data: Data) {
         guard status == .live else { return }
         // While the jump search pages the remote transcript, a keystroke

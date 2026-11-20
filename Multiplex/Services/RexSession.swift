@@ -109,6 +109,12 @@ struct RexSocket: Sendable {
 /// - **The last client to type owns the size**, as with tmux's latest-client
 ///   rule. Another client (the Rex app) can claim the block back; the next
 ///   keystroke here claims it again and re-sizes it.
+/// - **Only what a person does is written.** `write` is what claims, so
+///   nothing may reach it that the emulator said by itself. The server
+///   parses the terminal's output too and answers its queries there; the
+///   emulator's own answers are stopped before this transport
+///   (`TerminalSessionController.sendTerminalReport`). Sent on, each one
+///   was a second answer in the program's input and a claim nobody made.
 /// - **The palette is the app's.** `extra_palette` is not requested: it
 ///   would repaint the tab in Rex's theme.
 /// - **A tab attached during a full-screen program redraws when it exits.**
