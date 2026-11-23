@@ -1677,7 +1677,12 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
     // MARK: Backend
 
     /// Every backend this host shows tiles for — the checked set.
-    private var enabledBackends: Set<Host.SessionBackend> { form.enabledBackends }
+    /// The checked backends this device shows. One it has switched off
+    /// (`SessionBackend.isAvailable`) stays in the form, and so in the
+    /// record, without a check box or a line of copy.
+    private var enabledBackends: Set<Host.SessionBackend> {
+        form.enabledBackends.filter(\.isAvailable)
+    }
 
     private var backendDetail: String {
         let enabled = enabledBackends
@@ -1719,7 +1724,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         let checks = AddHostCheckBar<Host.SessionBackend>(
             // The button face uppercases; pass the natural spelling so
             // VoiceOver reads "tmux", not the letters T-M-U-X.
-            choices: Host.SessionBackend.allCases.map { ($0.rawValue, $0) },
+            choices: Host.SessionBackend.availableCases.map { ($0.rawValue, $0) },
             selection: enabledBackends
         ) { [weak self] backends in
             self?.setEnabledBackends(backends)
@@ -1785,7 +1790,10 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
     /// Apply a new checked set, keeping the current default where it is still
     /// checked — `setBackends` promotes a survivor when it isn't.
     private func setEnabledBackends(_ backends: Set<Host.SessionBackend>) {
-        updateTestSensitive { $0.backendSelection.setEnabled(backends) }
+        // The bar only knows the backends it lists: one that is checked in
+        // the record and hidden on this device is carried through.
+        let hidden = form.enabledBackends.filter { !$0.isAvailable }
+        updateTestSensitive { $0.backendSelection.setEnabled(backends.union(hidden)) }
         renderBackend()
         renderTestSection()
     }

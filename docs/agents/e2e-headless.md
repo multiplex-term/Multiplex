@@ -50,6 +50,10 @@ app.multiplexterm.multiplex`):
   through the real surrender/adopt path (moved tabs keep connections).
 - `MULTIPLEX_AUTO_DROP=<local path>` — drops that file into the first tab
   (SFTP upload + typed path, the real drag path).
+- `MULTIPLEX_REX=1` — turns the experimental Rex backend on whatever
+  Settings ▸ Experimental says (`ExperimentalFeatures`). Required by every
+  Rex recipe: without it a seeded `secondaryBackends: ["rex"]` is kept in
+  the record and not monitored.
 - `MULTIPLEX_AUTO_REX_SWITCH=<n>` — on a Rex tab, presses row n (1-based)
   of the REX panel's Switch Terminal list once the tab is live — the
   headless stand-in for a press nothing else can make. Proof host-side:

@@ -47,6 +47,28 @@ struct Host: Identifiable, Codable, Hashable {
         /// still shown, attached, created and closed like any other's.
         var canBeDefault: Bool { self != .rex }
 
+        /// Whether this backend sits behind a Settings ▸ Experimental
+        /// switch (`ExperimentalFeatures`).
+        var isExperimental: Bool { self == .rex }
+
+        /// Whether this device shows the backend at all. The one gate for
+        /// an experimental backend: a host's record may list it (records
+        /// sync, and the switch is per device), and every reader that asks
+        /// what a host monitors goes through `Host.monitoredBackends` or
+        /// `monitors(_:)`, which ask this.
+        var isAvailable: Bool { isAvailable(rexEnabled: ExperimentalFeatures.isRexBackendEnabled) }
+
+        func isAvailable(rexEnabled: Bool) -> Bool {
+            switch self {
+            case .tmux, .herdr: true
+            case .rex: rexEnabled
+            }
+        }
+
+        /// The backends this device offers — what Host Settings lists and
+        /// discovery asks about.
+        static var availableCases: [SessionBackend] { allCases.filter(\.isAvailable) }
+
         /// The backends a host's default can be — what the "New sessions
         /// run on" bars and the Bind pane offer.
         static let defaultCases = allCases.filter(\.canBeDefault)
@@ -356,9 +378,18 @@ struct Host: Identifiable, Codable, Hashable {
     /// iterates. Order is load-bearing: the primary's block leads the wall,
     /// and the primary alone answers reachability, minting, and the Signal
     /// check.
+    ///
+    /// A listed backend this device has switched off
+    /// (`SessionBackend.isAvailable`) is left out here and stays in the
+    /// record.
     var monitoredBackends: [SessionBackend] {
+        monitoredBackends(rexEnabled: ExperimentalFeatures.isRexBackendEnabled)
+    }
+
+    func monitoredBackends(rexEnabled: Bool) -> [SessionBackend] {
         [sessionBackend] + SessionBackend.allCases.filter {
             $0 != sessionBackend && secondaryBackends.contains($0)
+                && $0.isAvailable(rexEnabled: rexEnabled)
         }
     }
 
@@ -368,7 +399,8 @@ struct Host: Identifiable, Codable, Hashable {
     /// here, and answering with the other one's namesake would attach the
     /// wrong multiplexer.
     func monitors(_ backend: SessionBackend) -> Bool {
-        backend == sessionBackend || secondaryBackends.contains(backend)
+        backend == sessionBackend
+            || (secondaryBackends.contains(backend) && backend.isAvailable)
     }
 
     /// Whether tiles must say which multiplexer they came from. The single
@@ -379,8 +411,11 @@ struct Host: Identifiable, Codable, Hashable {
     /// two array allocations — this is read once per tile per render and
     /// once per session per widget publish. The set never holds the primary
     /// (`secondaryBackends`' `didSet`), so non-empty is exactly "more than
-    /// one monitored backend".
-    var showsBackendIdentity: Bool { !secondaryBackends.isEmpty }
+    /// one monitored backend" — once the ones this device has switched off
+    /// are left out, which only a host that lists any pays for.
+    var showsBackendIdentity: Bool {
+        !secondaryBackends.isEmpty && secondaryBackends.contains(where: \.isAvailable)
+    }
 
     /// The configured launch models for one agent, picker-ready.
     func launchModels(for agent: AgentKind) -> [String] {

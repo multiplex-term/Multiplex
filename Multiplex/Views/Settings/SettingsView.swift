@@ -246,6 +246,7 @@ final class SettingsViewController: UIViewController {
             ),
             makeWindowModeSection(),
             makeRendererSection(),
+            makeExperimentalSection(),
             makeScreenSection(),
             voiceInputSection,
             makeConnectionStatsSection(),
@@ -488,6 +489,30 @@ final class SettingsViewController: UIViewController {
             detail: String(localized: """
                 Draws terminal text on the GPU instead of CoreGraphics. Takes effect for newly \
                 opened terminal windows.
+                """),
+            rows: [control]
+        )
+    }
+
+    /// Features that are off until asked for (`ExperimentalFeatures`). The
+    /// switch is read wherever a host's backends are, so nothing here has to
+    /// tell the deck: its next refresh asks again.
+    private func makeExperimentalSection() -> UIView {
+        let control = SettingsBooleanRow(
+            title: String(localized: "Rex sessions"),
+            isOn: ExperimentalFeatures.isRexBackendEnabled
+        ) { enabled in
+            ExperimentalFeatures.setRexBackendEnabled(enabled)
+        }
+        control.accessibilityIdentifier = "settings.experimental.rex"
+        return SettingsSectionView(
+            title: String(localized: "Experimental"),
+            detail: String(localized: """
+                Shows the sessions of a host that runs Rex (superlogical.com/rex) and attaches \
+                their terminals as tabs. Rex is a preview and can change under Multiplex. Once \
+                on, a host with Rex sessions offers + REX on its rail, and REX appears in Host \
+                Settings under Backends. Turning it off hides them at the deck's next refresh; \
+                hosts keep their setting.
                 """),
             rows: [control]
         )

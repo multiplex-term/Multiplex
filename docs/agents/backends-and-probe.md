@@ -274,8 +274,28 @@ HerdrProbe, RexProbe, session creation/targeting, or file attach/drop.
 - **Rex is shown, attached, and minted — never a host's default**
   (`Host.SessionBackend.rex`;
   `RexProbe` for the deck and the mint, `RexSession` for a tab; Rex 0.1.0-preview.19 /
-  API revision 14, measured 2026-11-16 against a throwaway server),
+  API revision 14, measured 2026-11-16 against a throwaway server — the
+  app still announces revision 14, and a client making the same calls
+  attached, typed, resized and streamed against preview.21 / revision 18 on
+  2026-11-23),
   adapted as session→tile, window (a tab)→window, terminal block→pane.
+  - **Experimental: off until switched on in Settings ▸ Experimental**
+    (`ExperimentalFeatures.isRexBackendEnabled`, default off). ⚠ The switch
+    is per DEVICE and the record is per host: `secondaryBackends` keeps
+    `rex` whatever the switch says (records sync; another device may have
+    it on), and the gate sits where the record is read —
+    `SessionBackend.isAvailable`, asked by `Host.monitoredBackends`,
+    `monitors(_:)` and `showsBackendIdentity`. Everything downstream (probe
+    loop, tiles, New Session's "Runs on", widgets, `backend=rex` actions)
+    reads those, so none of it has a check of its own. Two surfaces list
+    backends directly and use `availableCases` instead: the discovery riders
+    (`ConnectionHub` — no `rex` exec on a host while it is off) and Host
+    Settings' check bar, which carries a hidden checked `rex` through an
+    edit rather than dropping it. Nothing observes the switch: the hub
+    re-reads the host every refresh, so it takes effect within one (~5 s).
+    A Rex tab already open keeps running. `MULTIPLEX_REX=1` forces it on —
+    the unit-test scheme sets it (`project.yml`), and a harness run that
+    seeds `secondaryBackends: ["rex"]` needs it too.
   - **Rex has no terminal client, so Multiplex is one.** No `rex attach`
     exists and `rex block stream` answers `not implemented`: Rex sessions
     are drawn by a native app over the server's WebSocket API
@@ -636,6 +656,39 @@ HerdrProbe, RexProbe, session creation/targeting, or file attach/drop.
     record is the only authority, and it reaches the strip through the
     window's own observation, so nothing polls), and mosh (no PTY for
     mosh-server to run — a Rex tab rides SSH whatever the host prefers).
+    - **TODO, waiting on upstream: mosh for a Rex tab needs a Rex
+      terminal client to run in mosh-server's PTY, and Rex ships none.**
+      Re-measured 2026-11-23 (0.1.0-preview.21 / API revision 18, mosh
+      1.4.0): `rex block stream BLOCK [DATA_REF]` exists and still answers
+      `not implemented`; there is no `rex attach`; a `rex do` Lua script
+      cannot stand in (the terminal creator lists no events, and the output
+      is a second WebSocket the script cannot open). mosh itself syncs a
+      screen, not bytes, so `RexSession`'s two WebSockets cannot ride it.
+      Revisit when `rex block stream <block>` stops answering `not
+      implemented` — and check first whether it is a terminal client at
+      all or a one-way dump of the data stream (the `DATA_REF` argument
+      suggests the latter, which changes nothing here).
+      A throwaway PTY client (a Python port of the attach, run by a real
+      mosh-server, read through a real mosh-client) drew, typed and resized
+      correctly and met four things any such client has to handle:
+      1. **Queries are answered twice.** mosh-server's emulator answers
+         DA/DSR in the output too, on the client's stdin, which a naive
+         client writes into the terminal (`62;22c;1R62c;1R` at the prompt,
+         and a size claim nobody made). Dropping queries from the output
+         before the PTY left one answer — the Rex server's.
+      2. **No alternate screen.** After `:q` the vim frame stays; the
+         client must redraw (RIS + `format`) on every `?1049l`, as
+         `AlternateScreenExitWatch` does for one case today.
+      3. **Another client's size has no way back to the app.** The client
+         sees the stream's `resize`, but a mosh tab's grid is the app's; the
+         grid pin above needs a side channel (unmeasured).
+      4. **No scrollback, and nothing replaces it**: a mosh tab has none
+         (`mosh.md`), and a Rex tab has no Copy Mode or HISTORY.
+      Also unbuilt: the REX key's switch, which rides the control
+      connection a mosh tab would not have. Not a prerequisite, and cheaper
+      for the same complaint (a slow re-attach on a bad link): the
+      protocol's RESUME, which continues a dropped stream within 60 s
+      without a redraw — today a resume is always a fresh attach.
     ⚠ `TerminalSessionController.ridesMosh` is the one statement of that
     last rule: scrollback, FILE and the bar's MOSH badge read it, where
     reading `host.useMosh` raw gave a Rex tab on a mosh host no
