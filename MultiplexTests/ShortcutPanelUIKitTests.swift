@@ -153,6 +153,33 @@ final class ShortcutPanelUIKitTests: XCTestCase {
         XCTAssertEqual(selected.map(\.payload), [.herdr(.closeTab)])
     }
 
+    func testANativePaneTabsRowsAreCommandsWithNoKeycapAndItsCloseAsksTwice() throws {
+        var selected: [ShortcutPanelItem] = []
+        let controller = ShortcutPanelViewController(content: .rex) {
+            selected.append($0)
+        }
+        controller.loadViewIfNeeded()
+
+        // A split is not a binding: the row shows what it does and no empty
+        // keycap beside it, and VoiceOver hears no trailing pause.
+        let split = try XCTUnwrap(control("paneShortcut.splitRight", in: controller.view))
+        XCTAssertEqual(split.accessibilityLabel, "Split Right, new_split horizontal")
+        XCTAssertTrue(
+            descendants(of: UIKitTallyBorderedView.self, in: split).allSatisfy(\.isHidden))
+        split.sendActions(for: .touchUpInside)
+        XCTAssertEqual(selected.map(\.payload), [.pane(.splitRight)])
+
+        // Closing a pane ends its program: armed first, performed second —
+        // and the keycap that says so is there.
+        let close = try XCTUnwrap(control("paneShortcut.closePane", in: controller.view))
+        XCTAssertTrue(
+            descendants(of: UIKitTallyBorderedView.self, in: close).contains { !$0.isHidden })
+        close.sendActions(for: .touchUpInside)
+        XCTAssertEqual(selected.count, 1)
+        close.sendActions(for: .touchUpInside)
+        XCTAssertEqual(selected.map(\.payload), [.pane(.splitRight), .pane(.closePane)])
+    }
+
     func testWindowChoicesOnlyRenderWhenSwitchingIsUsefulAndSelectionDisarmsClose() throws {
         var selectedChoice: TmuxWindowChoice?
         let controller = ShortcutPanelViewController(

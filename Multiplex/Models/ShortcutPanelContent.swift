@@ -11,6 +11,9 @@ struct ShortcutPanelItem: Equatable, Sendable, Identifiable {
     enum Payload: Equatable, Sendable {
         case tmux(TmuxShortcut)
         case herdr(HerdrShortcut)
+        /// A row of a tab that draws its backend's panes itself: performed
+        /// on the pane the tab's keyboard is on, through the transport.
+        case pane(PaneShortcut)
     }
 
     var payload: Payload
@@ -62,6 +65,27 @@ struct ShortcutPanelItem: Equatable, Sendable, Identifiable {
         promptsForName = false
         symbolName = nil
         accessibilityIdentifier = "herdrShortcut.\(shortcut.rawValue)"
+    }
+
+    /// `reference` is the backend's own name for what the row does, shown
+    /// as the row's supporting text the way a tmux command or a herdr
+    /// action name is; `title` is the backend's word for the row where it
+    /// has one.
+    init(_ shortcut: PaneShortcut, title: String? = nil, reference: String) {
+        payload = .pane(shortcut)
+        self.title = title ?? shortcut.title
+        command = reference
+        bindingLabel = shortcut.bindingLabel
+        requiresDoubleActivation = shortcut.requiresDoubleActivation
+        // Every row changes what the tab shows: a new pane, the neighbour
+        // of a closed one, one pane alone, another window.
+        keepsPanelOpen = false
+        // The switch list marks the terminal the keyboard is on, and a
+        // split, a close and a new window all move it.
+        invalidatesSwitchChoices = shortcut != .zoomPane
+        promptsForName = false
+        symbolName = nil
+        accessibilityIdentifier = "paneShortcut.\(shortcut.rawValue)"
     }
 }
 
@@ -126,15 +150,39 @@ struct ShortcutPanelContent: Equatable, Sendable {
     )
 
     /// Rex has no prefix-key client — Multiplex IS the client — so its panel
-    /// carries no shortcut rows at all. What it carries is the one thing a
-    /// Rex tab cannot otherwise do from inside itself: a tab shows ONE
-    /// terminal of its session, and this lists the others and switches the
-    /// tab to one in place (`RexSession.switchBlock`). The header's trailing
-    /// slot says so where the others state their prefix.
+    /// has no bindings to list. Its rows act on the tab's own panes
+    /// (`PaneShortcut`): split the pane the keyboard is on, zoom it, close
+    /// it, or open a new Rex tab — a window, in the server's word and in
+    /// every other part of this app — beside the one the tab is drawing.
+    /// Below them, every terminal of the session: one among the panes on
+    /// show takes the keyboard, one in another Rex window brings that
+    /// window's panes into the tab (`RexSession.showTerminal`). The
+    /// header's trailing slot says whose pane the rows act on, where the
+    /// others state their prefix.
     static let rex = ShortcutPanelContent(
-        headerTitle: "REX TERMINALS",
-        prefixLabel: "SWITCHES THIS TAB",
-        sections: [],
+        headerTitle: "REX PANES",
+        prefixLabel: "ACTS ON THE FOCUSED PANE",
+        sections: [
+            ShortcutPanelSection(
+                title: String(localized: "Panes"),
+                accessibilityIdentifier: "rexGroup.Panes",
+                items: [
+                    ShortcutPanelItem(.splitRight, reference: "new_split horizontal"),
+                    ShortcutPanelItem(.splitDown, reference: "new_split vertical"),
+                    ShortcutPanelItem(.zoomPane, reference: "in this tab only"),
+                    ShortcutPanelItem(.closePane, reference: "block.close"),
+                ]
+            ),
+            ShortcutPanelSection(
+                title: String(localized: "Tabs"),
+                accessibilityIdentifier: "rexGroup.Tabs",
+                items: [
+                    ShortcutPanelItem(
+                        .newWindow, title: String(localized: "New Tab"),
+                        reference: "session.new_window"),
+                ]
+            ),
+        ],
         switchSectionTitle: String(localized: "Switch Terminal"),
         switchSectionAccessibilityIdentifier: "rexTerminalSection",
         switchChoiceAccessibilityPrefix: "rexTerminal.",
@@ -168,7 +216,7 @@ extension Host.SessionBackend {
         switch self {
         case .tmux: String(localized: "Show tmux shortcuts")
         case .herdr: String(localized: "Show herdr shortcuts")
-        case .rex: String(localized: "Show Rex terminals")
+        case .rex: String(localized: "Show Rex panes and terminals")
         }
     }
 }

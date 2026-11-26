@@ -1009,10 +1009,11 @@ final class TerminalWindowViewController: UIViewController,
             return activeController?.directShellAgent
         }
         let session = probedSession(for: activeTab)
-        // A Rex tab is ONE terminal of its session, and not necessarily the
-        // one the session is fronting — Open Terminal, Switch Terminal, or
-        // the Rex app showing another window — so the strip is that
-        // terminal's (`TmuxSession.agent(inPane:)`).
+        // A Rex tab's strip is the terminal its keyboard is on — one pane
+        // of the window it draws, and not necessarily the one the session
+        // is fronting (Open Terminal, Switch Terminal, a touch on another
+        // pane, or the Rex app showing another window): `TmuxSession
+        // .agent(inPane:)`.
         if let rex = activeTab.rexTarget {
             return session?.agent(inPane: activeController?.rexBlockID ?? rex.blockID)
         }
@@ -1065,6 +1066,9 @@ final class TerminalWindowViewController: UIViewController,
             _ = activeController?.pendingLink
             _ = activeController?.pendingPath
             _ = activeController?.talkbackOpen
+            // A paned tab's keyboard moved to another pane: the agent strip
+            // and the key cluster are that pane's now.
+            _ = activeController?.activePaneID
             #if os(visionOS)
             _ = activeController?.keyBarArranging
             #endif

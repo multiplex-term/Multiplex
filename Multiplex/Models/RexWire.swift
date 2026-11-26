@@ -1,8 +1,9 @@
 import Foundation
 
-/// The Rex server's wire protocol, as far as attaching one terminal needs it:
-/// the control connection's JSON messages, the data connection's binary
-/// handshake, and the terminal stream. Pure — `RexSession` owns the sockets.
+/// The Rex server's wire protocol, as far as a tab drawing one window's
+/// terminals needs it: the control connection's JSON messages, the session
+/// view and its layout tree, the data connection's binary handshake, and
+/// the terminal stream. Pure — `RexSession` owns the sockets.
 ///
 /// Written against API revision 14 (Rex 0.1.0-preview.19, 2026-11-16). The
 /// authority is the server's own `GET /llms.txt`, not the website docs; what
@@ -186,6 +187,8 @@ enum RexWire {
         var isFocused: Bool
         /// In the session's active window.
         var isFronted: Bool
+        /// The client its size follows; nil for none.
+        var owner: String?
     }
 
     /// Every terminal block of a `session.view` (or the `view` inside a
@@ -209,7 +212,8 @@ enum RexWire {
                         windowLabel: window["label"] as? String ?? "",
                         windowPosition: offset + 1,
                         isFocused: id == focused,
-                        isFronted: windowID == activeWindow
+                        isFronted: windowID == activeWindow,
+                        owner: block["owner"] as? String
                     ))
                 }
             }
@@ -227,6 +231,169 @@ enum RexWire {
             ?? blocks.first(where: \.isFronted)
             ?? blocks.first(where: \.isFocused)
             ?? blocks.first
+    }
+
+    // MARK: - Session view → the panes a tab draws
+
+    static let shellFlavor = terminalCreator + ".shell"
+
+    /// The part of a session's view one tab draws: ONE layer of one window,
+    /// as the app's own pane tree. A pane's id is its block's.
+    struct Layer: Equatable, Sendable {
+        var windowID: String
+        var layerID: String
+        var layout: PaneLayout
+        /// The window's focused block, when it is one of this layer's
+        /// terminals — where Rex itself would type.
+        var focusedBlockID: String?
+    }
+
+    /// The layer holding `blockID` — where a tab pointed at that terminal
+    /// draws. nil when no window shows it as a terminal.
+    static func layer(holding blockID: String, inView view: [String: Any]) -> Layer? {
+        layers(inView: view, preferring: blockID)
+            .first { $0.layout.contains(PaneID(blockID)) }
+    }
+
+    /// The layer a tab was already drawing, as `view` now has it. nil once
+    /// the window or the layer is gone, or holds no terminal any more.
+    static func layer(
+        windowID: String, layerID: String, preferring blockID: String?,
+        inView view: [String: Any]
+    ) -> Layer? {
+        layers(inView: view, preferring: blockID)
+            .first { $0.windowID == windowID && $0.layerID == layerID }
+    }
+
+    /// Every layer of `view` that holds a terminal, as a pane tree of its
+    /// TERMINAL blocks. Any other kind of block has no stream this client
+    /// can draw: its leaf is cut out and what was beside it takes the room.
+    /// A window's tiled layer and each floating layer are separate entries —
+    /// a tab draws one of them, filling its own space (`bounds` is where a
+    /// floating layer sits over a Rex window, which a tab has no use for).
+    private static func layers(
+        inView view: [String: Any], preferring blockID: String?
+    ) -> [Layer] {
+        var found: [Layer] = []
+        for window in view["windows"] as? [[String: Any]] ?? [] {
+            guard let windowID = window["window_id"] as? String else { continue }
+            let focused = window["focused_block_id"] as? String
+            for layer in window["layers"] as? [[String: Any]] ?? [] {
+                guard let layerID = layer["layer_id"] as? String else { continue }
+                let terminals = (layer["blocks"] as? [[String: Any]] ?? []).compactMap { block in
+                    block["creator_name"] as? String == terminalCreator
+                        ? block["block_id"] as? String : nil
+                }
+                guard !terminals.isEmpty else { continue }
+                let layout: PaneLayout?
+                if let tree = layer["layout"] as? [String: Any] {
+                    layout = paneLayout(tree, terminals: Set(terminals))
+                } else {
+                    // A layer that names its terminals but not how they are
+                    // arranged (no server measured leaves the layout out):
+                    // one of them, alone, rather than an arrangement
+                    // invented here.
+                    layout = .pane(PaneID(
+                        blockID.flatMap { terminals.contains($0) ? $0 : nil } ?? terminals[0]))
+                }
+                guard let layout else { continue }
+                found.append(Layer(
+                    windowID: windowID, layerID: layerID, layout: layout,
+                    focusedBlockID: focused.flatMap {
+                        layout.contains(PaneID($0)) ? $0 : nil
+                    }))
+            }
+        }
+        return found
+    }
+
+    /// One node of a layer's `layout`: a block, or a split of two nodes.
+    /// A direction this client does not know is drawn side by side, as the
+    /// protocol asks.
+    private static func paneLayout(
+        _ node: [String: Any], terminals: Set<String>
+    ) -> PaneLayout? {
+        if let block = node["block_id"] as? String {
+            return terminals.contains(block) ? .pane(PaneID(block)) : nil
+        }
+        guard let split = node["split"] as? [String: Any] else { return nil }
+        let before = (split["before"] as? [String: Any])
+            .flatMap { paneLayout($0, terminals: terminals) }
+        let after = (split["after"] as? [String: Any])
+            .flatMap { paneLayout($0, terminals: terminals) }
+        guard let before, let after else { return before ?? after }
+        guard let id = split["split_id"] as? String else { return before }
+        let ratio = (split["ratio"] as? NSNumber)?.doubleValue ?? 0.5
+        return .split(PaneLayout.Split(
+            id: id,
+            axis: split["direction"] as? String == "vertical" ? .stacked : .sideBySide,
+            ratio: min(
+                max(ratio, PaneLayout.ratioBounds.lowerBound),
+                PaneLayout.ratioBounds.upperBound),
+            before: before, after: after))
+    }
+
+    // MARK: - Changing a layout
+
+    /// `session.new_split`: one new shell beside `anchorID` — to its right,
+    /// or below it — taking half its space.
+    ///
+    /// `focus` stays false on purpose. Focusing also makes the block's
+    /// window the session's active one, which is what the Rex app on the
+    /// host is showing; a tab's own focus is the tab's (`PaneCommand
+    /// .focus`). `cwd` is taken literally by the server (`RexProbe`), so it
+    /// is only ever a path the server itself reported.
+    static func newSplitPayload(
+        sessionID: String, anchorID: String, axis: PaneLayout.Axis, cwd: String?
+    ) -> [String: Any] {
+        var block: [String: Any] = ["flavor": shellFlavor]
+        if let cwd { block["options"] = ["cwd": cwd] }
+        return [
+            "session_id": sessionID,
+            "anchor_id": anchorID,
+            "direction": direction(axis),
+            "side": "after",
+            "layout": ["block": block],
+            "focus": false,
+        ]
+    }
+
+    /// `session.new_window`: a new window — a tab, in Rex's own app —
+    /// holding one shell.
+    ///
+    /// `focus` is false for the reason `newSplitPayload`'s is: true (the
+    /// default) makes the new window the session's active one, and the Rex
+    /// app on the host would flip to it. Measured: with false the session's
+    /// `active_window_id` stays where it was, and the block is still its
+    /// maker's.
+    static func newWindowPayload(sessionID: String, cwd: String?) -> [String: Any] {
+        var block: [String: Any] = ["flavor": shellFlavor]
+        if let cwd { block["options"] = ["cwd": cwd] }
+        return [
+            "session_id": sessionID,
+            "layout": ["block": block],
+            "focus": false,
+        ]
+    }
+
+    /// `session.resize_pane`: the server finds the split from a block on
+    /// each side of it. Any pair works — the split is the only one with one
+    /// of them on each side — so the first pane of each side names it.
+    static func resizePanePayload(
+        sessionID: String, split: PaneLayout.Split, ratio: Double
+    ) -> [String: Any] {
+        [
+            "session_id": sessionID,
+            "direction": direction(split.axis),
+            "before_block_id": split.before.firstPane.rawValue,
+            "after_block_id": split.after.firstPane.rawValue,
+            "ratio": ratio,
+        ]
+    }
+
+    /// Rex's word for an axis: `horizontal` puts the two sides side by side.
+    private static func direction(_ axis: PaneLayout.Axis) -> String {
+        axis == .sideBySide ? "horizontal" : "vertical"
     }
 
     // MARK: - Working directory
@@ -255,20 +422,30 @@ enum RexWire {
     /// record. A row reads `window — terminal`; a window nobody named
     /// (`chosenWindowLabel`) is `window N`, and a terminal whose label says
     /// nothing more than its window is the window alone. `isActive` marks
-    /// the one this tab is showing.
+    /// the one the tab's keyboard is on.
+    ///
+    /// Rows that would read the same are counted: a window split three ways
+    /// is three shells called `shell`, and the tab draws all three, so the
+    /// list has to say which is which — `shell`, `shell 2`, `shell 3`, in
+    /// the layout's reading order, which is the order the panes are in on
+    /// screen.
     static func terminalChoices(
         in blocks: [Block], showing blockID: String?
     ) -> [TmuxWindowChoice] {
-        blocks.enumerated().map { offset, block in
+        var seen: [String: Int] = [:]
+        return blocks.enumerated().map { offset, block in
             let window = chosenWindowLabel(block.windowLabel, windowID: block.windowID)
                 ?? String(localized: "window \(block.windowPosition)")
             let terminal = displayLabel(block.label)
-            let name = terminal.isEmpty || terminal.caseInsensitiveCompare(window) == .orderedSame
+            let base = terminal.isEmpty || terminal.caseInsensitiveCompare(window) == .orderedSame
                 ? window
                 : "\(window) — \(terminal)"
+            let count = (seen[base.lowercased()] ?? 0) + 1
+            seen[base.lowercased()] = count
             return TmuxWindowChoice(
                 tmuxID: block.id, index: offset + 1,
-                isActive: block.id == blockID, name: name)
+                isActive: block.id == blockID,
+                name: count == 1 ? base : "\(base) \(String(count))")
         }
     }
 

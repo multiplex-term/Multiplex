@@ -86,7 +86,13 @@ UIKit scene runtime (MultiplexSceneDelegate + UIKitSceneRootViewController;
   SidePanelViewController one active-window mount around an existing ▤/⌗
                      pane: 30 pt header + iPad seam or visionOS trailing slab;
                      presentation only, never controller lifetime
-  TerminalSessionController  one per tab; input pump + TerminalView
+  TerminalSessionController  one per tab: the transport run and everything
+                     above the emulator. "The terminal" of a tab is its
+                     active screen's view
+    TerminalScreen       one emulator endpoint: the SwiftTerm view, its
+                         output coalescer, ordered input + resize pumps, its
+                         grid pin. A tab has one — or one per PANE on a
+                         paned transport (docs/agents/panes.md)
     TalkbackDraft        the tab's chat-style message box (text +
                          attachments; pure) beside its observed talkbackOpen
                          — sendTalkback = one paste + CR through the pump,
@@ -101,17 +107,22 @@ UIKit scene runtime (MultiplexSceneDelegate + UIKitSceneRootViewController;
                          analyzer or SFSpeechRecognizer behind AudioDenoiser
                          (RNNoise, Vendor/rnnoise) when the model is on;
                          RNNoiseModelStore downloads + SHA-256-pins it
-    TerminalTransport    the tab's byte pipe; picked by the route (a Rex
-                         tab) then host.useMosh (exec + SFTP stay SSH-only
+    TerminalTransport    the tab's byte pipe (SSH PTY or mosh), picked by
+                         host.useMosh (exec + SFTP stay SSH-only
                          capabilities)
+    PanedTerminalTransport  the other kind of link: one stream per pane
+                         plus the layout they sit in (PaneLayout /
+                         PaneCommand, pure), drawn by the app
+                         (PaneSplitView). Picked by the route — a Rex tab
     SessionResumePolicy  pure: suspension damage vs user-ended session
     SSHConnection (actor)  Citadel → SwiftNIO SSH; exec channel (probe,
                      mosh bootstrap, drops) + PTY shell ⇄ SwiftTerm
     MoshSession (actor)  UDP socket + MoshTransportEngine; bootstrapped
                      over a throwaway SSHConnection
-    RexSession (actor)   a Rex terminal block: Rex has no client to run in
-                     a PTY, so the tab speaks its WebSocket API over two
-                     SSHConnection.openPipe byte pipes (control + data)
+    RexSession (actor)   a Rex window, the first paned transport: Rex has
+                     no client to run in a PTY, so the tab speaks its
+                     WebSocket API over SSHConnection.openPipe byte pipes
+                     (one control, one data per terminal block)
       WebSocketCodec / RexWire  RFC 6455 client codec and the Rex control,
                      data-handshake and terminal-stream formats (pure)
       Mosh/*         clean-room mosh stack, pure + unit-tested against

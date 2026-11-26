@@ -662,11 +662,15 @@ private final class ShortcutItemButton: ShortcutPressControl {
         commandLabel.setText(
             armed ? String(localized: "press again to close") : item.command
         )
+        let binding = armed ? "AGAIN" : item.bindingLabel
         bindingLabel.configure(
-            armed ? "AGAIN" : item.bindingLabel,
+            binding,
             font: UIKitChassis.monoFont(9, weight: .semibold),
             color: UIKitChassis.signal2
         )
+        // A row with no key behind it (a native-pane tab's rows are not
+        // bindings) shows no empty keycap.
+        bindingBorder.isHidden = binding.isEmpty
         layer.borderWidth = armed ? 1 : 0
         refreshBorder()
         accessibilityLabel = Self.accessibilityLabel(for: item, isArmed: armed)
@@ -695,7 +699,9 @@ private final class ShortcutItemButton: ShortcutPressControl {
         if item.requiresDoubleActivation {
             return String(localized: "\(item.title), \(item.command), press twice to confirm")
         }
-        return "\(item.title), \(item.command), \(item.bindingLabel)"
+        return [item.title, item.command, item.bindingLabel]
+            .filter { !$0.isEmpty }
+            .joined(separator: ", ")
     }
 
     private func refreshBorder() {

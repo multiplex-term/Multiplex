@@ -108,11 +108,12 @@ enum HostGuide {
 
     /// What showing Rex sessions means, said wherever they can be switched
     /// on — the rail's offer confirmation and Host Settings' Backend detail
-    /// — so neither promises more than the app does: one terminal per tab,
-    /// and new sessions only where a Rex server is already running, which
-    /// is also why it is missing from the default's choices right below.
+    /// — so neither promises more than the app does: one Rex window per
+    /// tab, and new sessions only where a Rex server is already running,
+    /// which is also why it is missing from the default's choices right
+    /// below.
     static let rexSessionsNote = String(localized: """
-        A Rex tile opens one terminal: the one its session is showing. \
+        A Rex tile opens the window its session is showing, with its panes. \
         New Rex sessions need Rex already running on the host, so Rex is \
         never the default.
         """)

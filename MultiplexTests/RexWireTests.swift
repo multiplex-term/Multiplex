@@ -270,6 +270,136 @@ final class RexWireTests: XCTestCase {
             JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
     }
 
+    // MARK: - The panes a tab draws
+
+    /// A window as measured on preview.23 (revision 14 shapes): `a | (b / c)`
+    /// in its tiled layer with a non-terminal block beside `c`, and a
+    /// floating layer holding one more terminal.
+    private func layeredView() throws -> [String: Any] {
+        let json = """
+            {"revision": 7, "active_window_id": "window:1", "windows": [
+              {"window_id": "window:1", "label": "editor", "focused_block_id": "block:b",
+               "layers": [
+                 {"layer_id": "layer:tiled", "kind": "tiled", "bounds": [0, 0, 1, 1],
+                  "layout": {"rect": [0, 0, 1, 1], "split": {
+                    "split_id": "split:outer", "direction": "horizontal", "ratio": 0.3,
+                    "before": {"rect": [0, 0, 0.3, 1], "block_id": "block:a"},
+                    "after": {"rect": [0.3, 0, 0.7, 1], "split": {
+                      "split_id": "split:inner", "direction": "vertical", "ratio": 0.7,
+                      "before": {"rect": [0.3, 0, 0.7, 0.7], "block_id": "block:b"},
+                      "after": {"rect": [0.3, 0.7, 0.7, 0.3], "split": {
+                        "split_id": "split:mixed", "direction": "sideways", "ratio": 0.5,
+                        "before": {"rect": [0.3, 0.7, 0.35, 0.3], "block_id": "block:c"},
+                        "after": {"rect": [0.65, 0.7, 0.35, 0.3], "block_id": "block:tunnel"}}}}}}},
+                  "blocks": [
+                    {"block_id": "block:a", "label": "shell",
+                     "creator_name": "com.superlogical.terminal", "owner": "client:me"},
+                    {"block_id": "block:b", "label": "logs",
+                     "creator_name": "com.superlogical.terminal", "owner": "client:app"},
+                    {"block_id": "block:c", "label": "repl",
+                     "creator_name": "com.superlogical.terminal"},
+                    {"block_id": "block:tunnel", "creator_name": "com.example.tunnel"}]},
+                 {"layer_id": "layer:float", "kind": "floating", "bounds": [0.2, 0.2, 0.6, 0.6],
+                  "layout": {"rect": [0.2, 0.2, 0.6, 0.6], "block_id": "block:f"},
+                  "blocks": [{"block_id": "block:f", "label": "scratch",
+                              "creator_name": "com.superlogical.terminal"}]}]},
+              {"window_id": "window:2", "label": "old",
+               "layers": [{"layer_id": "layer:bare",
+                           "blocks": [{"block_id": "block:x",
+                                       "creator_name": "com.superlogical.terminal"},
+                                      {"block_id": "block:y",
+                                       "creator_name": "com.superlogical.terminal"}]}]}]}
+            """
+        return try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+    }
+
+    func testALayerBecomesThePaneTreeOfItsTerminals() throws {
+        let layer = try XCTUnwrap(RexWire.layer(holding: "block:c", inView: try layeredView()))
+        XCTAssertEqual(layer.windowID, "window:1")
+        XCTAssertEqual(layer.layerID, "layer:tiled")
+        // `horizontal` is side by side, `vertical` stacked. The block that
+        // is not a terminal is cut out and `c` has its split's room — which
+        // takes the split with the direction nobody knows away with it.
+        XCTAssertEqual(layer.layout, .split(PaneLayout.Split(
+            id: "split:outer", axis: .sideBySide, ratio: 0.3,
+            before: .pane(PaneID("block:a")),
+            after: .split(PaneLayout.Split(
+                id: "split:inner", axis: .stacked, ratio: 0.7,
+                before: .pane(PaneID("block:b")), after: .pane(PaneID("block:c")))))))
+        XCTAssertEqual(layer.focusedBlockID, "block:b")
+        // Each block says whose size it follows.
+        XCTAssertEqual(
+            RexWire.terminalBlocks(inView: try layeredView()).prefix(3).map(\.owner),
+            ["client:me", "client:app", nil])
+    }
+
+    func testAFloatingLayerIsALayerOfItsOwnAndTheWindowsFocusIsNotItsOwn() throws {
+        let view = try layeredView()
+        let floating = try XCTUnwrap(RexWire.layer(holding: "block:f", inView: view))
+        XCTAssertEqual(floating.layerID, "layer:float")
+        XCTAssertEqual(floating.layout, .pane(PaneID("block:f")))
+        // The window is focused on a block of its other layer.
+        XCTAssertNil(floating.focusedBlockID)
+        // A tab keeps drawing the layer it was on, by window and layer.
+        XCTAssertEqual(
+            RexWire.layer(
+                windowID: "window:1", layerID: "layer:float", preferring: nil, inView: view),
+            floating)
+        XCTAssertNil(RexWire.layer(
+            windowID: "window:1", layerID: "layer:gone", preferring: nil, inView: view))
+        // A block nobody shows as a terminal names no layer.
+        XCTAssertNil(RexWire.layer(holding: "block:tunnel", inView: view))
+        XCTAssertNil(RexWire.layer(holding: "block:gone", inView: view))
+    }
+
+    func testALayerThatStatesNoLayoutIsOneOfItsTerminalsAlone() throws {
+        let view = try layeredView()
+        // The one asked for, not an arrangement invented here.
+        XCTAssertEqual(
+            RexWire.layer(holding: "block:y", inView: view)?.layout, .pane(PaneID("block:y")))
+        XCTAssertEqual(
+            RexWire.layer(
+                windowID: "window:2", layerID: "layer:bare", preferring: nil, inView: view
+            )?.layout,
+            .pane(PaneID("block:x")))
+    }
+
+    func testLayoutRequestsNameWhatTheServerNeeds() throws {
+        let split = RexWire.newSplitPayload(
+            sessionID: "session:1", anchorID: "block:a", axis: .stacked, cwd: "/work")
+        XCTAssertEqual(split["anchor_id"] as? String, "block:a")
+        XCTAssertEqual(split["direction"] as? String, "vertical")
+        XCTAssertEqual(split["side"] as? String, "after")
+        // Never focused on the server: that would also front the window.
+        XCTAssertEqual(split["focus"] as? Bool, false)
+        let block = (split["layout"] as? [String: Any])?["block"] as? [String: Any]
+        XCTAssertEqual(block?["flavor"] as? String, "com.superlogical.terminal.shell")
+        XCTAssertEqual((block?["options"] as? [String: Any])?["cwd"] as? String, "/work")
+        // No directory known: none is sent, and the server starts in $HOME.
+        let bare = RexWire.newSplitPayload(
+            sessionID: "session:1", anchorID: "block:a", axis: .sideBySide, cwd: nil)
+        XCTAssertEqual(bare["direction"] as? String, "horizontal")
+        XCTAssertNil(((bare["layout"] as? [String: Any])?["block"] as? [String: Any])?["options"])
+
+        // A new tab is a window with one shell — and never the active one.
+        let window = RexWire.newWindowPayload(sessionID: "session:1", cwd: "/work")
+        XCTAssertEqual(window["focus"] as? Bool, false)
+        let shell = (window["layout"] as? [String: Any])?["block"] as? [String: Any]
+        XCTAssertEqual(shell?["flavor"] as? String, "com.superlogical.terminal.shell")
+        XCTAssertEqual((shell?["options"] as? [String: Any])?["cwd"] as? String, "/work")
+        XCTAssertNil(window["window_label"])
+
+        // A split is named by a block on each side of it: the first of each.
+        let layer = try XCTUnwrap(RexWire.layer(holding: "block:a", inView: try layeredView()))
+        let outer = try XCTUnwrap(layer.layout.split(withID: "split:outer"))
+        let resize = RexWire.resizePanePayload(sessionID: "session:1", split: outer, ratio: 0.4)
+        XCTAssertEqual(resize["direction"] as? String, "horizontal")
+        XCTAssertEqual(resize["before_block_id"] as? String, "block:a")
+        XCTAssertEqual(resize["after_block_id"] as? String, "block:b")
+        XCTAssertEqual(resize["ratio"] as? Double, 0.4)
+    }
+
     func testOnlyTerminalBlocksAreAttachableAndTheFrontedOneWins() throws {
         let blocks = RexWire.terminalBlocks(inView: try view())
         // A tunnel block is not a terminal.
@@ -311,6 +441,25 @@ final class RexWireTests: XCTestCase {
             showing: nil)
         XCTAssertEqual(generated.map(\.name), ["window 3", "logs"])
         XCTAssertEqual(generated.map(\.isActive), [false, false])
+
+        // A window split three ways is three shells called `shell`. The tab
+        // draws all three, so the rows are counted in the order the panes
+        // are in — and a same-named terminal of ANOTHER window is its own.
+        func shell(_ id: String, window: String, at position: Int) -> RexWire.Block {
+            RexWire.Block(
+                id: id, label: "Shell", windowID: "window:" + window, windowLabel: window,
+                windowPosition: position, isFocused: false, isFronted: false)
+        }
+        let split = RexWire.terminalChoices(
+            in: [
+                shell("block:1", window: "api", at: 1), shell("block:2", window: "api", at: 1),
+                shell("block:3", window: "web", at: 2), shell("block:4", window: "API", at: 1),
+            ],
+            showing: "block:2")
+        XCTAssertEqual(
+            split.map(\.name),
+            ["api — Shell", "api — Shell 2", "web — Shell", "API — Shell 3"])
+        XCTAssertEqual(split.map(\.isActive), [false, true, false, false])
     }
 
     func testTheWorkingDirectoryIsTheForegroundProcesssThenTheChilds() throws {

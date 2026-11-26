@@ -1246,8 +1246,11 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback, KeyBarDropSurface 
         }
     }
 
+    /// `terminal` is nil for a paned tab that has not attached yet: its
+    /// emulators come with the layout, and `retarget` hands the rail the
+    /// one the keyboard is on.
     init(
-        terminal: TerminalView,
+        terminal: TerminalView?,
         controller: TerminalSessionController?,
         performShortcut: @escaping (ShortcutPanelItem) -> Void,
         finishTmuxCopyMode: @escaping () -> Void,
@@ -1261,7 +1264,7 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback, KeyBarDropSurface 
         self.shortcutBackend = shortcutBackend
         self.orderStore = orderStore
         showsReturnKey = UIDevice.current.userInterfaceIdiom == .pad
-        ctrlLatched = terminal.controlModifier
+        ctrlLatched = terminal?.controlModifier ?? false
         super.init(frame: .zero)
 
         backgroundColor = UIKitChassis.bezel
@@ -1272,12 +1275,7 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback, KeyBarDropSurface 
         dropCoordinator.installDropTarget(on: self)
         HardwareKeyboardMonitor.shared.startIfNeeded()
 
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(controlModifierDidReset),
-            name: .terminalViewControlModifierReset,
-            object: terminal
-        )
+        observeControlModifierReset(of: terminal)
         observationGeneration &+= 1
         observeAndRender(generation: observationGeneration)
         #if DEBUG
@@ -1377,6 +1375,34 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback, KeyBarDropSurface 
         ctrlLatched = false
         ctrlKeyControl?.isLatched = false
         hideCtrlCombos()
+    }
+
+    private func observeControlModifierReset(of terminal: TerminalView?) {
+        guard let terminal else { return }
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(controlModifierDidReset),
+            name: .terminalViewControlModifierReset,
+            object: terminal
+        )
+    }
+
+    /// Points the rail at another emulator of the same tab: the pane the
+    /// keyboard moved to. A CTRL latch does not travel — it was armed for a
+    /// key about to be typed into the pane being left.
+    func retarget(to terminal: TerminalView?) {
+        guard terminal !== self.terminal else { return }
+        if let previous = self.terminal {
+            if ctrlLatched { previous.controlModifier = false }
+            NotificationCenter.default.removeObserver(
+                self, name: .terminalViewControlModifierReset, object: previous)
+        }
+        self.terminal = terminal
+        observeControlModifierReset(of: terminal)
+        let latched = terminal?.controlModifier ?? false
+        ctrlLatched = latched
+        ctrlKeyControl?.isLatched = latched
+        if !latched { hideCtrlCombos() }
     }
 
     private var currentObservedState: TerminalKeyBarObservedState {
@@ -2168,11 +2194,17 @@ enum TmuxShortcutDebugHook {
 
 }
 
-/// The rail beside the focused terminal — every headless hook's target.
+/// The rail beside the focused terminal — every headless hook's target. A
+/// single emulator is the rail's sibling; a pane of a paned tab sits two
+/// levels further in (its cell, the split), so the search climbs.
 @MainActor
 private func focusedBar() -> TerminalKeyBar? {
-    guard let view = TerminalFocusArbiter.current else { return nil }
-    return view.superview?.subviews.compactMap { $0 as? TerminalKeyBar }.first
+    var ancestor = TerminalFocusArbiter.current?.superview
+    while let view = ancestor {
+        if let bar = view.subviews.compactMap({ $0 as? TerminalKeyBar }).first { return bar }
+        ancestor = view.superview
+    }
+    return nil
 }
 
 @MainActor

@@ -1670,18 +1670,18 @@
         }
       }
     },
-    "A Rex tile opens one terminal: the one its session is showing. New Rex sessions need Rex already running on the host, so Rex is never the default." : {
+    "A Rex tile opens the window its session is showing, with its panes. New Rex sessions need Rex already running on the host, so Rex is never the default." : {
       "localizations" : {
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Rexタイルは、そのセッションが表示しているターミナルを1つ開きます。新しいRexセッションを作成するには、ホストでRexがすでに実行されている必要があるため、Rexが新規セッションのデフォルトの実行先になることはありません。"
+            "value" : "Rexタイルは、そのセッションが表示しているウインドウをペインごと開きます。新しいRexセッションを作成するには、ホストでRexがすでに実行されている必要があるため、Rexが新規セッションのデフォルトの実行先になることはありません。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Rex 方塊會開啟一個終端機：也就是該工作階段目前顯示的那一個。主機上必須已有 Rex 在執行，才能建立新的 Rex 工作階段，因此 Rex 不會是新工作階段的預設後端。"
+            "value" : "Rex 方塊會開啟該工作階段目前顯示的視窗，窗格一併顯示。主機上必須已有 Rex 在執行，才能建立新的 Rex 工作階段，因此 Rex 不會是新工作階段的預設後端。"
           }
         }
       }
@@ -1846,18 +1846,18 @@
         }
       }
     },
-    "Shows the sessions of a host that runs Rex (superlogical.com/rex) and attaches their terminals as tabs. Rex is a preview and can change under Multiplex. Once on, a host with Rex sessions offers + REX on its rail, and REX appears in Host Settings under Backends. Turning it off hides them at the deck's next refresh; hosts keep their setting." : {
+    "Shows the sessions of a host that runs Rex (superlogical.com/rex) and opens their windows as tabs, panes included. Rex is a preview and can change under Multiplex. Once on, a host with Rex sessions offers + REX on its rail, and REX appears in Host Settings under Backends. Turning it off hides them at the deck's next refresh; hosts keep their setting." : {
       "localizations" : {
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Rex（superlogical.com/rex）を実行しているホストのセッションを表示し、そのターミナルをタブとしてアタッチします。Rexはプレビュー版のため、Multiplexが対応する前に変更されることがあります。オンにすると、Rexセッションのあるホストは + REX をDeckに表示し、「ホスト設定」の「バックエンド」にREXが表示されます。オフにすると、Deckの次回更新時に非表示になります。ホストの設定は保持されます。"
+            "value" : "Rex（superlogical.com/rex）を実行しているホストのセッションを表示し、そのウインドウをペインごとタブとして開きます。Rexはプレビュー版のため、Multiplexが対応する前に変更されることがあります。オンにすると、Rexセッションのあるホストは + REX をDeckに表示し、「ホスト設定」の「バックエンド」にREXが表示されます。オフにすると、Deckの次回更新時に非表示になります。ホストの設定は保持されます。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "顯示執行 Rex（superlogical.com/rex）的主機上的工作階段，並把其中的終端機連接成分頁。Rex 仍是預覽版，可能在 Multiplex 跟上之前就有變動。開啟後，有 Rex 工作階段的主機會在 Deck 上顯示 + REX，「主機設定」的「後端」下也會出現 REX。關閉後，這些項目會在 Deck 下次重新整理時隱藏；主機本身的設定會保留。"
+            "value" : "顯示執行 Rex（superlogical.com/rex）的主機上的工作階段，並把其中的視窗連同窗格開成標籤頁。Rex 仍是預覽版，可能在 Multiplex 跟上之前就有變動。開啟後，有 Rex 工作階段的主機會在 Deck 上顯示 + REX，「主機設定」的「後端」下也會出現 REX。關閉後，這些項目會在 Deck 下次重新整理時隱藏；主機本身的設定會保留。"
           }
         }
       }
@@ -3172,6 +3172,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "提示音"
+          }
+        }
+      }
+    },
+    "Between left and right panes" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "左右のペインの間"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "左右窗格之間"
+          }
+        }
+      }
+    },
+    "Between top and bottom panes" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上下のペインの間"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上下窗格之間"
           }
         }
       }
@@ -5006,6 +5038,22 @@
         }
       }
     },
+    "Couldn't close the pane. %@" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ペインを閉じられませんでした。%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法關閉窗格。%@"
+          }
+        }
+      }
+    },
     "Couldn't connect to %@: %@" : {
       "localizations" : {
         "en" : {
@@ -5152,6 +5200,38 @@
         }
       }
     },
+    "Couldn't open a new tab. %@" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新規タブを開けませんでした。%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法開啟新的標籤頁。%@"
+          }
+        }
+      }
+    },
+    "Couldn't open this terminal. %@" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このターミナルを開けませんでした。%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法開啟這個終端機。%@"
+          }
+        }
+      }
+    },
     "Couldn't reach %@ (%@)." : {
       "localizations" : {
         "en" : {
@@ -5284,6 +5364,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無法解析 %@。"
+          }
+        }
+      }
+    },
+    "Couldn't split the pane. %@" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ペインを分割できませんでした。%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法分割窗格。%@"
           }
         }
       }
@@ -11394,6 +11490,22 @@
         }
       }
     },
+    "Pane divider" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ペインの区切り線"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "窗格分隔線"
+          }
+        }
+      }
+    },
     "PANE MENU" : {
       "localizations" : {
         "ja" : {
@@ -13664,6 +13776,22 @@
         }
       }
     },
+    "Show all panes" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "すべてのペインを表示"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "顯示所有窗格"
+          }
+        }
+      }
+    },
     "Show connection stats" : {
       "localizations" : {
         "ja" : {
@@ -13760,18 +13888,18 @@
         }
       }
     },
-    "Show Rex terminals" : {
+    "Show Rex panes and terminals" : {
       "localizations" : {
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Rexのターミナルを表示"
+            "value" : "Rexのペインとターミナルを表示"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "顯示 Rex 終端機"
+            "value" : "顯示 Rex 窗格與終端機"
           }
         }
       }
@@ -14363,6 +14491,22 @@
         }
       }
     },
+    "Split Down" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下に分割"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "向下分割"
+          }
+        }
+      }
+    },
     "Split Left / Right" : {
       "localizations" : {
         "ja" : {
@@ -14375,6 +14519,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "左右分割"
+          }
+        }
+      }
+    },
+    "Split Right" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "右に分割"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "向右分割"
           }
         }
       }
@@ -16255,6 +16415,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此標籤頁無法重新連線，因為它的主機已不在 Deck 中。"
+          }
+        }
+      }
+    },
+    "The terminal closed before it could be opened." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ターミナルは開く前に閉じられました。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "終端機在開啟前就已關閉。"
           }
         }
       }

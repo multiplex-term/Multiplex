@@ -3019,8 +3019,8 @@ struct FleetSessionTileConfiguration {
     let copyHandoffCommand: () -> Void
     let delete: () -> Void
     let droppedSession: (String) -> Void
-    /// Opens ONE terminal of the session as its own tab — the Rex tile's
-    /// Open Terminal rows. A `var` with a default so the tiles of every
+    /// Opens a tab on ONE terminal of the session (its window, the
+    /// keyboard on that terminal) — the Rex tile's Open Terminal rows. A `var` with a default so the tiles of every
     /// other backend, and their tests, construct exactly as before.
     var openPane: (TmuxWindow, TmuxPane) -> Void = { _, _ in }
 
@@ -3148,10 +3148,10 @@ final class FleetSessionTileView: FleetPressView,
                     configuration.attachNewWindow()
                 },
             ]
-            // A Rex tab shows one terminal, and a press opens the one the
-            // session is fronting. The others are reached here — only when
-            // there ARE others, so a one-terminal session's menu is as short
-            // as any tile's.
+            // A press opens the window the session is fronting. Its other
+            // terminals — in that window or another — are reached here, only
+            // when there ARE others, so a one-terminal session's menu is as
+            // short as any tile's.
             if configuration.sessionBackend == .rex,
                configuration.session.paneCount > 1 {
                 let rows = configuration.session.windows.flatMap { window in

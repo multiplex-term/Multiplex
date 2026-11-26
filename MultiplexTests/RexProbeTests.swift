@@ -463,11 +463,25 @@ final class RexProbeTests: XCTestCase {
         XCTAssertEqual(Host.SessionBackend.rex.shortcutKeyCaption, "REX")
         XCTAssertEqual(Host.SessionBackend.tmux.shortcutKeyCaption, "TMUX")
         XCTAssertEqual(Host.SessionBackend.herdr.shortcutKeyCaption, "HRDR")
-        // The panel has no shortcut rows (Rex has no prefix-key client),
-        // only the list that switches the tab's terminal.
+        // The panel lists no bindings (Rex has no prefix-key client): its
+        // rows act on the tab's own panes, and the list below them reaches
+        // the session's other terminals.
         let panel = ShortcutPanelContent.content(for: route.sessionBackend)
         XCTAssertEqual(panel, .rex)
-        XCTAssertEqual(panel?.sections, [])
+        XCTAssertEqual(
+            panel?.sections.flatMap(\.items).map(\.payload),
+            [
+                .pane(.splitRight), .pane(.splitDown), .pane(.zoomPane), .pane(.closePane),
+                .pane(.newWindow),
+            ])
+        // Closing ends a program: asked twice, like every backend's close.
+        XCTAssertEqual(
+            panel?.sections.flatMap(\.items).map(\.requiresDoubleActivation),
+            [false, false, false, true, false])
+        // Rex's own app calls a window a tab, and so does its row.
+        XCTAssertEqual(panel?.sections.map(\.title), ["Panes", "Tabs"])
+        XCTAssertEqual(panel?.sections.last?.items.map(\.title), ["New Tab"])
+        XCTAssertEqual(panel?.sections.last?.items.map(\.command), ["session.new_window"])
         XCTAssertEqual(panel?.switchSectionTitle, "Switch Terminal")
 
         // A label is not a target: two sessions can share one.

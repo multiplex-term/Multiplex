@@ -17,14 +17,15 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
         /// presses too. A real terminal like `.attach`: restores across
         /// launches, resumes per `SessionResumePolicy`.
         case herdrAttach(sessionName: String)
-        /// Attach one terminal block of a Rex session. Unlike tmux and herdr
-        /// there is no client to run in a PTY: the tab speaks Rex's own
-        /// protocol (`RexSession`), so this mode has no remote command at
-        /// all. `sessionName` is the tile's display name — the identity the
+        /// Attach one window of a Rex session, its terminal blocks drawn as
+        /// the tab's own panes. Unlike tmux and herdr there is no client to
+        /// run in a PTY: the tab speaks Rex's own protocol (`RexSession`),
+        /// so this mode has no remote command at all. `sessionName` is the tile's display name — the identity the
         /// deck and the tab strip match on — while `sessionID` is the only
         /// thing the server can be asked for (a Rex label is not unique).
         /// `block` names one terminal of the session (the tile menu's Open
-        /// Terminal rows); nil means the one the session is fronting,
+        /// Terminal rows) — the tab draws that terminal's window with the
+        /// keyboard on it; nil means the one the session is fronting,
         /// decided at attach time, which is what a tile press opens. A real
         /// terminal like `.attach`: restores across launches, resumes per
         /// `SessionResumePolicy` — a named block that has since closed falls
@@ -94,10 +95,11 @@ struct TerminalRoute: Codable, Hashable, Identifiable {
                 sessionID: session.tmuxID)
         }
 
-        /// The mode for ONE terminal of a session, as its own tab — a Rex
-        /// tile's Open Terminal row. nil for a record with no usable ids,
-        /// and for a backend whose tab shows the whole session: its panes
-        /// are reached inside the tab, not opened one each.
+        /// The mode for a tab pointed at ONE terminal of a session — a Rex
+        /// tile's Open Terminal row: the tab opens on that terminal's
+        /// window. nil for a record with no usable ids, and for a backend
+        /// whose tab shows the whole session: its panes are reached inside
+        /// the tab, not opened one each.
         static func attach(session: TmuxSession, window: TmuxWindow, pane: TmuxPane) -> Mode? {
             guard session.backend == .rex,
                   RexWire.bakeableSessionID(session.tmuxID), !pane.tmuxID.isEmpty

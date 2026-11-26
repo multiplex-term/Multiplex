@@ -508,11 +508,11 @@ final class SettingsViewController: UIViewController {
         return SettingsSectionView(
             title: String(localized: "Experimental"),
             detail: String(localized: """
-                Shows the sessions of a host that runs Rex (superlogical.com/rex) and attaches \
-                their terminals as tabs. Rex is a preview and can change under Multiplex. Once \
-                on, a host with Rex sessions offers + REX on its rail, and REX appears in Host \
-                Settings under Backends. Turning it off hides them at the deck's next refresh; \
-                hosts keep their setting.
+                Shows the sessions of a host that runs Rex (superlogical.com/rex) and opens \
+                their windows as tabs, panes included. Rex is a preview and can change under \
+                Multiplex. Once on, a host with Rex sessions offers + REX on its rail, and REX \
+                appears in Host Settings under Backends. Turning it off hides them at the \
+                deck's next refresh; hosts keep their setting.
                 """),
             rows: [control]
         )
