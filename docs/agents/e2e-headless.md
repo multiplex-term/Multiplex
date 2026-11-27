@@ -26,7 +26,11 @@ app.multiplexterm.multiplex`):
   `workingDirs` / `sessionScripts` / `newSessionTmuxConf` /
   `agentLaunchModels` feed the picker/script/conf/model paths;
   `secondaryBackends: ["herdr"]` imports a MIXED host (two probes on one
-  connection, both backends' tiles); `passphrase`
+  connection, both backends' tiles; `["rex"]` adds the Rex probe — on a
+  Mac running Rex it reads, and a tab attaches, that Mac's REAL sessions,
+  so use a throwaway server per `backends-and-probe.md` when that
+  matters);
+  `passphrase`
   stores the key passphrase in the Keychain so an encrypted `privateKey`
   proves the sealed-key connect path (probe logs `Accepted publickey`, no
   prompt); `"enabled": false` proves the never-dials promise against a
@@ -46,6 +50,20 @@ app.multiplexterm.multiplex`):
   through the real surrender/adopt path (moved tabs keep connections).
 - `MULTIPLEX_AUTO_DROP=<local path>` — drops that file into the first tab
   (SFTP upload + typed path, the real drag path).
+- `MULTIPLEX_AUTO_REX_SWITCH=<n>` — on a Rex tab, presses row n (1-based)
+  of the REX panel's Switch Terminal list once the tab is live — the
+  headless stand-in for a press nothing else can make. Proof host-side:
+  `terminal.size` names the tab the owner of the NEW block and no longer of
+  the old one.
+- `MULTIPLEX_AUTO_PANE_ACTIONS=splitRight,splitDown,ratio:0.3,focus:1,closePane`
+  — on a paned (Rex) tab, walks the steps four seconds apart from six
+  seconds after it goes live, each through the entry point its control
+  uses: the REX panel's rows (`PaneShortcut` raw values — `splitRight`,
+  `splitDown`, `zoomPane`, `closePane`, `newWindow`), a divider
+  drag on the layout's first split (`ratio:`), a touch on the nth pane in
+  reading order (`focus:`). Fires once per process. Proof host-side: `rex
+  api call -s <session> session.view` (the tree, every block's `owner`)
+  and `com.superlogical.terminal.size` per block.
 - `MULTIPLEX_AUTO_ACTION_URL=multiplex://open?…` — submits the URL through
   the exact `onOpenURL` → router seam once per process; the headless widget
   stand-in (simctl openurl's first-run confirmation can't be clicked

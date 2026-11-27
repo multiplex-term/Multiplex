@@ -23,6 +23,9 @@ struct TerminalPaneConfiguration {
     /// hold-CTRL panel (iPad/iPhone; the visionOS cluster gets it from the
     /// window directly).
     var keyCommandPlan: KeyCommandPlan = .unrestricted
+    /// The tab's session has several windows to switch between: the key
+    /// rail's shortcut key lights (`TmuxSession.hasSwitchChoices`).
+    var shortcutHasChoices = false
     var close: () -> Void
 }
 
@@ -42,9 +45,18 @@ struct TerminalPaneObservedState: Equatable {
     var isDictating: Bool
     #endif
     var keyboardLocked: Bool
+    /// A paned tab's arrangement and the pane its keyboard is on: the
+    /// surface redraws the split, and the overlays that hang on "the
+    /// terminal" move to the emulator that now is it.
+    var paneLayout: PaneLayout?
+    var activePaneID: PaneID?
+    var zoomedPaneID: PaneID?
 
     @MainActor
     init(controller: TerminalSessionController) {
+        paneLayout = controller.paneLayout
+        activePaneID = controller.activePaneID
+        zoomedPaneID = controller.zoomedPaneID
         status = controller.status
         isResuming = controller.isResuming
         tmuxCopyModeUIActive = controller.tmuxCopyModeUIActive
@@ -76,6 +88,10 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
     private(set) var missingHostView: UIView?
     private var selectionActionsOverlay: TerminalSelectionActionsOverlay?
     private var selectionMenuOverlay: TerminalSelectionMenuOverlay?
+    /// The emulator the two overlays above were installed on. On a paned
+    /// tab the controller's `terminalView` moves with the keyboard, and
+    /// overlays left on the pane it came from would answer its presses.
+    private weak var overlayTerminal: TerminalView?
 
     private let topCenterStack = UIStackView()
     private let topTrailingStack = UIStackView()
@@ -209,6 +225,13 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
         guard canAcceptFileDrop(session),
               let controller = configuration.controller
         else { return }
+        // Among several panes a file lands in the one it was dropped on:
+        // the upload goes to that pane's directory and its path is typed
+        // there, so the tab's focus moves to it first.
+        if let split = terminalSurface?.paneSplitView,
+           let pane = split.pane(at: session.location(in: split)) {
+            controller.focusPane(pane)
+        }
         let providers = session.items.map(\.itemProvider)
         Task { @MainActor [weak controller] in
             controller?.deliverDrop(await TerminalDropLoader.load(providers))
@@ -240,6 +263,7 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
             keyRailHidden: configuration.keyRailHidden,
             isActive: configuration.isActive && configuration.focusAllowed,
             shortcutBackend: configuration.controller?.route.sessionBackend,
+            shortcutHasChoices: configuration.shortcutHasChoices,
             keyCommandPlan: configuration.keyCommandPlan
         )
     }
@@ -330,6 +354,13 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
         _ state: TerminalPaneObservedState,
         controller: TerminalSessionController
     ) {
+        if overlayTerminal !== controller.terminalView {
+            selectionActionsOverlay?.detach()
+            selectionActionsOverlay = nil
+            selectionMenuOverlay?.detach()
+            selectionMenuOverlay = nil
+            overlayTerminal = controller.terminalView
+        }
         let wantsOverlay = state.selectTextModeUIActive
             && configuration.isActive
             && state.status == .live
@@ -458,6 +489,15 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
     ) {
         removeArrangedSubviews(from: topCenterStack)
         guard configuration.isActive else { return }
+        if state.zoomedPaneID != nil {
+            // One pane is drawn over the others: say so, and carry the way
+            // back — the panes it covers cannot be seen to be missed.
+            let bar = TerminalContextBarView.zoomed { [weak controller] in
+                controller?.togglePaneZoom()
+            }
+            bar.accessibilityIdentifier = "terminalPane.context.zoomed"
+            topCenterStack.addArrangedSubview(bar)
+        }
         if state.tmuxCopyModeUIActive {
             let bar = TerminalContextBarView.copyMode { [weak controller] in
                 controller?.finishTmuxCopyMode()
@@ -812,6 +852,20 @@ final class TerminalContextBarView: UIKitTallyBorderedView {
                 prominent: true,
                 accessibilityLabel: String(localized: "Done"),
                 action: done
+            ),
+        ])
+    }
+
+    /// A paned tab drawing one pane over the rest: the lamp, and the chip
+    /// that brings the others back.
+    static func zoomed(showAll: @escaping () -> Void) -> TerminalContextBarView {
+        TerminalContextBarView(items: [
+            UIKitTallyLamp(caption: "ZOOMED", color: TallyPalette.caution),
+            UIKitChassisChip(
+                "ALL PANES",
+                prominent: true,
+                accessibilityLabel: String(localized: "Show all panes"),
+                action: showAll
             ),
         ])
     }

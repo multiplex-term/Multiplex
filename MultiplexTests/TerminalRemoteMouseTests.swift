@@ -64,6 +64,30 @@ final class TerminalRemoteMouseTests: XCTestCase {
         ])
     }
 
+    /// The split a Rex tab depends on (`TerminalSessionController
+    /// .sendTerminalReport`): what the terminal says by itself — a query's
+    /// answer, the focus state it reports the moment reporting is switched
+    /// on — leaves by one road, and a person's mouse event by the other.
+    /// Both used to arrive as `send`, where nothing could tell them apart.
+    func testWhatTheTerminalSaysByItselfTravelsApartFromAMouseEvent() {
+        let (terminal, delegate) = sgrTracking()
+        delegate.reports = []
+        terminal.longPressMouseDragFilter = { _, _ in true }
+
+        terminal.feed(text: "\u{1B}[c\u{1B}[6n\u{1B}[?1004h")
+        XCTAssertTrue(terminal.beginRemoteMouseDrag(at: terminal.pointForCell(col: 5, row: 2)))
+        terminal.endRemoteMouseDrag(at: terminal.pointForCell(col: 5, row: 2))
+        waitForSends(delegate, count: 2)
+
+        XCTAssertEqual(text(delegate), ["\u{1B}[<0;6;3M", "\u{1B}[<0;6;3m"])
+        let reports = (delegate.reports ?? []).map { String(decoding: $0, as: UTF8.self) }
+        XCTAssertEqual(reports.count, 3)
+        XCTAssertEqual(reports.first?.last, "c") // device attributes
+        XCTAssertEqual(reports.dropFirst().first, "\u{1B}[1;1R")
+        // Focus, said the moment reporting is switched on — whichever it is.
+        XCTAssertTrue(["\u{1B}[I", "\u{1B}[O"].contains(reports.last ?? ""))
+    }
+
     func testDeclinedCellKeepsTheLongPressLocal() {
         let (terminal, delegate) = sgrTracking()
         terminal.longPressMouseDragFilter = { _, _ in false }

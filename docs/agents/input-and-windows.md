@@ -89,7 +89,20 @@ routing, tab moves, keyboard avoidance, or secret fields.
   HRDR — four mono characters, so every tier and cutoff holds unchanged —
   and both open the shared `ShortcutPanelViewController`, whose content
   (`ShortcutPanelContent.tmux`/`.herdr`) is the ONE place a backend's
-  shortcut set lives. Pane cycling (both backends) and herdr tab cycling are
+  shortcut set lives. The key LIGHTS (primary ink + signal border, the
+  UMD chips' `prominent`; never the latch's fill, which means ON) while
+  the session's switch list has somewhere else to go —
+  `TmuxSession.hasSwitchChoices`: more than one window (herdr: workspace),
+  or on Rex more than one TERMINAL, since its Switch Terminal list has a
+  row per terminal and a single split window already has a second. (A Rex
+  tab draws its panes itself; which pane the keyboard, the rail and the
+  rest of the chrome follow is in `panes.md`.) The fact comes from the
+  wall probe's record (`probedSession(for:)` in the window), so it trails
+  a new window by up to one ~5 s tick, and it is re-inked IN PLACE on both
+  rails: the probe moves it while the key's own panel may be open (New
+  Window is a row there), and a rebuilt UMD bar would pull the chip out
+  from under its popover — which is why `shortcutHasChoices` stays out of
+  `UMDBarPresentationKey`. Pane cycling (both backends) and herdr tab cycling are
   deliberately absent because those targets are already directly tappable;
   tmux Last Window is absent because the live switch list targets a window
   directly. The panel root scrolls when a phone popover clamps

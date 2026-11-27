@@ -984,28 +984,45 @@ final class TerminalWindowViewController: UIViewController,
         else { return nil }
         return notice
     }
-    private var detectedAgent: AgentKind? {
-        guard let activeTab else { return nil }
-        guard let sessionName = activeTab.sessionName else {
-            return activeController?.directShellAgent
-        }
+    /// The wall probe's record of a tab's session; nil for a plain shell.
+    private func probedSession(for tab: TerminalRoute) -> TmuxSession? {
         // Any backend this host MONITORS can answer — on a mixed host the
         // probe carries both, and a tab on the secondary deserves its agent
         // chips too. A tab whose backend the host no longer monitors gets
         // nothing rather than a same-named record from the other one.
-        guard let host = store.host(id: activeTab.hostID),
-              let backend = activeTab.sessionBackend,
+        guard let sessionName = tab.sessionName,
+              let host = store.host(id: tab.hostID),
+              let backend = tab.sessionBackend,
               host.monitors(backend)
         else { return nil }
-        let model = hub.model(for: host)
-        // One expression serves both backends on purpose: a herdr tile IS
+        let sessions = hub.model(for: host).sessions(on: backend)
+        // A Rex session is found by id: a Rex label is not an identity, and
+        // is respelled when another session takes the same one.
+        if let rex = tab.rexTarget {
+            return sessions.first { $0.tmuxID == rex.sessionID }
+        }
+        return sessions.first { $0.name == sessionName }
+    }
+    private var detectedAgent: AgentKind? {
+        guard let activeTab else { return nil }
+        guard activeTab.sessionName != nil else {
+            return activeController?.directShellAgent
+        }
+        let session = probedSession(for: activeTab)
+        // A Rex tab's strip is the terminal its keyboard is on — one pane
+        // of the window it draws, and not necessarily the one the session
+        // is fronting (Open Terminal, Switch Terminal, a touch on another
+        // pane, or the Rex app showing another window): `TmuxSession
+        // .agent(inPane:)`.
+        if let rex = activeTab.rexTarget {
+            return session?.agent(inPane: activeController?.rexBlockID ?? rex.blockID)
+        }
+        // One expression serves tmux and herdr on purpose: a herdr tile IS
         // a whole session, and the probe writes its live focus into the
         // record (active window = focused workspace, active pane = the
         // session's one focus every client mirrors) — so following
         // `activeAgent` follows a workspace switch inside the TUI too.
-        return model.sessions(on: backend)
-            .first { $0.name == sessionName }?
-            .activeAgent
+        return session?.activeAgent
     }
     private var resolvedTerminalTheme: TerminalTheme {
         // Prefer the pinned choice over the live traits: the observation
@@ -1049,6 +1066,9 @@ final class TerminalWindowViewController: UIViewController,
             _ = activeController?.pendingLink
             _ = activeController?.pendingPath
             _ = activeController?.talkbackOpen
+            // A paned tab's keyboard moved to another pane: the agent strip
+            // and the key cluster are that pane's now.
+            _ = activeController?.activePaneID
             #if os(visionOS)
             _ = activeController?.keyBarArranging
             #endif
@@ -1476,8 +1496,9 @@ final class TerminalWindowViewController: UIViewController,
         creatingTab = true
         // + TAB means "another one like this": the sibling session is minted
         // on THIS tab's backend, not the host's default, so a herdr tab on a
-        // tmux-default mixed host keeps producing herdr siblings. A backend
-        // the host no longer monitors falls back to the default.
+        // tmux-default mixed host keeps producing herdr siblings, and a Rex
+        // tab Rex ones. A backend the host no longer monitors falls back
+        // to the default.
         let backend = activeTab.sessionBackend
             .flatMap { host.monitors($0) ? $0 : nil }
             ?? host.sessionBackend
@@ -1506,13 +1527,7 @@ final class TerminalWindowViewController: UIViewController,
             ) else {
                 presentNewTabFailure(
                     hostName: host.name, target: .session,
-                    reason: model.sessionCreateFailure.map {
-                        switch $0 {
-                        case .backendMissing(let backend):
-                            HostGuide.backendMissingMessage(
-                                backend, hostName: host.name)
-                        }
-                    })
+                    reason: model.sessionCreateFailure?.message(hostName: host.name))
                 return
             }
             let tab = TerminalRoute(hostID: host.id, mode: created)
@@ -1849,6 +1864,12 @@ final class TerminalWindowViewController: UIViewController,
             .processFingerprint
         if agentChanged { renderNow() }
         await model.refreshAndWait(ifStaleFor: 4)
+
+        // No fast path to run between wall probes: the wall's record is the
+        // only authority, and it already reaches the strip through the
+        // render's own observation of `detectedAgent` (with its grace
+        // before hiding). Polling here would ask a question with no answer.
+        guard backend.hasFocusedPaneProbe else { return }
 
         if backend == .herdr {
             // The five-second wall probe remains the broad session/attention
@@ -2602,6 +2623,7 @@ extension TerminalWindowViewController {
             isActive: isActive,
             focusAllowed: terminalFocusAllowed,
             keyCommandPlan: keyCommandPlan,
+            shortcutHasChoices: probedSession(for: tab)?.hasSwitchChoices == true,
             close: { [weak self] in self?.closeTab(tab.id) }
         )
     }
@@ -2935,6 +2957,7 @@ extension TerminalWindowViewController {
             fullScreenActive: fullScreenColumn,
             extraNewTabTarget: extraNewTabTarget,
             shortcutBackend: activeTab?.sessionBackend,
+            shortcutHasChoices: activeTab.flatMap(probedSession(for:))?.hasSwitchChoices == true,
             style: vertical ? .verticalColumn : profile.style,
             deckControl: shell?.deckControl ?? .back,
             availableWidth: vertical ? column.width : umdAvailableWidth,

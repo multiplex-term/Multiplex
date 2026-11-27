@@ -1,5 +1,6 @@
 Multiplex — a spatial SSH terminal built around remote **tmux** (with herdr
-as an optional second backend); visionOS-first, iPadOS alongside. The deck is
+as an optional second backend, and Rex sessions shown, attached and created);
+visionOS-first, iPadOS alongside. The deck is
 a fleet-wide monitor wall: every host probes concurrently, every session
 renders as a live capture-pane tile, and each attach opens its own terminal
 window (a scene on visionOS / Stage Manager on iPad). Product tour:
@@ -62,10 +63,12 @@ One UIKit scene runtime (`MultiplexSceneDelegate` +
 ornament API needs a View): a classic Deck window + N terminal windows, or
 one adaptive single-window Shell. A terminal window is ordered tabs, each a
 `TerminalRoute`; `TerminalWorkspace` owns the tab controllers so merge/split
-move live shells. `ConnectionHub` runs one probe connection per host (one
-exec round-trip per monitored backend, ~5 s); `TerminalFocusArbiter` is the
-app-wide single owner of keyboard focus; hosts + secrets sync via iCloud
-Keychain. Full annotated component map: `docs/agents/architecture.md`.
+move live shells. A tab is one emulator, except on a backend that hands its
+panes out one stream each (Rex): that tab draws the panes itself.
+`ConnectionHub` runs one probe connection per host (one exec round-trip per
+monitored backend, ~5 s); `TerminalFocusArbiter` is the app-wide single
+owner of keyboard focus; hosts + secrets sync via iCloud Keychain. Full
+annotated component map: `docs/agents/architecture.md`.
 
 Layer rule: **Views → Services → Models**; Models have no UIKit/SwiftTerm
 imports. `TmuxProbe`, `TerminalRoute`, and the models are pure and are where
@@ -89,12 +92,15 @@ approaches. Don't re-litigate a recorded decision without new facts.
   and tab moves, keyboard avoidance, secret fields, held-backspace filler.
 - `links-and-viewers.md` — link/path confirmation, ⌗ viewport, ▤ file viewer.
 - `backends-and-probe.md` — tmux invocation facts, mixed tmux+herdr hosts,
-  the herdr adaptation, session creation (setup scripts, per-host tmux conf,
-  systemd-run), file attach/drop.
+  the herdr adaptation, the Rex adaptation (probe, attach, panes, mint), session creation
+  (setup scripts, per-host tmux conf, systemd-run), file attach/drop.
 - `agent-helpers.md` — CLI-agent detection, helper chips, launch model
   override, keychain-locked tip, HISTORY/jump.
 - `lifecycle-and-attention.md` — disabled hosts, session resume, keep screen on, background
   keep-alive + `BGAppRefreshTask`, attention alerts and notification rules.
+- `panes.md` — native panes: the pane tree, the paned transport seam, one
+  emulator per pane, focus and keyboard rules, what a second backend (tmux
+  control mode, herdr) would have to do.
 - `mosh.md` — the clean-room mosh transport.
 - `bind-host.md` — Bind Host flow + `mpx` CLI distribution.
 - `sync-and-widgets.md` — iCloud Keychain sync, widgets/Shortcuts/external

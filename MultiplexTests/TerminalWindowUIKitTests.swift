@@ -8,7 +8,7 @@ import SwiftUI
 
 @MainActor
 final class TerminalWindowUIKitTests: XCTestCase {
-    func testSurfaceAppearanceRestoresOnlyTheExistingAppWideFocusOwner() {
+    func testSurfaceAppearanceRestoresOnlyTheExistingAppWideFocusOwner() throws {
         TerminalFocusArbiter.inputSuppressed = false
         let host = Host(
             name: "devbox",
@@ -31,8 +31,8 @@ final class TerminalWindowUIKitTests: XCTestCase {
             frame: .zero,
             font: .monospacedSystemFont(ofSize: 14, weight: .regular)
         )
-        first.bind(owner)
-        second.bind(contender)
+        first.bind(owner, to: try XCTUnwrap(first.soleScreen))
+        second.bind(contender, to: try XCTUnwrap(second.soleScreen))
 
         TerminalFocusArbiter.claim(owner)
         TerminalWindowViewController.restoreFocusAfterSurfaceAppearance(

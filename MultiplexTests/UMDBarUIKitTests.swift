@@ -60,6 +60,32 @@ final class UMDBarUIKitTests: XCTestCase {
         XCTAssertNil(control("umd.tmux", in: none.view))
     }
 
+    func testShortcutChipTurnsProminentWhenTheSessionHasChoices() throws {
+        let controller = UMDBarViewController(configuration: configuration())
+        controller.loadViewIfNeeded()
+        func chip() throws -> UMDChipBase {
+            try XCTUnwrap(control("umd.tmux", in: controller.view) as? UMDChipBase)
+        }
+        let built = try chip()
+        XCTAssertFalse(built.prominent)
+
+        // The wall probe finds a second window: the SAME chip re-inks — its
+        // panel may be open over it, so the bar must not rebuild.
+        controller.update(configuration: configuration(shortcutHasChoices: true))
+        XCTAssertTrue(built.prominent)
+        XCTAssertTrue(try chip() === built)
+
+        controller.update(configuration: configuration())
+        XCTAssertFalse(built.prominent)
+
+        // A bar built for a session that already has several starts lit.
+        let lit = UMDBarViewController(configuration: configuration(
+            shortcutHasChoices: true
+        ))
+        lit.loadViewIfNeeded()
+        XCTAssertEqual((control("umd.tmux", in: lit.view) as? UMDChipBase)?.prominent, true)
+    }
+
     func testRegularActionRouterAndDirectButtonsPreserveEveryCallback() throws {
         let first = UUID()
         let second = UUID()
@@ -646,6 +672,7 @@ final class UMDBarUIKitTests: XCTestCase {
         fullScreenActive: Bool = false,
         extraNewTabTarget: TerminalRoute.NewTabTarget? = nil,
         shortcutBackend: Host.SessionBackend? = .tmux,
+        shortcutHasChoices: Bool = false,
         style: UMDBarStyle = .regular,
         deckControl: ShellDeckControl = .back,
         availableWidth: CGFloat? = nil,
@@ -671,6 +698,7 @@ final class UMDBarUIKitTests: XCTestCase {
             fullScreenActive: fullScreenActive,
             extraNewTabTarget: extraNewTabTarget,
             shortcutBackend: shortcutBackend,
+            shortcutHasChoices: shortcutHasChoices,
             style: style,
             deckControl: deckControl,
             availableWidth: availableWidth,

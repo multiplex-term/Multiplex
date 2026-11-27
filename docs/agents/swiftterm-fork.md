@@ -247,6 +247,37 @@ input encoding, or terminal rendering.
       ~2–4 fps under streaming load with the row cache warm (rows rebuilt
       0/58) — the stall is the sim's present path, not the renderer; only a
       real-device A/B against the CG damage-strip path counts.
+    - **The terminal's own bytes leave by a second road.** Upstream hands
+      the host one `send` for everything: what a person typed or clicked,
+      and what the terminal says by itself (answers to queries in its
+      output; focus, visibility, in-band size and color-scheme reports).
+      `Terminal.isSendingUserInput` is true only inside the sends that are
+      a person's (`sendUserInput`, `sendEvent` and the mouse packet, the
+      prompt-click cursor walk), the iOS view reads it in `send(source: Terminal, …)`
+      before hopping to main, and routes the rest to
+      `TerminalViewDelegate.sendTerminalReport` — which defaults to `send`,
+      so a delegate that does not care sees no change. A Rex tab drops
+      them (`backends-and-probe.md`). Keyboard input never passes through
+      the terminal, so it was always `send`. Pinned by
+      `TerminalRemoteMouseTests`. Mouse packets used to leave through
+      `sendResponse`; re-check that on a bump, or mouse input would be
+      classed as a report and a Rex tab would lose its clicks.
+    - **A full reset empties the alternate screen too**
+      (`Terminal.setup(isReset:)`). Upstream's RIS replaces the normal
+      buffer and steps back to it with `activateNormalBuffer(clearAlt:
+      false)`; the alternate buffer is otherwise emptied only on the way
+      OUT of it (1047/1049), and `fillViewportRows` returns at once for a
+      buffer that already has rows. So after an RIS sent while a
+      full-screen program was up, the next `?1049h` showed that program's
+      cells again and whatever drew next drew over them. Nothing a
+      well-behaved program does hits this — it is what a HOST does when it
+      redraws a tab from scratch, which a Rex tab does behind every RIS
+      (`backends-and-probe.md`): switching from one terminal running an
+      agent to another left the first one's screen under the second
+      (user-reported 2026-11-20; with two stand-in full-screen programs
+      the whole first screen stayed). The reset now also clears the
+      alternate buffer and its kitty images. Pinned by
+      `TerminalFullResetTests`; mosh's resync reset rides the same path.
     - The visible screen's links are enumerable (`Terminal
       .visibleLinkMatches` + `TerminalView.visibleLinkRegions`, the inverse
       of `calculateTapHit`) — what visionOS gaze hover stands on.

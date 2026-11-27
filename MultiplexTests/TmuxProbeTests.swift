@@ -27,6 +27,9 @@ final class TmuxProbeTests: XCTestCase {
 
         XCTAssertFalse(sessions[1].isAttached)
         XCTAssertEqual(sessions[1].windowCount, 1)
+        // What lights the TMUX key: a second window to switch to.
+        XCTAssertTrue(main.hasSwitchChoices)
+        XCTAssertFalse(sessions[1].hasSwitchChoices)
     }
 
     func testEmptyOutputMeansNoServer() {

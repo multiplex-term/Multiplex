@@ -33,6 +33,14 @@ enum TallyPalette {
     /// which is also what pins the blue > red > green ordering that makes it
     /// violet rather than merely cool).
     static let herdrBezel = UIColor(light: 0xF6F0FF, dark: 0x2C2833)
+    /// `bezel` for a Rex tile, under the same gate and the same rule: a
+    /// different TINT at `bezel`'s own lightness (within 1/255 in both
+    /// polarities), never a raised tile. Rex publishes no palette to borrow,
+    /// so the hue is chosen for the one job it has — to be unmistakable
+    /// beside tmux's neutral bezel and herdr's mauve. A cool blue: blue over
+    /// green over red, where mauve runs blue over red over green
+    /// (`testTheRexWashMatchesBezelsLightnessAndIsNotMauve` pins both).
+    static let rexBezel = UIColor(light: 0xEAF4FF, dark: 0x1F2A33)
 
     static let tally = UIColor(light: 0xC13439, dark: 0xE5484D)
     static let caution = UIColor(light: 0x966618, dark: 0xE0A33E)

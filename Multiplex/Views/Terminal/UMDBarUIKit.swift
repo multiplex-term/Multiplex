@@ -47,6 +47,12 @@ struct UMDBarConfiguration {
     var extraNewTabTarget: TerminalRoute.NewTabTarget?
     /// Which multiplexer owns the shortcut chip (TMUX/HRDR); nil hides it.
     var shortcutBackend: Host.SessionBackend?
+    /// The active tab's session has several windows to switch between: the
+    /// shortcut chip turns prominent (`TmuxSession.hasSwitchChoices`).
+    /// Deliberately outside the presentation key — the wall probe moves it
+    /// while the chip's own panel may be open (New Window is a row there),
+    /// so the chip is re-inked in place, never rebuilt under its popover.
+    var shortcutHasChoices = false
     var style: UMDBarStyle
     var deckControl: ShellDeckControl
     var availableWidth: CGFloat?
@@ -192,6 +198,9 @@ final class UMDBarViewController: UIViewController,
     private(set) var fileAttachController: FileAttachMenuViewController
     private weak var shortcutPopoverController: ShortcutPanelViewController?
     private weak var shortcutButtonView: UMDBarButton?
+    /// The shortcut chip in whichever shape the rail drew it (bar button or
+    /// column chip), for the in-place `shortcutHasChoices` re-ink.
+    private weak var shortcutChip: UMDChipBase?
     private weak var guideNavigationController: UINavigationController?
     private weak var guideFocusController: TerminalSessionController?
     private var resumesFocusAfterShortcutPanel = false
@@ -242,6 +251,7 @@ final class UMDBarViewController: UIViewController,
         let previousKey = UMDBarPresentationKey(self.configuration)
         self.configuration = configuration
         let nextKey = UMDBarPresentationKey(configuration)
+        shortcutChip?.prominent = configuration.shortcutHasChoices
         guard previousKey != nextKey else { return }
         fileAttachController.update(controller: configuration.controller)
         guard isViewLoaded else { return }
@@ -483,12 +493,10 @@ final class UMDBarViewController: UIViewController,
         case .shortcut:
             guard let backend = configuration.shortcutBackend else { return nil }
             let chip = UMDColumnChip(
-                caption: backend == .herdr ? "HRDR" : "TMUX",
+                caption: backend.shortcutKeyCaption,
                 systemImage: "command",
-                prominent: false,
-                accessibilityLabel: backend == .herdr
-                    ? String(localized: "Show herdr shortcuts")
-                    : String(localized: "Show tmux shortcuts")
+                prominent: configuration.shortcutHasChoices,
+                accessibilityLabel: backend.shortcutKeyAccessibilityLabel
             )
             chip.accessibilityIdentifier = "umd.tmux"
             chip.isEnabled = state.status == .live
@@ -497,6 +505,7 @@ final class UMDBarViewController: UIViewController,
                 self.showShortcutPanel(from: chip)
             }, for: .touchUpInside)
             shortcutButtonView = nil
+            shortcutChip = chip
             return chip
         case .overflow:
             let menu = makeOverflowMenu(overflowing: overflowing)
@@ -860,12 +869,10 @@ final class UMDBarViewController: UIViewController,
     /// hooks address "umd.tmux" for either backend's shortcut chip.
     private func shortcutButton(_ backend: Host.SessionBackend) -> UMDBarButton {
         let button = UMDBarButton(
-            caption: backend == .herdr ? "HRDR" : "TMUX",
+            caption: backend.shortcutKeyCaption,
             systemImage: "command",
-            prominent: false,
-            accessibilityLabel: backend == .herdr
-                ? String(localized: "Show herdr shortcuts")
-                : String(localized: "Show tmux shortcuts")
+            prominent: configuration.shortcutHasChoices,
+            accessibilityLabel: backend.shortcutKeyAccessibilityLabel
         )
         button.accessibilityIdentifier = "umd.tmux"
         button.isEnabled = currentObservedState.status == .live
@@ -874,12 +881,13 @@ final class UMDBarViewController: UIViewController,
             self.showShortcutPanel(from: button)
         }, for: .touchUpInside)
         shortcutButtonView = button
+        shortcutChip = button
         return button
     }
 
     private func statusCluster(_ state: UMDBarObservedState) -> UIView {
         var views: [UIView] = []
-        if configuration.controller?.host.useMosh == true {
+        if configuration.controller?.ridesMosh == true {
             let mosh = UMDStateBadgeView(
                 caption: "MOSH",
                 accessibilityLabel: String(localized: "Connects over mosh")
@@ -1886,7 +1894,14 @@ final class UMDSourceStripView: UIView {
 /// opaque on the glass bar for good).
 @MainActor
 class UMDChipBase: UIButton {
-    let prominent: Bool
+    /// Mutable for the one chip whose state moves under an open popover
+    /// (the shortcut chip); every other chip is rebuilt with its bar.
+    var prominent: Bool {
+        didSet {
+            guard prominent != oldValue else { return }
+            refreshColors()
+        }
+    }
 
     init(prominent: Bool, accessibilityLabel: String) {
         self.prominent = prominent

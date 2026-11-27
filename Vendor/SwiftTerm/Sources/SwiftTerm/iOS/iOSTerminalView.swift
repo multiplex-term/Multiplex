@@ -2538,9 +2538,16 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     
     nonisolated open func send(source: Terminal, data: ArraySlice<UInt8>) {
         let capturedData = Array(data)
+        // Multiplex patch: read now — the flag is only true for the length
+        // of this call, and the delivery below happens later, on main.
+        let isUserInput = source.isSendingUserInput
         onMain { [weak self] in
             guard let self else { return }
-            self.terminalDelegate?.send(source: self, data: capturedData[...])
+            if isUserInput {
+                self.terminalDelegate?.send(source: self, data: capturedData[...])
+            } else {
+                self.terminalDelegate?.sendTerminalReport(source: self, data: capturedData[...])
+            }
         }
     }
     
