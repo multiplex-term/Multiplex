@@ -6,8 +6,10 @@ import Foundation
 ///
 /// Rex (superlogical.com/rex) is a multiplexer whose sessions are rendered by
 /// a native app, not by a client drawing in a terminal. Wire facts, measured
-/// against Rex 0.1.0-preview.19 / API revision 14 on 2026-11-16 (a throwaway
-/// server; fixtures under MultiplexTests/Fixtures):
+/// against Rex 0.1.0-preview.19 / API revision 14 on 2026-11-16 and run
+/// again, unchanged, against preview.25 / revision 24 on 2026-11-27 (a
+/// throwaway server each time; fixtures from both under
+/// MultiplexTests/Fixtures):
 /// - **There is nothing to attach.** No `rex attach` exists, and `rex block
 ///   stream` answers `not implemented`. Live output is only the server's
 ///   WebSocket data stream, which opens with a Ghostty-format binary

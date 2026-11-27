@@ -8,14 +8,14 @@ private final class RexWireFixtureAnchor {}
 /// control and data messages, and the terminal stream. The stream fixture is
 /// 2322 bytes recorded off a live data connection (Rex 0.1.0-preview.19,
 /// nonce 4078407816757279798): a 1962-byte Ghostty snapshot, a `resize`,
-/// `tick 82`, a second `resize`, then three more lines.
+/// `tick 82`, a second `resize`, then three more lines. A second recording,
+/// off preview.25, has its own test.
 final class RexWireTests: XCTestCase {
     private let nonce: UInt64 = 4_078_407_816_757_279_798
 
-    private func streamFixture() throws -> Data {
+    private func streamFixture(_ name: String = "rex-terminal-stream-preview19") throws -> Data {
         let url = try XCTUnwrap(
-            Bundle(for: RexWireFixtureAnchor.self)
-                .url(forResource: "rex-terminal-stream-preview19", withExtension: "bin"))
+            Bundle(for: RexWireFixtureAnchor.self).url(forResource: name, withExtension: "bin"))
         return try Data(contentsOf: url)
     }
 
@@ -171,14 +171,17 @@ final class RexWireTests: XCTestCase {
 
     // MARK: - Control messages
 
-    func testTheHelloPinsTheRevisionAndStaysSmall() throws {
+    func testTheHelloStatesItsRevisionRangeAndStaysSmall() throws {
         let hello = RexWire.hello(clientVersion: "1.5.2")
         // The protocol caps a hello at 512 bytes.
         XCTAssertLessThan(hello.count, 512)
         let object = try XCTUnwrap(
             JSONSerialization.jsonObject(with: hello) as? [String: Any])
         XCTAssertEqual(object["type"] as? String, "hello")
-        XCTAssertEqual(object["api_revision"] as? Int, 14)
+        // The newest revision this client was read against, and the oldest
+        // whose shapes are the same: the server picks between them.
+        XCTAssertEqual(object["api_revision"] as? Int, 24)
+        XCTAssertEqual(object["api_min_revision"] as? Int, 14)
         // Never `app`: Rex aims client actions at "the one app client".
         XCTAssertEqual((object["client"] as? [String: Any])?["kind"] as? String, "other")
     }
@@ -205,13 +208,19 @@ final class RexWireTests: XCTestCase {
             RexWire.decodeInbound(Data(text.utf8))
         }
         // Verbatim from a live server.
-        guard case .welcome(let clientID)? = decode("""
+        guard case .welcome(let clientID, let revision)? = decode("""
             {"type":"welcome","protocol":"rex.control.v1","limits":{"max_message_bytes":1048576},\
             "client":{"id":"client:01a1e1d4-754f","reconnect_token":"CARtI14i"},\
-            "api_revision":14,"api_server_revision":14}
+            "api_revision":24,"api_server_revision":24}
             """)
         else { return XCTFail("welcome") }
         XCTAssertEqual(clientID, "client:01a1e1d4-754f")
+        XCTAssertEqual(revision, 24)
+        // A welcome that names no revision speaks revision 0.
+        guard case .welcome(_, let unnamed)? = decode(
+            #"{"type":"welcome","protocol":"rex.control.v1"}"#)
+        else { return XCTFail("welcome without a revision") }
+        XCTAssertEqual(unnamed, 0)
         // A welcome for some other protocol is not a welcome.
         XCTAssertNil(decode(#"{"type":"welcome","protocol":"rex.control.v2"}"#))
 
@@ -580,6 +589,25 @@ final class RexWireTests: XCTestCase {
         var stream = RexTerminalStream(nonce: nonce)
         XCTAssertFalse(stream.isLive)
         XCTAssertEqual(stream.consume(fixture), expectedEvents())
+        XCTAssertTrue(stream.isLive)
+    }
+
+    /// 1558 bytes off a Rex 0.1.0-preview.25 data connection (API revision
+    /// 24, 2026-11-27): the stream still opens with a Ghostty snapshot
+    /// whose length nothing states, and the first `resize` still ends it.
+    func testTheNewestServersStreamOpensTheSameWay() throws {
+        let fixture = try streamFixture("rex-terminal-stream-preview25")
+        XCTAssertEqual(String(decoding: fixture.prefix(8), as: UTF8.self), "GHOSTSNP")
+        let owner = "client:01a21b89-9478-7a29-995c-6da52ce05171"
+        var stream = RexTerminalStream(nonce: 12_387_399_168_064_344_086)
+        // A `resize` now states the cell size in pixels too; a field this
+        // client has no use for is skipped.
+        XCTAssertEqual(stream.consume(fixture), [
+            .resize(cols: 80, rows: 24, owner: owner),
+            .output(Data("tick 8\r\ntick 9\r\n".utf8)),
+            .resize(cols: 100, rows: 30, owner: owner),
+            .output(Data("tick 10\r\ntick 11\r\n".utf8)),
+        ])
         XCTAssertTrue(stream.isLive)
     }
 

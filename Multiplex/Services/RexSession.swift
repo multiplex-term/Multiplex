@@ -1074,7 +1074,16 @@ actor RexSession: PanedTerminalTransport {
         switch message {
         case .text(let text):
             switch RexWire.decodeInbound(text) {
-            case .welcome(let id)?:
+            case .welcome(let id, let revision)?:
+                // A server from before revisions were negotiated answers
+                // at its own, whatever range the hello gave.
+                guard revision >= RexWire.minimumAPIRevision else {
+                    fail(.welcome, Failure(String(localized: """
+                        The Rex server on this host is older than Multiplex can talk to. \
+                        Update Rex there.
+                        """)))
+                    return
+                }
                 if let id { clientID = id }
                 reach(.welcome)
             case .response(let id, let result)?:

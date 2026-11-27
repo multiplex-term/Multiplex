@@ -273,12 +273,9 @@ HerdrProbe, RexProbe, session creation/targeting, or file attach/drop.
   fallback mint.
 - **Rex is shown, attached, and minted — never a host's default**
   (`Host.SessionBackend.rex`;
-  `RexProbe` for the deck and the mint, `RexSession` for a tab; Rex 0.1.0-preview.19 /
-  API revision 14, measured 2026-11-16 against a throwaway server — the
-  app still announces revision 14, and a client making the same calls
-  attached, typed, resized and streamed against preview.21 / revision 18 on
-  2026-11-23; the layout methods a tab's panes use were measured at that
-  same pinned revision against preview.23 / revision 19 on 2026-11-26),
+  `RexProbe` for the deck and the mint, `RexSession` for a tab; written
+  against Rex 0.1.0-preview.25 / API revision 24, measured 2026-11-27
+  against a throwaway server),
   adapted as session→tile, window (a tab)→window, terminal block→pane.
   - **Experimental: off until switched on in Settings ▸ Experimental**
     (`ExperimentalFeatures.isRexBackendEnabled`, default off). ⚠ The switch
@@ -297,6 +294,71 @@ HerdrProbe, RexProbe, session creation/targeting, or file attach/drop.
     A Rex tab already open keeps running. `MULTIPLEX_REX=1` forces it on —
     the unit-test scheme sets it (`project.yml`), and a harness run that
     seeds `secondaryBackends: ["rex"]` needs it too.
+  - **The hello states a RANGE of API revisions and the server picks**
+    (`RexWire.apiRevision` 24, `minimumAPIRevision` 14; the welcome's
+    `api_revision` is the newest both sides speak, and a server translates
+    to and from it). A preview server gains a revision every few days — 14
+    on 2026-11-16, 18 a week later, 24 by 2026-11-27 — so what matters is
+    which shapes this client READS, and those have not moved: every call
+    and event a tab makes or handles was sent at 14 and at 24 to one
+    preview.25 server, and at 19 to a preview.23 one, and the answers
+    differ only in ids (`session.attach`'s view and its layout tree,
+    `own_block`, `data.connect`, the stream's handshake and its `resize`,
+    `modes`, `format`, `blob_read`, `process`, `new_split`, `resize_pane`,
+    `block.close`, `new_window`, `disown_block`, and the three events).
+    The probe and mint scripts, `ls -q`, `kill`, exit status 4 and
+    `__internal dial-stdio` were run unchanged with the preview.25 CLI,
+    which also probes a preview.23 server. Fixtures from both ends are in
+    the tests (`rex-probe-preview19` / `-preview25`, and the two stream
+    recordings).
+    - **To move the range up**: fetch the new server's `/llms.txt`, diff it
+      against the last one read, and send the tab's calls at the old and
+      the new revision to one server (a script that prints each answer with
+      ids replaced, run twice, then `diff`). Raise `apiRevision` only after
+      that; raise `minimumAPIRevision` only when a shape this client reads
+      differs below it.
+    - A server with no revision in common closes with status 1008 and a
+      reason that names the side to update (`no common API revision:
+      server speaks 0 to 13, client needs 14 to 24; update the server`,
+      measured by asking for 25–30); it becomes the tab's ended line as it
+      is. A welcome that names a revision below the minimum — a server
+      from before revisions were negotiated names none, which reads as 0 —
+      fails the attach here with "older than Multiplex can talk to". NOT
+      measured: a real server older than preview.23; none is installed any
+      more.
+    - **What revisions 20–24 added, and what this client does with it**:
+      - `block.close` / `session.close_window` / `session.destroy` take
+        `undoable`, and `client.undo_close` reopens the caller's newest
+        close for about a minute. Not sent: a close that can be undone
+        only by the client that made it needs an undo row to be worth its
+        minute, and the reopened block "becomes its window's focused
+        block, its window becomes the active window" — the Rex app on the
+        host would flip to it, which every other call here avoids
+        (`focus: false`). What it changes for a tab without sending it:
+        ANOTHER client's undoable close takes the block out of every
+        window at once and sends `block_closed` only when it is freed, and
+        an undo brings it back with the same ids. The tab already reads
+        both from the view — the pane goes, and comes back as a new pane
+        would, at its owner's size until someone types here (measured on
+        the iPad simulator: a stand-in client closed one of three panes
+        with `undoable`, the tab drew two; six seconds later it called
+        `client.undo_close` and the pane was back with its screen).
+      - `session.transfer_window` moves a window to another session. To
+        the session it leaves that is a window closing (`window_closed`, a
+        `block_closed` each, the streams end), so a tab drawing it ends
+        cleanly, like its last terminal exiting (measured: ENDED, with
+        RECONNECT, and the client gone from the server at once).
+      - A window has TWO zooms now (`tiled_zoomed_block_id` beside
+        `zoomed_block_id`) and a split no longer ends one (measured: a
+        block zoomed by `window_id`, then `new_split` with `focus: false`,
+        and the view still named it zoomed). So a pane this tab splits off
+        while the Rex app has its neighbour zoomed is hidden behind that
+        zoom ON THE HOST until the zoom ends. Both fields stay ignored
+        here (the zoom bullet below).
+      - `com.superlogical.fs` blocks (`rex cp`) and
+        `com.superlogical.terminal.program_resume_records` are not used.
+        Only `com.superlogical.terminal` blocks are drawn or listed, so a
+        block of another creator in a view is cut out as before.
   - **Rex has no terminal client, so Multiplex is one.** No `rex attach`
     exists and `rex block stream` answers `not implemented`: Rex sessions
     are drawn by a native app over the server's WebSocket API
@@ -424,6 +486,15 @@ HerdrProbe, RexProbe, session creation/targeting, or file attach/drop.
     leads because it does not depend on the bundle's name or location) and
     the helper inside the app bundle; Linux/FreeBSD packages land in
     `/usr/bin` and the unprivileged install in `~/.local/bin`.
+    - ⚠ The CLI found there and the server it reaches can be two releases.
+      Seen 2026-11-27: the app had updated to preview.25 (its helper, and a
+      new `Versions/2147/` named for the build) while `Versions/Current/`
+      and the server still running out of it were preview.23. Either pair
+      works — the preview.23 CLI ran the probe against a preview.25 server
+      and the preview.25 CLI against a preview.23 one — because the CLI
+      negotiates its revision like any client and `dial-stdio` only moves
+      bytes. What becomes of `Current` when the server restarts was not
+      seen.
   - **Attention: reported status first, the tmux heuristics otherwise.**
     Programs report idle / working / done / blocked / error through OSC
     7501, kept per block (`program_status`). Where any block reports, the
@@ -579,9 +650,9 @@ HerdrProbe, RexProbe, session creation/targeting, or file attach/drop.
       sh; fish as a login shell is unverified.
   - **`WebSocketCodec` + `RexWire` are the whole protocol, pure.** No
     extension is offered (a data connection is never compressed, and the
-    control connection works without), revision 14 is pinned in the hello
-    (a newer server translates down to it), pings are answered in
-    `RexSocket`, and requests are matched by id with a 10 s timeout.
+    control connection works without), the hello states the revision range
+    above, pings are answered in `RexSocket`, and requests are matched by
+    id with a 10 s timeout.
   - **Attach order is load-bearing** (`RexSession.attach`, `show`): hello
     → `session.attach` → **the tab lays the panes out and answers with
     each one's grid** (`PaneEvents.arrange`) → ONE `own_block(take)` for

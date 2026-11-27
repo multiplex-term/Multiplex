@@ -339,13 +339,13 @@ enum RemoteCommandEnvironment {
     /// `~/.local/bin` (its unprivileged install, already on `pathPrefix`).
     /// On macOS the CLI is put on PATH only for terminals Rex itself opens —
     /// an SSH exec never sees it — so its homes are named outright, read off
-    /// a live install (Rex Beta 0.1.0-preview.19, 2026-11-16):
+    /// a live install (Rex Beta 0.1.0-preview.19, 2026-11-16; the app has
+    /// been `Rex.app` since preview.23):
     /// - the server copy the app installs and runs, under Application
-    ///   Support with a `Current` link — independent of where the app
+    ///   Support in `Versions/Current` — independent of where the app
     ///   bundle sits or what it is called, so it leads;
     /// - the helper inside the app bundle, for a Mac where Rex is installed
-    ///   but has not run yet. The Beta name was observed; the release name
-    ///   is assumed to keep the layout.
+    ///   but has not run yet, under both names the app has had.
     /// A directory that does not exist costs a PATH lookup nothing.
     static let rexPathPrefix = pathPrefix
         + "PATH=\"$PATH"

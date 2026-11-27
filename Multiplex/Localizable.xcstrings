@@ -16371,6 +16371,22 @@
         }
       }
     },
+    "The Rex server on this host is older than Multiplex can talk to. Update Rex there." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このホストのRexサーバーは古く、Multiplexから接続できません。ホスト側でRexをアップデートしてください。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這台主機上的 Rex 伺服器版本太舊，Multiplex 無法與它通訊。請在主機上更新 Rex。"
+          }
+        }
+      }
+    },
     "The same block, right where you pressed — and it reaches links and paths at any mouse mode, when a tap belongs to the remote." : {
       "localizations" : {
         "ja" : {

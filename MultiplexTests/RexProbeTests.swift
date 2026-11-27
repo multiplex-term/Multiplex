@@ -8,7 +8,8 @@ private final class RexFixtureAnchor {}
 /// Rex on the deck: the probe, the record rules, and the tile. (Attaching a
 /// Rex terminal is `RexWireTests`.) The probe fixture is the verbatim output of
 /// the shipped probe command against a throwaway Rex 0.1.0-preview.19 server
-/// (API revision 14, captured 2026-11-16) holding three sessions:
+/// (API revision 14, captured 2026-11-16; a second capture off preview.25
+/// has its own test) holding three sessions:
 /// - `work` — window `editor` (a titled block beside an untitled split) and
 ///   an unnamed window whose block reports `blocked` / `permission` for
 ///   `claude-code`; the session fronts `editor`.
@@ -17,10 +18,9 @@ private final class RexFixtureAnchor {}
 /// - a SECOND `work`, whose block reports `working` for `cargo`.
 @MainActor
 final class RexProbeTests: XCTestCase {
-    private func fixture() throws -> String {
+    private func fixture(_ name: String = "rex-probe-preview19") throws -> String {
         let url = try XCTUnwrap(
-            Bundle(for: RexFixtureAnchor.self)
-                .url(forResource: "rex-probe-preview19", withExtension: "txt"))
+            Bundle(for: RexFixtureAnchor.self).url(forResource: name, withExtension: "txt"))
         return try String(contentsOf: url, encoding: .utf8)
     }
 
@@ -123,6 +123,37 @@ final class RexProbeTests: XCTestCase {
         XCTAssertEqual(work.windows[1].activeAgent, .claudeCode)
         XCTAssertEqual(work.detectedAgents, [.claudeCode])
         XCTAssertNil(work.activeAgent)
+    }
+
+    /// The same probe command against Rex 0.1.0-preview.25 (API revision
+    /// 24, captured 2026-11-27): `work` — window `editor` split in two, and
+    /// an unnamed window whose block reports `blocked` / `permission` for
+    /// `claude-code` — and an unnamed session with 400 multibyte lines.
+    func testTheNewestServersProbeReadsTheSameWay() throws {
+        let probe = RexProbe.parseProbe(try fixture("rex-probe-preview25"))
+        let sessions = try sessions(probe)
+        XCTAssertEqual(sessions.map(\.name), ["work", "drifting-bluff"])
+        XCTAssertEqual(
+            sessions[0].tmuxID, "session:01a21b89-5982-70bb-aa31-e0ead58431fe")
+
+        let work = sessions[0]
+        // The second window's generated `Window 3a065c6a` gives way to its
+        // focused block's label.
+        XCTAssertEqual(work.windows.map(\.name), ["editor", "shell"])
+        XCTAssertEqual(work.windows.map(\.isActive), [true, false])
+        XCTAssertEqual(work.windows.map(\.paneCount), [2, 1])
+        XCTAssertEqual(work.windows[0].paneTitle, "vim README.md")
+        XCTAssertEqual(work.windows[0].panes?.map(\.command), ["sleep", "sleep"])
+        XCTAssertEqual(work.windows[1].activeAgent, .claudeCode)
+
+        XCTAssertEqual(
+            probe.signals["work"]?.reported,
+            [RexProbe.ProgramStatus(state: .blocked, kind: .permission)])
+        XCTAssertEqual(probe.tails["work"], ["editing README"])
+        let tail = try XCTUnwrap(probe.tails["drifting-bluff"])
+        XCTAssertTrue(tail.allSatisfy { $0.hasPrefix("行 ") })
+        XCTAssertEqual(tail.last, "行 400 日本語の出力")
+        XCTAssertEqual(tail.count, 30)
     }
 
     func testAnUnnamedWindowWithAnUnnamedBlockFallsBackToItsPosition() throws {

@@ -901,6 +901,60 @@ final class RexSessionTests: XCTestCase {
         XCTAssertTrue(sink.text(front).isEmpty)
     }
 
+    // MARK: - API revision
+
+    func testTheServerSettlesOnTheNewestRevisionBothSidesSpeak() async throws {
+        let newest = FakeRexServer()
+        let current = makeSession(newest)
+        try await open(current, sink: Sink())
+        XCTAssertEqual(newest.agreedRevision, RexWire.apiRevision)
+        await current.close()
+
+        // An older server is spoken to at its own revision: nothing a tab
+        // sends or reads differs between the oldest it accepts and the
+        // newest it knows.
+        let older = FakeRexServer()
+        older.apiRevision = 19
+        let session = makeSession(older)
+        let sink = Sink()
+        try await open(session, sink: sink)
+        XCTAssertEqual(older.agreedRevision, 19)
+        XCTAssertEqual(sink.text(front), ["\u{1B}cSCREEN"])
+        await session.close()
+    }
+
+    func testAServerTooOldToTalkToFailsTheOpenAndSaysToUpdateIt() async {
+        // One that negotiates closes the connection instead of welcoming,
+        // and its reason is the tab's.
+        let old = FakeRexServer()
+        old.apiRevision = RexWire.minimumAPIRevision - 1
+        do {
+            try await open(makeSession(old), sink: Sink())
+            XCTFail("the open should have thrown")
+        } catch {
+            XCTAssertEqual(
+                (error as? RexSession.Failure)?.message,
+                "no common API revision: server speaks 0 to 13, client needs 14 to 24; "
+                    + "update the server")
+        }
+        XCTAssertFalse(old.calls.contains("session.attach"))
+
+        // One from before revisions were negotiated welcomes anyway, at a
+        // revision this client cannot read.
+        let ancient = FakeRexServer()
+        ancient.apiRevision = nil
+        do {
+            try await open(makeSession(ancient), sink: Sink())
+            XCTFail("the open should have thrown")
+        } catch {
+            XCTAssertEqual(
+                (error as? RexSession.Failure)?.message,
+                "The Rex server on this host is older than Multiplex can talk to. "
+                    + "Update Rex there.")
+        }
+        XCTAssertFalse(ancient.calls.contains("session.attach"))
+    }
+
     func testAPipeThatCannotStartCarriesTheCommandsOwnReason() async {
         let session = RexSession(
             openPipe: {
@@ -1061,6 +1115,10 @@ private final class FakeRexServer: @unchecked Sendable {
     /// How many pipes may open; the next one is refused, as sshd refuses a
     /// channel past `MaxSessions`.
     var pipeLimit = Int.max
+    /// The newest API revision this server speaks. nil is a server from
+    /// before revisions were negotiated: its welcome names none.
+    var apiRevision: Int? = RexWire.apiRevision
+    private var agreed: Int?
     let nonce: UInt64 = 0x1122_3344_5566_7788
     let clientID = "client:me"
 
@@ -1074,6 +1132,8 @@ private final class FakeRexServer: @unchecked Sendable {
     var windowRequests: [[String: Any]] { lock.withLock { recordedWindows } }
     var ratioRequests: [[String: Any]] { lock.withLock { recordedRatios } }
     var helloKind: String? { lock.withLock { kind } }
+    /// The revision the welcome settled on.
+    var agreedRevision: Int? { lock.withLock { agreed } }
     var lastWriteBlock: String? { lock.withLock { writeBlock } }
     var eventsDelivered: Int { lock.withLock { events } }
 
@@ -1128,8 +1188,7 @@ private final class FakeRexServer: @unchecked Sendable {
 
     func closeData(code: UInt16, reason: String, of block: String = "block:front") {
         let feed = lock.withLock { dataFeeds[block] }
-        feed?.yield(Self.frame(
-            0x8, Data([UInt8(code >> 8), UInt8(code & 0xFF)]) + Data(reason.utf8)))
+        feed?.yield(Self.closeFrame(code: code, reason: reason))
         feed?.finish()
     }
 
@@ -1240,6 +1299,11 @@ private final class FakeRexServer: @unchecked Sendable {
         return frame + payload
     }
 
+    /// A server's close: the status, then why.
+    static func closeFrame(code: UInt16, reason: String) -> Data {
+        frame(0x8, Data([UInt8(code >> 8), UInt8(code & 0xFF)]) + Data(reason.utf8))
+    }
+
     static func json(_ object: [String: Any]) -> Data {
         (try? JSONSerialization.data(withJSONObject: object)) ?? Data()
     }
@@ -1317,10 +1381,28 @@ private final class FakeRexServer: @unchecked Sendable {
             if message["type"] as? String == "hello" {
                 let client = message["client"] as? [String: Any]
                 server.lock.withLock { server.kind = client?["kind"] as? String }
-                send([
+                var welcome: [String: Any] = [
                     "type": "welcome", "protocol": RexWire.controlSubprotocol,
                     "client": ["id": server.clientID],
-                ])
+                ]
+                // A real server's rule: the newest revision both sides
+                // speak, or no welcome at all.
+                if let newest = server.apiRevision {
+                    let asked = message["api_revision"] as? Int ?? 0
+                    let oldest = message["api_min_revision"] as? Int ?? 0
+                    guard newest >= oldest else {
+                        let reason = "no common API revision: server speaks 0 to \(newest), "
+                            + "client needs \(oldest) to \(asked); update the server"
+                        feed.yield(FakeRexServer.closeFrame(code: 1008, reason: reason))
+                        feed.finish()
+                        return
+                    }
+                    let agreed = min(asked, newest)
+                    server.lock.withLock { server.agreed = agreed }
+                    welcome["api_revision"] = agreed
+                    welcome["api_server_revision"] = newest
+                }
+                send(welcome)
                 return
             }
             guard let id = message["id"] as? String, let method = message["method"] as? String
@@ -1503,8 +1585,8 @@ private final class FakeRexServer: @unchecked Sendable {
             }
             if let reason = server.rejectReasons[block] {
                 feed.yield(FakeRexServer.frame(0x2, Data([0x82, reason])))
-                feed.yield(FakeRexServer.frame(
-                    0x8, Data([0x03, 0xF0]) + Data("data handshake rejected".utf8)))
+                feed.yield(FakeRexServer.closeFrame(
+                    code: 1008, reason: "data handshake rejected"))
                 feed.finish()
                 return
             }

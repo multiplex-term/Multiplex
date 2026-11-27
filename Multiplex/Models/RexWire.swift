@@ -5,7 +5,7 @@ import Foundation
 /// view and its layout tree, the data connection's binary handshake, and
 /// the terminal stream. Pure — `RexSession` owns the sockets.
 ///
-/// Written against API revision 14 (Rex 0.1.0-preview.19, 2026-11-16). The
+/// Written against API revision 24 (Rex 0.1.0-preview.25, 2026-11-27). The
 /// authority is the server's own `GET /llms.txt`, not the website docs; what
 /// is restated here is what was also exercised against a live server:
 /// - Both connections are WebSockets (`WebSocketCodec`): `/api/control` with
@@ -13,8 +13,9 @@ import Foundation
 ///   frame; `/api/data` with `rex.data.terminal.v1`, binary frames only.
 /// - A client sends one `hello` within 5 seconds, then `request`s. The
 ///   server answers `welcome`, a `response` per request (matched by `id`),
-///   and unsolicited `event`s. A newer server translates to the revision the
-///   hello asked for, so pinning 14 is what keeps this parser's shapes true.
+///   and unsolicited `event`s. The hello states the range of revisions the
+///   client speaks and the server picks the newest both do (`apiRevision`,
+///   `minimumAPIRevision`).
 /// - `session.attach` joins a session; `data.connect` needs that attachment
 ///   and issues a one-use ticket (16 bytes as 22 base64url characters).
 /// - A data connection opens with HELLO `0x01 + ticket`; the server answers
@@ -28,7 +29,17 @@ enum RexWire {
     static let controlSubprotocol = "rex.control.v1"
     static let dataPath = "/api/data"
     static let terminalSubprotocol = "rex.data.terminal.v1"
-    static let apiRevision = 14
+    /// The newest API revision this client speaks — the one its shapes
+    /// were last read against (`GET /llms.txt` of a preview.25 server).
+    static let apiRevision = 24
+    /// The oldest revision this client can use. The server settles on the
+    /// newest revision both sides speak and translates to it, so an older
+    /// server is spoken to at ITS revision: everything a tab sends and
+    /// reads was compared at 14, 19 and 24 and has one shape in all three
+    /// (`backends-and-probe.md`). A server from before 14 closes the
+    /// connection with status 1008 and a reason that says to update it,
+    /// which is what the tab's ended line then reads.
+    static let minimumAPIRevision = 14
     static let terminalCreator = "com.superlogical.terminal"
 
     // MARK: - Control: outbound
@@ -47,6 +58,7 @@ enum RexWire {
         json([
             "type": "hello",
             "api_revision": apiRevision,
+            "api_min_revision": minimumAPIRevision,
             "client": [
                 "kind": "other",
                 "platform": "ios",
@@ -85,7 +97,10 @@ enum RexWire {
     }
 
     enum Inbound {
-        case welcome(clientID: String?)
+        /// `revision` is the API revision the server settled on for this
+        /// connection; a welcome that names none means 0, as the protocol
+        /// reads it.
+        case welcome(clientID: String?, revision: Int)
         /// `payload` is the method's result as a JSON object (empty for a
         /// result that is not an object).
         case response(id: String, result: Result<[String: Any], ServerError>)
@@ -103,7 +118,9 @@ enum RexWire {
         case "welcome":
             guard object["protocol"] as? String == controlSubprotocol else { return nil }
             let client = object["client"] as? [String: Any]
-            return .welcome(clientID: client?["id"] as? String)
+            return .welcome(
+                clientID: client?["id"] as? String,
+                revision: object["api_revision"] as? Int ?? 0)
         case "response":
             guard let id = object["id"] as? String else { return nil }
             if let error = object["error"] as? [String: Any] {
