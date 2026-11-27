@@ -60,7 +60,6 @@ final class SettingsUIKitTests: XCTestCase {
             "Your themes",
         ] + windowMode + [
             "Terminal renderer",
-            "Experimental",
         ] + screen + [
             "Voice input",
             "Connection stats",
@@ -79,7 +78,6 @@ final class SettingsUIKitTests: XCTestCase {
         XCTAssertTrue(rendered.contains("MOSH TRANSPORT"))
         XCTAssertTrue(rendered.contains("AGENT HELPERS"))
         XCTAssertTrue(rendered.contains("Metal renderer"))
-        XCTAssertTrue(rendered.contains("Rex sessions"))
         XCTAssertTrue(
             rendered.contains("NOT INSTALLED") || rendered.contains("Noise reduction"),
             "Voice input shows the model's state or its switch"

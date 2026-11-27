@@ -277,23 +277,11 @@ HerdrProbe, RexProbe, session creation/targeting, or file attach/drop.
   against Rex 0.1.0-preview.25 / API revision 24, measured 2026-11-27
   against a throwaway server),
   adapted as session→tile, window (a tab)→window, terminal block→pane.
-  - **Experimental: off until switched on in Settings ▸ Experimental**
-    (`ExperimentalFeatures.isRexBackendEnabled`, default off). ⚠ The switch
-    is per DEVICE and the record is per host: `secondaryBackends` keeps
-    `rex` whatever the switch says (records sync; another device may have
-    it on), and the gate sits where the record is read —
-    `SessionBackend.isAvailable`, asked by `Host.monitoredBackends`,
-    `monitors(_:)` and `showsBackendIdentity`. Everything downstream (probe
-    loop, tiles, New Session's "Runs on", widgets, `backend=rex` actions)
-    reads those, so none of it has a check of its own. Two surfaces list
-    backends directly and use `availableCases` instead: the discovery riders
-    (`ConnectionHub` — no `rex` exec on a host while it is off) and Host
-    Settings' check bar, which carries a hidden checked `rex` through an
-    edit rather than dropping it. Nothing observes the switch: the hub
-    re-reads the host every refresh, so it takes effect within one (~5 s).
-    A Rex tab already open keeps running. `MULTIPLEX_REX=1` forces it on —
-    the unit-test scheme sets it (`project.yml`), and a harness run that
-    seeds `secondaryBackends: ["rex"]` needs it too.
+  - **Opt-in per host, like herdr as a second backend — and nothing else
+    gates it.** A host shows Rex once `secondaryBackends` lists it: the
+    rail's `+ REX` offer, or the box in Host Settings ▸ Backends. (A
+    per-device Settings ▸ Experimental switch hid it for a few days in
+    2026-11; a record that listed `rex` while it was off is monitored.)
   - **The hello states a RANGE of API revisions and the server picks**
     (`RexWire.apiRevision` 24, `minimumAPIRevision` 14; the welcome's
     `api_revision` is the newest both sides speak, and a server translates

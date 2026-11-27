@@ -77,11 +77,6 @@ schemes:
         MultiplexTests: [test]
     test:
       config: Debug
-      # The Rex backend is off until switched on in Settings ▸ Experimental
-      # (`ExperimentalFeatures`); the tests that build Rex hosts must not
-      # depend on what a simulator's defaults say.
-      environmentVariables:
-        MULTIPLEX_REX: "1"
       targets:
         - MultiplexTests
   # Real-touch UI tests (XCUITest): the one route that drives a gesture

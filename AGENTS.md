@@ -1,6 +1,5 @@
 Multiplex — a spatial SSH terminal built around remote **tmux** (with herdr
-as an optional second backend, and — experimental, behind a Settings switch —
-Rex sessions shown, attached and created);
+as an optional second backend, and Rex sessions shown, attached and created);
 visionOS-first, iPadOS alongside. The deck is
 a fleet-wide monitor wall: every host probes concurrently, every session
 renders as a live capture-pane tile, and each attach opens its own terminal

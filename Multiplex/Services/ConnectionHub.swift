@@ -272,9 +272,7 @@ final class HostConnectionModel {
     /// acted on automatically; the press is the whole design.
     var offeredBackends: [BackendDiscovery.Result] {
         let monitored = Set(host.monitoredBackends)
-        // `availableCases`: a result found before an experimental backend
-        // was switched off is not an offer any more.
-        return Host.SessionBackend.availableCases.compactMap { backend in
+        return Host.SessionBackend.allCases.compactMap { backend in
             guard !monitored.contains(backend),
                   let result = discovery[backend],
                   result.offersSessions
@@ -583,7 +581,7 @@ final class HostConnectionModel {
             // Discovery rides the primary probe for every backend this host
             // does NOT already monitor. A monitored one gets a full probe of
             // its own below, which would make the rider redundant work.
-            let discovering = Set(Host.SessionBackend.availableCases)
+            let discovering = Set(Host.SessionBackend.allCases)
                 .subtracting(host.monitoredBackends)
             let secondaries = host.monitoredBackends.dropFirst()
 

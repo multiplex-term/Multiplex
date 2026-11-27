@@ -27,7 +27,6 @@ final class RexPanesUITests: XCTestCase {
 
         let app = XCUIApplication()
         app.launchEnvironment["MULTIPLEX_SEED_HOST"] = seed
-        app.launchEnvironment["MULTIPLEX_REX"] = "1"
         app.launchEnvironment["MULTIPLEX_METAL"] = "0"
         app.launchEnvironment["MULTIPLEX_AUTO_ACTION_URL"] =
             "multiplex://open?host=devbox&action=shell&session=\(session)&backend=rex"
