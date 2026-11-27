@@ -130,6 +130,12 @@ so far only) backend that uses it is Rex — its own facts are in
   arrangement — the same road a terminal chosen from the panel's switch
   list takes. Which word the row wears is the backend's (`PaneShortcut
   .newWindow` is "New Window"; Rex's row is titled New Tab).
+  - The same road is how a tab survives its window closing: the transport
+    sends another window's arrangement instead of `close`, and names no
+    focus (Rex: `backends-and-probe.md`). `close` is for a session with
+    nothing left to draw. A tab whose every pane just went therefore gets
+    a new set in one arrangement — the case the keyboard handover above
+    exists for.
 - **A file dropped on a pane lands in that pane.** The drop moves the
   tab's focus to the pane under it first (`PaneSplitView.pane(at:)`), so
   the upload goes to that pane's directory and the path is typed there —

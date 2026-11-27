@@ -333,9 +333,10 @@ HerdrProbe, RexProbe, session creation/targeting, or file attach/drop.
         `client.undo_close` and the pane was back with its screen).
       - `session.transfer_window` moves a window to another session. To
         the session it leaves that is a window closing (`window_closed`, a
-        `block_closed` each, the streams end), so a tab drawing it ends
-        cleanly, like its last terminal exiting (measured: ENDED, with
-        RECONNECT, and the client gone from the server at once).
+        `block_closed` each, the streams end), so a tab drawing it goes
+        where a closed window's tab goes (measured with no other window
+        left in the session: ENDED, with RECONNECT, and the client gone
+        from the server at once).
       - A window has TWO zooms now (`tiled_zoomed_block_id` beside
         `zoomed_block_id`) and a split no longer ends one (measured: a
         block zoomed by `window_id`, then `new_split` with `focus: false`,
@@ -554,9 +555,31 @@ HerdrProbe, RexProbe, session creation/targeting, or file attach/drop.
       an EARLIER ask arrives mid-drag and pulled the divider back under the
       finger. `floorRevision` drops a view read before this tab's own last
       change was answered, for the same reason.
-    - A window whose last terminal closes ends the tab cleanly (the ended
-      panel and RECONNECT, which attaches whatever the session is fronting
-      by then). One pane closing is not the tab ending.
+    - **A window that closes under a tab moves the tab to the window Rex
+      shows next** (`RexWire.layer(replacing:among:inView:)`, asked in
+      `refreshView`) — its last terminal exited, its last pane was closed
+      from the panel, another client closed or transferred it. Rex's own
+      rule for a closed active window is "the window after it becomes
+      active, or the one before it if it was last"; the tab walks the same
+      way from the closed window's place in the tab order it last read,
+      passing windows with no terminal, so a tab and a Rex app that were
+      both on the window land on the same one (measured: `exit` in the
+      first of three windows put the tab AND `active_window_id` on the
+      second; New Tab then Close Pane came back to the window the tab
+      had left). The first shape ended the tab there, with DETACHED and
+      RECONNECT, which read as the session being gone while its other
+      tabs were one press away.
+      - It is not an attach and not a choice: the arrangement names no
+        focus, so the window's own focused pane takes the keyboard, and
+        only terminals nobody owns are claimed. One another client holds
+        is drawn at that client's size until someone types here, like a
+        pane another client adds.
+      - A window that is still there and only lost the layer the tab drew
+        (a floating layer closed) keeps the tab, on the layer its focused
+        block is in.
+      - The tab ends cleanly only when no window of the session has a
+        terminal left (the ended panel and RECONNECT, which then has
+        nothing to attach either). One pane closing is not the tab ending.
   - **The REX key's panel acts on the focused pane, then lists the
     session's terminals** (`ShortcutPanelContent.rex`). Rex has no prefix
     keys to list — Multiplex is the client — so its rows are

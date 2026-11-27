@@ -316,10 +316,12 @@ final class RexSessionTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(100))
         XCTAssertEqual(server.written, ["z"])
 
-        // Closing the last pane closes the window: a clean end.
+        // Closing the last pane closes the window, and the tab goes to the
+        // window Rex shows next — the one before it, this one being last.
         try await session.perform(.close(side))
-        await eventually { !sink.closeReasons.isEmpty }
-        XCTAssertEqual(sink.closeReasons, [nil])
+        await eventually { sink.arrangements.last?.layout == .pane(self.other) }
+        XCTAssertEqual(sink.arrangements.last?.focus, other)
+        XCTAssertTrue(sink.closeReasons.isEmpty)
         await session.close()
     }
 
@@ -761,15 +763,36 @@ final class RexSessionTests: XCTestCase {
 
     // MARK: - Ending
 
-    func testTheLastBlockClosingEndsTheTabCleanlyAndSaysGoodbye() async throws {
+    func testAClosedWindowsTabMovesToTheNextWindowAndTheLastOneEndsItCleanly() async throws {
         let server = FakeRexServer()
+        server.screens["block:other"] = "OTHER"
         let session = makeSession(server)
         let sink = Sink()
         try await open(session, sink: sink)
+        let attachCalls = server.calls.count
 
         // The shell exits: its stream closes (4000), the block goes, and
-        // with it the window.
+        // with it the window. The session has another, so the tab is not
+        // over: it draws that one, as Rex's own app shows the next tab
+        // when one is closed.
         server.closeBlock("block:front")
+        await eventually { sink.text(self.other) == ["\u{1B}cOTHER"] }
+        XCTAssertEqual(
+            sink.arrangements.last, PaneArrangement(layout: .pane(other), focus: other))
+        XCTAssertTrue(sink.closeReasons.isEmpty)
+        // Nobody's terminal is claimed and sized like one of an attach; a
+        // block that closed is not given up (one unknown id fails the call).
+        XCTAssertEqual(server.claims.last, ["block:other"])
+        XCTAssertFalse(server.calls.dropFirst(attachCalls).contains {
+            $0.hasPrefix("session.disown_block")
+        })
+        // The tab is live there.
+        try await session.write(Data("x".utf8), to: other)
+        await eventually { server.written == ["x"] }
+        XCTAssertEqual(server.lastWriteBlock, "block:other")
+
+        // The last terminal of the session goes: nowhere is left.
+        server.closeBlock("block:other")
         await eventually { !sink.closeReasons.isEmpty }
         // A clean end — like a shell exiting, not an error.
         XCTAssertEqual(sink.closeReasons, [nil])

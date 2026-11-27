@@ -282,6 +282,42 @@ enum RexWire {
             .first { $0.windowID == windowID && $0.layerID == layerID }
     }
 
+    /// A view's windows in tab order: what a later view is read against
+    /// when one of them has gone (`layer(replacing:among:inView:)`).
+    static func windowOrder(inView view: [String: Any]) -> [String] {
+        (view["windows"] as? [[String: Any]] ?? []).compactMap { $0["window_id"] as? String }
+    }
+
+    /// Where a tab goes when what it drew is gone and the session still has
+    /// a terminal: the window Rex itself shows next. `order` is the tab
+    /// order from before, while `windowID` was still in it.
+    ///
+    /// Rex's rule for a closed window that was the active one: "the window
+    /// after it becomes active, or the one before it if it was last". The
+    /// same walk here, over the windows that still hold a terminal, so a
+    /// tab and a Rex app that were both on the window land on the same one.
+    /// A window that is still there and only lost the layer the tab drew (a
+    /// floating layer closed) keeps the tab. In a window, the layer its
+    /// focused block is in.
+    ///
+    /// nil only when no window of the session has a terminal left.
+    static func layer(
+        replacing windowID: String, among order: [String], inView view: [String: Any]
+    ) -> Layer? {
+        let layers = layers(inView: view, preferring: nil)
+        func layer(of window: String) -> Layer? {
+            let own = layers.filter { $0.windowID == window }
+            return own.first { $0.focusedBlockID != nil } ?? own.first
+        }
+        if let same = layer(of: windowID) { return same }
+        let place = order.firstIndex(of: windowID) ?? order.endIndex
+        let after = order[place...].dropFirst()
+        let before = order[..<place].reversed()
+        // A window made since `order` was read is in neither walk; any
+        // terminal at all beats ending a tab whose session has one.
+        return (Array(after) + Array(before)).lazy.compactMap(layer(of:)).first ?? layers.first
+    }
+
     /// Every layer of `view` that holds a terminal, as a pane tree of its
     /// TERMINAL blocks. Any other kind of block has no stream this client
     /// can draw: its leaf is cut out and what was beside it takes the room.

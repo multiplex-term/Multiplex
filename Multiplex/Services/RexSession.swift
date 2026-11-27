@@ -258,6 +258,10 @@ actor RexSession: PanedTerminalTransport {
     private var terminalSerial = 0
     /// The window and layer the tab draws.
     private var shown: (windowID: String, layerID: String)?
+    /// The session's windows in tab order, as of the last view that still
+    /// had `shown` in it: where the tab goes when that window closes is
+    /// read off its place here.
+    private var windowOrder: [String] = []
     private var layout: PaneLayout?
     private var viewRevision = -1
     /// The oldest view worth adopting: the revision the server gave in
@@ -387,9 +391,13 @@ actor RexSession: PanedTerminalTransport {
                         windowID: $0.windowID, layerID: $0.layerID,
                         preferring: focusedBlockID, inView: view)
                 }
-            guard let layer else {
-                // The window this tab drew has closed, or its last terminal
-                // has — a clean end, like a shell exiting.
+            // The window this tab drew has closed, or its last terminal
+            // has: the tab moves to the window Rex shows next, as its own
+            // app does when a tab is closed. With no terminal left in the
+            // session that is a clean end, like a shell exiting.
+            guard let layer = layer ?? shown.flatMap({
+                RexWire.layer(replacing: $0.windowID, among: windowOrder, inView: view)
+            }) else {
                 finish(nil)
                 return
             }
@@ -410,6 +418,7 @@ actor RexSession: PanedTerminalTransport {
     ) async -> [String: Failure] {
         if let revision = view["revision"] as? Int { viewRevision = max(viewRevision, revision) }
         shown = (layer.windowID, layer.layerID)
+        windowOrder = RexWire.windowOrder(inView: view)
         let previous = layout
         var next = layer.layout
         for (splitID, ratio) in pendingRatios {

@@ -362,6 +362,71 @@ final class RexWireTests: XCTestCase {
         XCTAssertNil(RexWire.layer(holding: "block:gone", inView: view))
     }
 
+    // MARK: - Where a tab goes when its window closes
+
+    /// Windows in tab order, each one shell — or, named in `bare`, a block
+    /// that is not a terminal.
+    private func windows(_ ids: [String], bare: Set<String> = []) -> [String: Any] {
+        ["windows": ids.map { id -> [String: Any] in
+            let block = "block:" + id
+            return [
+                "window_id": "window:" + id, "focused_block_id": block,
+                "layers": [[
+                    "layer_id": "layer:" + id,
+                    "layout": ["block_id": block],
+                    "blocks": [[
+                        "block_id": block,
+                        "creator_name": bare.contains(id)
+                            ? "com.superlogical.tunnel" : RexWire.terminalCreator,
+                    ]],
+                ]],
+            ]
+        }]
+    }
+
+    func testAClosedWindowsTabGoesToTheWindowAfterItOrTheOneBeforeIfItWasLast() {
+        let order = ["window:a", "window:b", "window:c", "window:d"]
+        XCTAssertEqual(RexWire.windowOrder(inView: windows(["a", "b", "c", "d"])), order)
+        func next(after closed: String, _ left: [String], bare: Set<String> = []) -> String? {
+            RexWire.layer(
+                replacing: "window:" + closed, among: order,
+                inView: windows(left, bare: bare))?.windowID
+        }
+        // Rex's own rule for a closed window: the one after it, or the one
+        // before it if it was last.
+        XCTAssertEqual(next(after: "b", ["a", "c", "d"]), "window:c")
+        XCTAssertEqual(next(after: "d", ["a", "b", "c"]), "window:c")
+        XCTAssertEqual(next(after: "a", ["b", "c", "d"]), "window:b")
+        // A window with no terminal is not somewhere a tab can go: the walk
+        // passes it, forward first and then back, nearest first.
+        XCTAssertEqual(next(after: "b", ["a", "c", "d"], bare: ["c"]), "window:d")
+        XCTAssertEqual(next(after: "c", ["a", "b", "d"], bare: ["d"]), "window:b")
+        // One made since the order was read is in neither walk, and still
+        // beats ending a tab whose session has a terminal.
+        XCTAssertEqual(next(after: "a", ["new"]), "window:new")
+        XCTAssertEqual(next(after: "never-seen", ["a", "b"]), "window:b")
+        // Nothing left to draw is the one case with no answer.
+        XCTAssertNil(next(after: "a", []))
+        XCTAssertNil(next(after: "a", ["b"], bare: ["b"]))
+    }
+
+    func testAWindowThatOnlyLostTheLayerATabDrewKeepsTheTab() throws {
+        // The floating layer a tab drew has closed; its window is still
+        // there, and the tab stays in it — on the layer the window's
+        // focused block is in.
+        var view = try layeredView()
+        var all = try XCTUnwrap(view["windows"] as? [[String: Any]])
+        var layers = try XCTUnwrap(all[0]["layers"] as? [[String: Any]])
+        layers.removeLast()
+        all[0]["layers"] = layers
+        view["windows"] = all
+        let kept = try XCTUnwrap(RexWire.layer(
+            replacing: "window:1", among: ["window:1", "window:2"], inView: view))
+        XCTAssertEqual(kept.windowID, "window:1")
+        XCTAssertEqual(kept.layerID, "layer:tiled")
+        XCTAssertEqual(kept.focusedBlockID, "block:b")
+    }
+
     func testALayerThatStatesNoLayoutIsOneOfItsTerminalsAlone() throws {
         let view = try layeredView()
         // The one asked for, not an arrangement invented here.

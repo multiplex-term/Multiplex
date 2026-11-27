@@ -11,7 +11,7 @@ PLEASE TRY
 4. Press the tile of a Rex session with a split: the tab should show every pane where Rex has it, colors and earlier output included. Tap a pane and type: it should run in that pane.
 5. Open vim in a Rex terminal, then attach it: the tab should show it. Quit vim: the earlier output should come back, with one prompt.
 6. Long-press the tile of a Rex session with a second window and choose Open Terminal: that window should open as its own tab.
-7. Exit the shell in one pane: that pane should close and the others stay. Exit the last: the tab should end with RECONNECT, not an error.
+7. Exit the shell in one pane: that pane should close and the others stay. Exit the last pane of a Rex tab while the session has another: the tab should show that other Rex tab. Exit the last of the session: the tab should end with RECONNECT, not an error.
 8. Start an agent in a Rex terminal, then let it ask a question: the tile should show RUNNING, then NEEDS YOU.
 9. In a Rex tab, press the REX key and choose Split Right, then Split Down: each should add a pane in the same directory with the keyboard in it. Drag a line between panes: both should resize. Toggle Pane Zoom: that pane should fill the tab until ALL PANES. Close Pane twice: it should go. Rex on the host should show the same panes. New Tab: the tab should show a new Rex tab, and Switch Terminal should lead back.
 10. Press + NEW SESSION and choose REX under Runs on: a new Rex session should open as a tab and appear in Rex. With no Rex server running, it should say so.
