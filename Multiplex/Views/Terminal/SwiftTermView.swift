@@ -452,24 +452,39 @@ final class TerminalSurfaceView: UIView {
         // that is about to go.
         let previous = coordinator.terminalView
         let hadKeyboard = previous != nil && TerminalFocusArbiter.current === previous
+        var active: TerminalView?
         paneSplitView.apply(
             layout: controller.paneLayout, screens: controller.screens,
             activePane: controller.activePaneID, zoomedPane: controller.zoomedPaneID,
-            theme: configuration.theme)
-        let active = paneSplitView.cell(for: controller.activePaneID)?.terminalView
-        coordinator.terminalView = active
+            theme: configuration.theme
+        ) { [self] in
+            active = paneSplitView.cell(for: controller.activePaneID)?.terminalView
+            // Before the claim: keyboard avoidance acts only on the
+            // terminal the coordinator names, so the hide a resigning pane
+            // reports is not acted on and the show its successor's is.
+            coordinator.terminalView = active
+            // The keyboard follows the tab's focus when the tab had it — a
+            // split just made, a pane closed under the cursor, the tab
+            // moved to another window's panes — and it moves HERE, while
+            // the pane it is leaving is still in the window. Left until a
+            // pane that was going had gone, the keyboard went with it and
+            // came back a turn later, and the layout below measured the
+            // panes without it: a new pane's terminal was opened 22 rows
+            // too tall and its screen drawn into an emulator that had
+            // shrunk back by then (measured: the top of the screen
+            // scrolled away). A tab that did not have the keyboard does
+            // not take it because its layout changed.
+            if hadKeyboard, configuration.isActive, let active, active !== previous {
+                TerminalFocusArbiter.claim(active)
+            }
+        }
         #if !os(visionOS)
         keyBar?.retarget(to: active)
         #endif
         if synchronously { layoutIfNeeded() }
-        // The keyboard follows the tab's focus when the tab had it — a pane
-        // closed under the cursor, a split just made — and goes to the
-        // first pane an attach brings, as it goes to a single emulator when
-        // its surface is installed. A tab that did not have the keyboard
-        // does not take it because its layout changed.
-        guard let active, active !== previous, configuration.isActive,
-              previous == nil || hadKeyboard
-        else { return }
+        // The first pane an attach brings takes the keyboard a turn later,
+        // as a single emulator does when its surface is installed.
+        guard previous == nil, configuration.isActive, let active else { return }
         DispatchQueue.main.async { [weak controller] in
             guard controller?.terminalView === active else { return }
             TerminalFocusArbiter.claim(active)

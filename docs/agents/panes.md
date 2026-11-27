@@ -64,6 +64,28 @@ so far only) backend that uses it is Rex — its own facts are in
   selection menu of whichever pane is active, and it has to be the one
   under the finger. Touch-down moves the keyboard only if the tab had it;
   the tap (`reclaimFocus`) is still what summons a dismissed keyboard.
+  - ⚠ **The keyboard moves INSIDE `PaneSplitView.apply`, while the pane it
+    is leaving is still in the window** (`beforeDropping`, the one claim in
+    `syncPanes` for a tab that had the keyboard; only an attach's first
+    claim waits a turn, as a single emulator's does). It used to move a
+    turn later for every case, which is too late for a pane that GOES — a
+    closed pane, and every pane of the window a tab leaves for another
+    (New Tab, a terminal chosen from the panel): the keyboard left with
+    the old pane, and the layout pass the transport is answered from
+    measured the panes WITHOUT it. Measured on an iPad: a new window's
+    pane was opened at 73 rows, its terminal sized and rendered at 73, and
+    the pane was back at 51 before that rendering was fed — the
+    rendering's blank rows scrolled the top of the screen away (a shell's
+    first line gone, about three times in five).
+    - The coordinator is pointed at the new pane BEFORE the claim:
+      keyboard avoidance acts only on the terminal it names, so the hide
+      the resigning pane reports is not acted on and the show its
+      successor's is.
+    - Not closed by that: UIKit still reports the keyboard hidden and
+      shown again about 270 ms later (the hide it started and took back),
+      and the panes are 73 rows for one layout pass — two more `resize`s
+      for the terminal, no damage to the screen (a rendering fed to a
+      TALLER emulator scrolls nothing).
 - ⚠ **A pane is laid out BEFORE its terminal is opened, and the transport
   waits for that.** `PaneEvents.arrange` is async and answers with the grid
   each pane measured: the controller makes the screens, the surface's
@@ -74,6 +96,13 @@ so far only) backend that uses it is Rex — its own facts are in
   records; without a mounted surface (a tab opened in the background) the
   answer is the emulator's default grid and the first real layout resizes
   it, which is no worse than a single-stream tab opened unseen.
+  - Still open: nothing ties a rendering to the grid the emulator has at
+    the moment it is FED. The transport hears a pane's size through its
+    pump, a moment after the emulator has it, so a pane that shrinks
+    between the fetch and the feed gets a rendering made for more rows
+    than it has (the keyboard handover above was the one case seen). The
+    complete fix is a feed that is refused when the grids differ — a
+    fifth `PaneEvents` member, awaited like `grid` — and was not built.
   - A pane's pumps start at the arrangement, not at `.live`: its size has
     to reach the transport while its terminal is still being opened. The
     transport keeps the newest size it was told per pane even before it

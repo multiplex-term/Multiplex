@@ -407,6 +407,69 @@ final class TerminalPaneSplitUIKitTests: XCTestCase {
         tab.window.isHidden = true
     }
 
+    // MARK: - The keyboard, when its pane goes
+
+    func testCellsThatLeaveAreStillInTheWindowWhileTheNewOnesAreAlreadyIn() async throws {
+        let tab = try await makeTab(PaneArrangement(layout: sideBySide, focus: right))
+        let split = try tab.split
+        let staying = split.cells[0], going = split.cells[1]
+        let arriving = TerminalScreen(paneID: below)
+
+        var handedOver = false
+        split.apply(
+            layout: PaneLayout.split(PaneLayout.Split(
+                id: "split:1", axis: .sideBySide, ratio: 0.5,
+                before: .pane(left), after: .pane(below))),
+            screens: [staying.screen, arriving], activePane: below, zoomedPane: nil,
+            theme: .tally
+        ) {
+            handedOver = true
+            // The one moment a first responder can pass from the pane that
+            // is going to the pane that came, with no turn in which neither
+            // is in the window — which is when the keyboard would leave.
+            XCTAssertNotNil(going.window)
+            XCTAssertNotNil(split.cell(for: self.below)?.terminalView.window)
+        }
+        XCTAssertTrue(handedOver)
+        XCTAssertNil(going.superview)
+        XCTAssertEqual(split.cells.map(\.screen.paneID), [left, below])
+        tab.window.isHidden = true
+    }
+
+    func testTheKeyboardGoesWithTheFocusBeforeTheTransportIsAnswered() async throws {
+        let tab = try await makeTab(PaneArrangement(layout: sideBySide, focus: right))
+        let split = try tab.split
+        let goingView = split.cells[1].terminalView
+        await eventually { TerminalFocusArbiter.current === goingView }
+
+        // The tab moves to another window of its session — New Tab, or a
+        // terminal chosen from the panel: every pane it drew goes, one new
+        // pane comes, and the keyboard is on it when the transport is
+        // answered with its grid.
+        let sizes = await tab.events.arrange(PaneArrangement(layout: .pane(below), focus: below))
+        let arrived = try XCTUnwrap(split.cells.first?.terminalView)
+        XCTAssertEqual(split.cells.map(\.screen.paneID), [below])
+        XCTAssertTrue(TerminalFocusArbiter.current === arrived)
+        XCTAssertNil(goingView.window)
+        XCTAssertNotNil(sizes[below])
+
+        // A pane that arrives beside one that stays takes it the same way.
+        _ = await tab.events.arrange(PaneArrangement(
+            layout: PaneLayout.split(PaneLayout.Split(
+                id: "split:9", axis: .sideBySide, ratio: 0.5,
+                before: .pane(below), after: .pane(right))),
+            focus: right))
+        let arrivedBeside = try XCTUnwrap(split.cell(for: right)?.terminalView)
+        XCTAssertTrue(TerminalFocusArbiter.current === arrivedBeside)
+
+        // A tab that did not have the keyboard does not take it because
+        // its panes changed.
+        TerminalFocusArbiter.release(arrivedBeside)
+        _ = await tab.events.arrange(PaneArrangement(layout: .pane(left), focus: left))
+        XCTAssertNil(TerminalFocusArbiter.current)
+        tab.window.isHidden = true
+    }
+
     // MARK: - Moving to another window
 
     func testAMovedTabsNewWindowAdoptsTheEmulatorsAndTheOldSurfaceCannotTakeThemBack() async throws {

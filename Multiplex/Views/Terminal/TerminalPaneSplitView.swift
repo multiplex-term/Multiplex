@@ -83,9 +83,14 @@ final class PaneSplitView: UIView {
     /// are kept by screen — a pane that stays keeps its emulator view, its
     /// scrollback and its selection — and only what changed is made or
     /// dropped.
+    ///
+    /// `beforeDropping` runs once the new cells are in and before the ones
+    /// that are going leave: the one moment both the pane the keyboard is
+    /// on and the pane it is going to are in the window.
     func apply(
         layout: PaneLayout?, screens: [TerminalScreen], activePane: PaneID?,
-        zoomedPane: PaneID?, theme: TerminalTheme
+        zoomedPane: PaneID?, theme: TerminalTheme,
+        beforeDropping: () -> Void
     ) {
         var arranged: [PaneCellView] = []
         for screen in screens {
@@ -97,14 +102,16 @@ final class PaneSplitView: UIView {
                 arranged.append(cell)
             }
         }
-        for cell in cells where !arranged.contains(where: { $0 === cell }) {
-            cell.removeFromSuperview()
-        }
+        let leaving = cells.filter { cell in !arranged.contains { $0 === cell } }
         cells = arranged
         self.layout = layout
         self.activePane = activePane
         self.zoomedPane = zoomedPane
         ink = UIColor(theme.foreground)
+        // Everything a layout pass reads is in place by now: a keyboard
+        // changing hands in there can ask for one.
+        beforeDropping()
+        for cell in leaving { cell.removeFromSuperview() }
         setNeedsLayout()
     }
 
