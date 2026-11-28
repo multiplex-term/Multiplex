@@ -1,3 +1,4 @@
+import WebKit
 import XCTest
 @testable import Multiplex
 
@@ -151,7 +152,7 @@ final class AgentBrowserTests: XCTestCase {
         let blocks = rules.filter { $0["action"]?["type"] == "block" }.compactMap { $0["trigger"]?["url-filter"] }
         let allows = rules.filter { $0["action"]?["type"] == "ignore-previous-rules" }
             .compactMap { $0["trigger"]?["url-filter"] }
-        XCTAssertEqual(blocks.count, 5)
+        XCTAssertEqual(blocks.count, 14, "seven loopback spellings, bare and behind userinfo")
         XCTAssertTrue(allows.contains("^[a-z][a-z0-9+.-]*://localhost:5173/"))
         XCTAssertTrue(allows.contains(#"^[a-z][a-z0-9+.-]*://127\.0\.0\.1:5173/"#))
         XCTAssertTrue(allows.contains("^http://localhost/"), "port 80 is the default for http")
@@ -161,6 +162,66 @@ final class AgentBrowserTests: XCTestCase {
         // Before any forward: everything loopback is blocked.
         let none = AgentBrowserAddressPolicy.loopbackRuleListJSON(forwardedPorts: [])
         XCTAssertFalse(none.contains("ignore-previous-rules"))
+    }
+
+    /// WebKit's verdict for a URL under a rule list: rules apply in order,
+    /// and `ignore-previous-rules` lifts the blocks before it.
+    private func isBlocked(_ url: String, by json: String) throws -> Bool {
+        let rules = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [[String: [String: String]]]
+        )
+        var blocked = false
+        for rule in rules {
+            let filter = try XCTUnwrap(rule["trigger"]?["url-filter"])
+            let regex = try NSRegularExpression(pattern: filter, options: [.caseInsensitive])
+            guard regex.firstMatch(in: url, range: NSRange(url.startIndex..., in: url)) != nil else { continue }
+            blocked = rule["action"]?["type"] == "block"
+        }
+        return blocked
+    }
+
+    /// A real device never proxies loopback, so these rules are all that
+    /// stands between a page and another app's server on the phone — in
+    /// every spelling a URL has for it.
+    func testLoopbackGuardCoversEverySpellingOfLoopback() throws {
+        let json = AgentBrowserAddressPolicy.loopbackRuleListJSON(forwardedPorts: [5173])
+        for reachable in [
+            "http://localhost:5173/", "ws://localhost:5173/hmr", "http://127.0.0.1:5173/a?b",
+            "http://[::1]:5173/", "http://app.localhost:5173/",
+            "https://example.com/", "http://192.168.1.24:9000/", "https://localhost.example.com/",
+            "http://user@example.com/", "http://[2001:db8::1]/",
+        ] {
+            XCTAssertFalse(try isBlocked(reachable, by: json), reachable)
+        }
+        for blocked in [
+            "http://localhost:9000/", "http://localhost/", "http://127.0.0.1:9000/", "http://127.8.8.8:9000/",
+            "http://[::1]:9000/", "http://app.localhost:9000/", "http://0.0.0.0:9000/", "ws://localhost:9000/",
+            "http://localhost.:9000/",
+            // Userinfo sits between the scheme and the host.
+            "http://x@127.0.0.1:9000/", "http://x:y@localhost:9000/", "http://x@[::1]:9000/",
+            "http://x@localhost:5173/",
+            // The unspecified address, and IPv4-mapped loopback.
+            "http://[::]:9000/", "http://[::ffff:7f00:1]:9000/", "http://[::ffff:127.0.0.1]:9000/",
+            "ws://[::ffff:7f00:1]:5173/",
+        ] {
+            XCTAssertTrue(try isBlocked(blocked, by: json), blocked)
+        }
+    }
+
+    /// A rule list WebKit refuses to compile opens no agent tab at all (the
+    /// fail-closed rule), so the patterns stay inside its url-filter syntax.
+    @MainActor
+    func testRuleListsCompileInWebKit() async throws {
+        let store = try XCTUnwrap(WKContentRuleListStore.default())
+        for (name, json) in [
+            ("loopback", AgentBrowserAddressPolicy.loopbackRuleListJSON(forwardedPorts: [80, 443, 5173])),
+            ("device", AgentBrowserAddressPolicy.contentRuleListJSON(host: host)),
+        ] {
+            let identifier = "agent-browser-test-\(name)"
+            let list = try await store.compileContentRuleList(forIdentifier: identifier, encodedContentRuleList: json)
+            XCTAssertNotNil(list, name)
+            try await store.removeContentRuleList(forIdentifier: identifier)
+        }
     }
 
     func testOutdatedCLIIsRecognized() {
@@ -382,6 +443,112 @@ final class AgentBrowserTests: XCTestCase {
         XCTAssertEqual(proxy.forwardedPorts, [port])
     }
 
+    /// A blocking loopback client: sends `request`, returns what came back
+    /// until the other side closed.
+    private func exchange(port: Int, _ request: String) throws -> String {
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        defer { close(fd) }
+        var timeout = timeval(tv_sec: 3, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = in_port_t(port).bigEndian
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let connected = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard connected == 0 else { throw POSIXError(.ECONNREFUSED) }
+        _ = request.withCString { send(fd, $0, strlen($0), 0) }
+        var received = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while true {
+            let count = recv(fd, &buffer, buffer.count, 0)
+            guard count > 0 else { break }
+            received.append(buffer, count: count)
+        }
+        return String(decoding: received, as: UTF8.self)
+    }
+
+    /// A listener of someone else's on loopback, at `address`.
+    private func foreignListener(on address: String, port: Int) throws -> Int32 {
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        var yes: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, socklen_t(MemoryLayout<Int32>.size))
+        var bound = sockaddr_in()
+        bound.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        bound.sin_family = sa_family_t(AF_INET)
+        bound.sin_port = in_port_t(port).bigEndian
+        bound.sin_addr.s_addr = inet_addr(address)
+        let result = withUnsafePointer(to: &bound) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard result == 0, listen(fd, 4) == 0 else {
+            close(fd)
+            throw POSIXError(.EADDRINUSE)
+        }
+        return fd
+    }
+
+    /// A forward closes a refused client first, which leaves that
+    /// connection in TIME_WAIT on the forward's port for half a minute.
+    /// Closing the last tab and opening the port again inside that window
+    /// answered `port_busy`.
+    func testAForwardedPortCanBeForwardedAgainRightAfterItClosed() async throws {
+        let proxy = AgentBrowserProxy(host: host)
+        defer { proxy.stop() }
+        var port = 40_000 + Int.random(in: 0..<10_000)
+        try await forwardNextFreePort(proxy, from: &port)
+        let answer = try exchange(port: port, "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        XCTAssertTrue(answer.hasPrefix("HTTP/1.1 403"), answer)
+
+        proxy.stopForwards()
+        try await proxy.forward(port: port)
+        XCTAssertEqual(proxy.forwardedPorts, [port])
+    }
+
+    /// Binding through TIME_WAIT must not turn into binding over a port
+    /// that is in use: the same address, or another app's wildcard listener.
+    func testAPortSomeoneElseListensOnStaysBusy() async throws {
+        let proxy = AgentBrowserProxy(host: host)
+        defer { proxy.stop() }
+        var port = 40_000 + Int.random(in: 0..<10_000)
+        for address in ["127.0.0.1", "0.0.0.0"] {
+            var listener: Int32?
+            for _ in 0..<200 where listener == nil {
+                port += 1
+                listener = try? foreignListener(on: address, port: port)
+            }
+            let fd = try XCTUnwrap(listener)
+            defer { close(fd) }
+            do {
+                try await proxy.forward(port: port)
+                XCTFail("bound over a listener on \(address)")
+            } catch is AgentBrowserProxy.PortBusy {}
+            XCTAssertTrue(proxy.forwardedPorts.isEmpty)
+        }
+    }
+
+    /// `--open` belongs to a forward: it cannot be set for a port that is
+    /// not forwarded, where it would wait for whoever forwards it next.
+    func testOnlyAForwardedPortCanBeOpened() async throws {
+        let proxy = AgentBrowserProxy(host: host)
+        defer { proxy.stop() }
+        var port = 40_000 + Int.random(in: 0..<10_000)
+        proxy.setOpen(port + 1, true)
+        try await forwardNextFreePort(proxy, from: &port)
+        XCTAssertEqual(proxy.openForwardedPorts, [], "opened before it was forwarded")
+        proxy.setOpen(port, true)
+        XCTAssertEqual(proxy.openForwardedPorts, [port])
+        proxy.stopForwards()
+        try await proxy.forward(port: port)
+        XCTAssertEqual(proxy.openForwardedPorts, [], "the mode goes with the forward")
+    }
+
     /// A revoked host's proxy binds nothing more: no listener, no forward.
     func testAStoppedProxyBindsNothing() async throws {
         let proxy = AgentBrowserProxy(host: host)
@@ -448,8 +615,25 @@ final class AgentBrowserTests: XCTestCase {
     func testEvalTriesExpressionThenStatements() {
         let bodies = AgentBrowserScript.evalBodies("document.title")
         XCTAssertEqual(bodies.count, 2)
-        XCTAssertTrue(bodies[0].hasPrefix("const __v = await (\ndocument.title\n);"))
+        XCTAssertTrue(bodies[0].hasPrefix("let __v;\ntry { __v = await (\ndocument.title\n); }"))
         XCTAssertTrue(bodies[1].contains("(async () => {\ndocument.title\n})()"))
+        // What the code throws comes back as an answer, so only a body that
+        // did not compile reaches the retry.
+        for body in bodies {
+            XCTAssertTrue(body.contains("catch (__e) { return JSON.stringify({ thrown: String(__e) }); }"))
+        }
+    }
+
+    /// The load and `wait` polls sleep between looks. Cancelled, the sleep
+    /// returns at once; a poll that ignored that span on the main actor
+    /// until its deadline.
+    func testACancelledPauseSaysSo() async {
+        let paused = Task { await AgentBrowserDriver.pause(.seconds(60)) }
+        paused.cancel()
+        let finished = await paused.value
+        XCTAssertFalse(finished)
+        let slept = await AgentBrowserDriver.pause(.milliseconds(1))
+        XCTAssertTrue(slept)
     }
 
     func testScriptsShareTheConsoleEventName() {

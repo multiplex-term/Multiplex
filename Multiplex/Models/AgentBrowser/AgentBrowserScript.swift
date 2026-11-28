@@ -45,6 +45,12 @@ enum AgentBrowserScript {
     /// Bodies for the agent's own `eval`, in the PAGE world (where the app's
     /// globals live). Tried as an expression first, then as statements, so
     /// both `document.title` and `const a = 1; return a + 1` work.
+    ///
+    /// Each body catches what the code throws and answers `{ thrown }`, so
+    /// the only exception WebKit reports is a body that did not compile —
+    /// the one case where nothing ran and the next body may be tried. A
+    /// `SyntaxError` thrown at RUN time (`JSON.parse` of an HTML error page)
+    /// used to look the same and ran the code, side effects included, twice.
     static func evalBodies(_ source: String) -> [String] {
         let finish = """
             if (__v === undefined) { return JSON.stringify({ undefined: true }); }
@@ -53,9 +59,10 @@ enum AgentBrowserScript {
             if (__s.length > \(maxAnswerChars)) { return JSON.stringify({ tooLarge: __s.length }); }
             return __s;
             """
+        let thrown = "catch (__e) { return JSON.stringify({ thrown: String(__e) }); }"
         return [
-            "const __v = await (\n\(source)\n);\n\(finish)",
-            "const __v = await (async () => {\n\(source)\n})();\n\(finish)",
+            "let __v;\ntry { __v = await (\n\(source)\n); } \(thrown)\n\(finish)",
+            "let __v;\ntry { __v = await (async () => {\n\(source)\n})(); } \(thrown)\n\(finish)",
         ]
     }
 
@@ -392,6 +399,13 @@ enum AgentBrowserScript {
             return el;
           }
 
+          // Only HTML elements have `click()`; an <svg> icon button does not.
+          function activate(el) {
+            if (typeof el.click === "function") { el.click(); return; }
+            const init = { bubbles: true, cancelable: true, composed: true, view: window };
+            el.dispatchEvent(new MouseEvent("click", init));
+          }
+
           function center(el) {
             el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
             const r = el.getBoundingClientRect();
@@ -416,7 +430,8 @@ enum AgentBrowserScript {
             if (typeof el.focus === "function") el.focus({ preventScroll: true });
             pointer("pointerup");
             el.dispatchEvent(new MouseEvent("mouseup", opts));
-            el.click();
+            if (typeof el.click === "function") el.click();
+            else el.dispatchEvent(new MouseEvent("click", opts));
             const out = { clicked: describe(el) };
             if (top && top !== el && !el.contains(top) && !top.contains(el)) out.coveredBy = describe(top);
             return out;
@@ -540,7 +555,7 @@ enum AgentBrowserScript {
                   if (el.form.requestSubmit) el.form.requestSubmit(); else el.form.submit();
                   action = "submit";
                 } else if (["A", "BUTTON", "SUMMARY"].includes(el.tagName) || roleOf(el) === "button") {
-                  el.click(); action = "click";
+                  activate(el); action = "click";
                 }
               } else if (key === "Tab") {
                 const list = focusables();

@@ -57,6 +57,9 @@ final class ViewportController: AuxiliaryPaneController {
         /// the private-network block on the device route.
         var ruleList: WKContentRuleList
         var route: Route
+        /// The forwards' admission cookies, as they are now (none on the
+        /// device route). Read again whenever the store has to be re-seeded.
+        var forwardCookies: @MainActor () -> [HTTPCookie] = { [] }
         /// Called once when the tab closes for real — forwards must not
         /// outlive a host's last agent tab.
         var onClose: @MainActor () -> Void
@@ -197,8 +200,19 @@ final class ViewportController: AuxiliaryPaneController {
     /// user's own intent, so no sheet stands between.
     @discardableResult
     func navigate(toTyped input: String) -> Bool {
-        guard let typed = ViewportOffer.fromTypedInput(input, host: host)
-        else { return false }
+        let typed: ViewportOffer?
+        switch agent?.route {
+        case nil:
+            typed = ViewportOffer.fromTypedInput(input, host: host)
+        case .host:
+            // An agent tab loads through the host: `localhost` typed here is
+            // the host's, as it is for the agent — not rewritten to the
+            // host's address, where a loopback-only dev server never answers.
+            typed = try? AgentBrowserAddressPolicy.admitViaHost(input, host: host).get()
+        case .device:
+            typed = try? AgentBrowserAddressPolicy.admit(input, host: host).get()
+        }
+        guard let typed else { return false }
         load(typed)
         return true
     }
@@ -210,6 +224,14 @@ final class ViewportController: AuxiliaryPaneController {
         currentReach = offer.reach
         currentURL = offer.url
         webView.load(URLRequest(url: offer.url))
+    }
+
+    /// Puts the forwards' admission cookies into this agent tab's store:
+    /// before its first load, and again whenever the store was wiped.
+    func installAgentCookies() async {
+        guard let agent else { return }
+        let cookies = webView.configuration.websiteDataStore.httpCookieStore
+        for cookie in agent.forwardCookies() { await cookies.setCookie(cookie) }
     }
 
     /// Swaps an agent tab's content rules (the loopback guard follows the
@@ -252,7 +274,17 @@ final class ViewportController: AuxiliaryPaneController {
             ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(),
             modifiedSince: .distantPast
         ) { [weak self] in
-            MainActor.assumeIsolated { self?.reload() }
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                guard self.agent != nil else { return self.reload() }
+                // The wipe took the forwards' admission cookie with it, for
+                // every agent tab of the host (they share the store): each
+                // forwarded port would answer 403 until a new tab opened.
+                Task { @MainActor in
+                    await self.installAgentCookies()
+                    self.reload()
+                }
+            }
         }
     }
 
@@ -299,7 +331,10 @@ final class ViewportController: AuxiliaryPaneController {
             return .allow
         }
         if let link = TerminalLink.resolve(url.absoluteString) {
-            externalLink = link
+            // The confirmation is a sheet over the whole window. A page in an
+            // agent tab sitting behind the user's terminal must not raise
+            // one: that is the interruption `AgentFocusGate` rations.
+            if agent == nil || AgentBrowserDriver.isOnScreen(webView) { externalLink = link }
         }
         return .cancel
     }
@@ -369,9 +404,15 @@ private final class ViewportWebBridge: NSObject, WKNavigationDelegate, WKUIDeleg
             guard let controller else { return decisionHandler(.cancel) }
             let url = navigationAction.request.url
             // Host route: a link or redirect to another host loopback port
-            // waits for its device-side forward, then loads.
+            // waits for its device-side forward, then loads. A frame gets
+            // one only inside a page that is itself the host's loopback: a
+            // page from elsewhere could otherwise spend the host's forwards
+            // (and the device's ports) with hidden frames. Unforwarded, the
+            // frame's load meets the loopback guard.
+            let mainFrame = navigationAction.targetFrame?.isMainFrame ?? true
+            let onLoopbackPage = webView.url.flatMap(AgentBrowserAddressPolicy.loopbackPort) != nil
             if let url, case .host(_, let forward) = controller.agent?.route,
-               AgentBrowserAddressPolicy.loopbackPort(url) != nil {
+               AgentBrowserAddressPolicy.loopbackPort(url) != nil, mainFrame || onLoopbackPage {
                 Task { @MainActor in
                     let ready = await forward(url)
                     decisionHandler(ready ? controller.policy(for: url) : .cancel)

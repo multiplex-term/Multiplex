@@ -123,7 +123,10 @@ link/path resolution, the ⌗ viewport, or the ▤ file viewer.
     are FORWARDED: a listener on the device's 127.0.0.1 (+ ::1, best
     effort) at the same port, piped to the host's `localhost:<port>`.
     `open`/`navigate` forward the URL's port; links and redirects to
-    another loopback port wait in the navigation policy for theirs; a port
+    another loopback port wait in the navigation policy for theirs (a
+    FRAME gets one only inside a page that is itself host loopback — a
+    page from elsewhere could spend the host's forwards with hidden
+    frames; unforwarded, the frame meets the loopback guard); a port
     only `fetch`ed or used by a WebSocket needs `mpx browser forward`.
     Device loopback is shared by every app, so a forward admits a
     connection only when its first request carries `__mpx_forward` — a
@@ -132,14 +135,20 @@ link/path resolution, the ⌗ viewport, or the ▤ file viewer.
     closed. ⚠ The cookie must go in through the NEW TAB's own store before
     its first load (agent tabs don't auto-load at init): set on a
     `WKWebsiteDataStore(forIdentifier:)` no web view uses yet, WebKit drops
-    it. Admission is decided at a connection's first bytes, not at accept
+    it. Clear Browsing Data wipes it with the rest, for every agent tab of
+    the host (one store): `clearBrowsingData` re-seeds it before the reload
+    (`installAgentCookies`), or every forward answers 403 until a new tab
+    opens. Admission is decided at a connection's first bytes, not at accept
     (WebKit pre-opens spare connections). Measured on iPhone: navigations, same-origin fetches, and
     WebSocket handshakes carry it; a cross-port fetch WITHOUT credentials
     does not (Fetch spec) and is refused unless the agent opens that port
     explicitly (`mpx browser forward <port> --open`: no cookie check, any
     device app can reach it while the tab lives; `tabs` marks it `(open)`;
     a plain `forward` restores the check AND closes the kept-alive
-    connections the open mode admitted). `*.localhost` is not admitted;
+    connections the open mode admitted; the mode belongs to a forward —
+    `setOpen` ignores a port that is not forwarded, and `admitIfOpen`
+    checks and records a client under one lock, or a connection could
+    outlive the mode that admitted it). `*.localhost` is not admitted;
     `https://localhost` only on an open port. `matchDomains` listing loopback
     does NOT make a device proxy it (tried). Forwards close with the
     host's last agent tab — and with an `open` that made no tab (no
@@ -147,10 +156,24 @@ link/path resolution, the ⌗ viewport, or the ▤ file viewer.
     tab is on its way. A forward left bound made the same port `port_busy`
     for another host. At most 16 per host (`AgentBrowserProxy.maxForwards`,
     `too_many_forwards`): a page can ask for one per loopback port it
-    navigates a frame to, and each is two listeners.
+    navigates a frame to, and each is two listeners. ⚠ A forward's
+    listener binds plain first and with `SO_REUSEADDR` only when nothing
+    accepts on the port (`listen(on:port:)`): a connection the forward
+    closed FIRST (a refused client, a host that closed an idle keep-alive)
+    sits in TIME_WAIT for ~30 s and fails a plain re-bind — close the last
+    tab, open the port again, `port_busy` (reproduced in the simulator).
+    `SO_REUSEADDR` alone would also bind over another app's wildcard
+    listener (measured on Darwin) and take its loopback clients.
+    While a tunnel's host side opens, the device socket is not read
+    (`autoRead` off until the splice joins): an upload that starts during
+    an SSH dial would otherwise buffer whole.
   - Loopback guard (`loopbackRuleListJSON`): every loopback URL is blocked
     except forwarded ports — otherwise a page could reach other apps'
-    servers on the device. Recompiled when forwards change and swapped
+    servers on the device — in every spelling: bare and behind userinfo
+    (`http://x@127.0.0.1/` puts text between scheme and host), `[::]`, and
+    IPv4-mapped literals (`[::ffff:7f00:1]`); a test compiles both rule
+    lists in WebKit, since one it refuses opens no tab at all.
+    Recompiled when forwards change and swapped
     into the host's open tabs; no rules → no tab (fail closed). A compile
     is a wait: `contentRules` answers only with rules for the forwards as
     they are when it returns (two ports forwarded at once used to race,
@@ -165,6 +188,14 @@ link/path resolution, the ⌗ viewport, or the ▤ file viewer.
     unless `--focus`/`show`, and `AgentFocusGate` refuses those while the
     user typed in the last 5 s and past once per 30 s per host (the
     phishing-interrupt bound). No terminal open for the host → `no_window`.
+    A granted focus also reveals the window: `WindowEntry.reveal` raised a
+    scene only through a tab's terminal, which a ⌗ tab does not have, and a
+    new tab's dock never called it (compact Shell: behind the deck). The
+    same bound covers the external-link sheet: a non-web navigation in an
+    agent tab raises it only while the tab is on screen (`policy(for:)`) —
+    it is a sheet over the whole window, and a hidden tab's pane is still
+    mounted. A typed address in an agent tab is admitted like the agent's
+    (`admitViaHost`: `localhost` stays the host's).
   - Several devices on one host each run a bridge; the socket is
     `browser-<name>-<install id>.sock` (iOS names devices generically —
     two iPads are both "iPad" — and a shared name made the newer bridge
@@ -172,7 +203,17 @@ link/path resolution, the ⌗ viewport, or the ▤ file viewer.
     `MPX_BROWSER_DEVICE` names one; a substring matching several is an
     error. Each device has its own tabs.
   - Input is synthetic DOM events (`isTrusted` false); typing prefers
-    `execCommand("insertText")`. No network interception.
+    `execCommand("insertText")`. No network interception. Only HTML
+    elements have `click()` — an `<svg>` button gets a dispatched click.
+    `eval` bodies catch what the code throws (`{thrown}`): the only
+    exception WebKit then reports is a body that did not compile, the one
+    case for the statement-body retry. A SyntaxError thrown at run time
+    (`r.json()` on an HTML error page) used to retry too, and a POST went
+    out twice.
+  - Polls end on cancellation (`AgentBrowserDriver.pause`): a cancelled
+    task's sleep returns at once, and `try?` around it turned `settle` /
+    `wait` into a main-actor spin until their deadline (the bridge's
+    `cancel`, a redial, and a revoke all cancel requests mid-load).
   - Scheduling (measured 2026-10-08, sims): an inactive tab's pane is
     `isHidden`, not unmounted, and WebKit keeps it fully live (rAF,
     timers, `takeSnapshot`); `inactiveSchedulingPolicy = .none` covers a
@@ -187,7 +228,11 @@ link/path resolution, the ⌗ viewport, or the ▤ file viewer.
     alone loses the race — request and cancel arrive in separate reads).
     Only the pong answering the ping in flight, back within 2 s, teaches
     the clock (a pong queued through a suspension would make every stale
-    request look fresh); the clock resets per bridge process.
+    request look fresh); the clock resets per bridge process. A session
+    that never says hello ends after `helloDeadline` (45 s from the dial):
+    only the connect has a deadline of its own, pings start at the hello,
+    and a channel that opened onto a stalled shell sat in `.connecting`
+    for good.
   - The host is untrusted input: wire integers go through `wireInteger`
     (finite, whole, 0…2^53 — an unchecked `Double`→`Int` traps the app);
     8 requests in flight per link, 6 agent tabs per host (counted again

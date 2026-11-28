@@ -1335,8 +1335,14 @@ final class TerminalWindowViewController: UIViewController,
                 noteActiveSessionOpened()
                 if let shell = self.shell {
                     shell.revealTab(tabID)
-                } else {
-                    self.workspace.controller(for: tabID)?.revealWindow()
+                } else if let terminal = self.workspace.controller(for: tabID) {
+                    terminal.revealWindow()
+                } else if let scene = self.view.window?.windowScene {
+                    // An auxiliary tab (an agent's ⌗ tab under `show`) has
+                    // no terminal to bring its window forward with.
+                    UIApplication.shared.activateSceneSession(
+                        for: UISceneSessionActivationRequest(session: scene.session)
+                    )
                 }
             },
             surrender: { [weak self] in

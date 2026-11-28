@@ -37,6 +37,7 @@ final class AgentBrowserLink {
     private var session: Task<Void, Never>?
     private var pinger: Task<Void, Never>?
     private var retry: Task<Void, Never>?
+    private var helloTimer: Task<Void, Never>?
     private var backoff = ConnectRetryBackoff()
     /// Bumped per session so a late callback from a dead one is ignored.
     private var generation = 0
@@ -55,6 +56,12 @@ final class AgentBrowserLink {
 
     private static let log = Logger.agentBrowser
     private static let pingInterval: Duration = .seconds(20)
+    /// From the dial to the bridge's hello. Only the connect itself has a
+    /// deadline; a channel that opens and then says nothing (an rc file
+    /// waiting on input, a stalled shell) would otherwise sit in
+    /// `.connecting` for good — pings start at the hello, and nothing else
+    /// ends a session that never got there.
+    static let helloDeadline: Duration = .seconds(45)
     /// A host can ask for at most this much at once; more is refused, not
     /// queued.
     static let maxInFlight = 8
@@ -156,6 +163,13 @@ final class AgentBrowserLink {
         let (lines, sink) = AsyncStream<Event>.makeStream(
             bufferingPolicy: .bufferingOldest(Self.maxPendingReads)
         )
+        helloTimer?.cancel()
+        helloTimer = Task { [weak self] in
+            try? await Task.sleep(for: Self.helloDeadline)
+            guard let self, !Task.isCancelled, self.generation == generation, self.state == .connecting
+            else { return }
+            self.sessionEnded(detail: "the bridge did not start", stderr: "")
+        }
         let overflow = OverflowLatch()
         let push: @Sendable (Event) -> Void = { event in
             if case .dropped = sink.yield(event) { overflow.trip() }
@@ -347,6 +361,8 @@ final class AgentBrowserLink {
         session = nil
         pinger?.cancel()
         pinger = nil
+        helloTimer?.cancel()
+        helloTimer = nil
         outstandingPing = nil
         inFlight.values.forEach { $0.cancel() }
         inFlight.removeAll()

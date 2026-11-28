@@ -178,19 +178,22 @@ final class AgentBrowserProxy: @unchecked Sendable {
     /// Forwarded ports that admit any device client.
     var openForwardedPorts: [Int] { lock.withLock { openPorts.intersection(forwards.keys).sorted() } }
 
-    /// Whether `port` skips the cookie check — read per connection, so a
-    /// change applies to the next one.
-    func isOpen(_ port: Int) -> Bool { lock.withLock { openPorts.contains(port) } }
-
+    /// Sets whether `port` skips the cookie check — read per connection, so
+    /// a change applies to the next one. Only a port that is forwarded can
+    /// be opened: the mode belongs to the forward and goes with it, so a
+    /// request that lost its forward meanwhile (the last tab closed) must
+    /// not leave the port open for whoever forwards it next.
     func setOpen(_ port: Int, _ open: Bool) {
-        let ended = lock.withLock { () -> [Channel] in
+        let (ended, applied) = lock.withLock { () -> ([Channel], Bool) in
             if open {
+                guard !stopped, forwards[port] != nil else { return ([], false) }
                 openPorts.insert(port)
-                return []
+                return ([], true)
             }
             openPorts.remove(port)
-            return openAdmitted.removeValue(forKey: port).map { Array($0.values) } ?? []
+            return (openAdmitted.removeValue(forKey: port).map { Array($0.values) } ?? [], true)
         }
+        guard applied else { return }
         // Kept-alive tunnels admitted while open would otherwise outlive it.
         ended.forEach { $0.close(promise: nil) }
         let mode = open ? "OPEN to every app on the device" : "cookie-checked"
@@ -205,13 +208,16 @@ final class AgentBrowserProxy: @unchecked Sendable {
             if let pending = binding[port] { return pending }
             guard !stopped else { throw CancellationError() }
             guard forwards.count + binding.count < Self.maxForwards else { throw TooManyForwards() }
-            let task = Task { try await self.bindForward(port: port) }
+            // The bind clears its own entry. Cleared by whoever awaited it,
+            // a late awaiter could erase the entry of a newer bind.
+            let task = Task {
+                defer { self.lock.withLock { self.binding[port] = nil } }
+                try await self.bindForward(port: port)
+            }
             binding[port] = task
             return task
         }
-        guard let task else { return }
-        defer { lock.withLock { binding[port] = nil } }
-        try await task.value
+        try await task?.value
     }
 
     private func bindForward(port: Int) async throws {
@@ -219,19 +225,10 @@ final class AgentBrowserProxy: @unchecked Sendable {
         // IPv4 is required; ::1 is best effort (WebKit may try it first for
         // `localhost`, and falls back to 127.0.0.1 when it is refused).
         for address in ["127.0.0.1", "::1"] {
-            do {
-                let listener = try await ServerBootstrap(group: MultiThreadedEventLoopGroup.singleton)
-                    .childChannelInitializer { [weak self] child in
-                        guard let self else { return child.close() }
-                        return child.pipeline.addHandler(HeadHandler(proxy: self, target: ("localhost", port)))
-                    }
-                    .bind(host: address, port: port)
-                    .get()
+            if let listener = await listen(on: address, port: port) {
                 listeners.append(listener)
-            } catch where address == "127.0.0.1" {
+            } else if address == "127.0.0.1" {
                 throw PortBusy()
-            } catch {
-                continue
             }
         }
         // A stop during the bind has already closed every forward it knew.
@@ -247,6 +244,38 @@ final class AgentBrowserProxy: @unchecked Sendable {
         Self.log.info("host route: device localhost:\(port, privacy: .public) → host localhost:\(port, privacy: .public)")
     }
 
+    /// One forward listener, or nil when the address is taken.
+    ///
+    /// A plain bind also fails while a connection this forward closed FIRST
+    /// still sits in TIME_WAIT (a refused client, a host that closed an idle
+    /// keep-alive): for half a minute after a tab closed, reopening its port
+    /// answered `port_busy`. `SO_REUSEADDR` binds through that — but alone it
+    /// would also bind over another app's wildcard listener and take its
+    /// loopback clients. So it is the second try, and only when nothing
+    /// accepts on the port.
+    private func listen(on address: String, port: Int) async -> Channel? {
+        func bind(reusingAddress: Bool) async -> Channel? {
+            try? await ServerBootstrap(group: MultiThreadedEventLoopGroup.singleton)
+                .serverChannelOption(ChannelOptions.socketOption(.so_reuseaddr), value: reusingAddress ? 1 : 0)
+                .childChannelInitializer { [weak self] child in
+                    guard let self else { return child.close() }
+                    return child.pipeline.addHandler(HeadHandler(proxy: self, target: ("localhost", port)))
+                }
+                .bind(host: address, port: port)
+                .get()
+        }
+        if let listener = await bind(reusingAddress: false) { return listener }
+        let probe = try? await ClientBootstrap(group: MultiThreadedEventLoopGroup.singleton)
+            .connectTimeout(.milliseconds(500))
+            .connect(host: address, port: port)
+            .get()
+        if let probe {
+            probe.close(promise: nil)
+            return nil
+        }
+        return await bind(reusingAddress: true)
+    }
+
     /// Closes every forward (the host has no agent tabs left), and every
     /// connection an open port admitted.
     func stopForwards() {
@@ -257,14 +286,22 @@ final class AgentBrowserProxy: @unchecked Sendable {
         channels.forEach { $0.close(promise: nil) }
     }
 
-    /// Records a connection admitted only because `port` is open; it is
-    /// forgotten when it closes.
-    fileprivate func admittedWhileOpen(_ channel: Channel, port: Int) {
+    /// Admits `channel` as a client of an OPEN port and records it (it is
+    /// forgotten when it closes) — in one step. Checked and recorded apart,
+    /// a `forward` without `--open`, or the last tab closing, could fall in
+    /// between, and the connection would outlive the mode that admitted it.
+    fileprivate func admitIfOpen(_ channel: Channel, port: Int) -> Bool {
         let key = ObjectIdentifier(channel)
-        lock.withLock { openAdmitted[port, default: [:]][key] = channel }
+        let admitted = lock.withLock { () -> Bool in
+            guard openPorts.contains(port), forwards[port] != nil else { return false }
+            openAdmitted[port, default: [:]][key] = channel
+            return true
+        }
+        guard admitted else { return false }
         channel.closeFuture.whenComplete { [weak self] _ in
             self?.lock.withLock { _ = self?.openAdmitted[port]?.removeValue(forKey: key) }
         }
+        return true
     }
 
     // MARK: SSH
@@ -280,8 +317,15 @@ final class AgentBrowserProxy: @unchecked Sendable {
             let task = Task {
                 let secrets = await HostSecrets.loadOffMain(for: host)
                 let dialled = SSHConnection(host: host, secrets: secrets)
-                // Citadel connects can black-hole and ignore cancellation.
-                try await deadlined(seconds: HostTest.connectDeadline) { try await dialled.connect() }
+                do {
+                    // Citadel connects can black-hole and ignore cancellation.
+                    try await deadlined(seconds: HostTest.connectDeadline) { try await dialled.connect() }
+                } catch {
+                    // Abandoned on the deadline, the connect can still land
+                    // later; closed, that late client shuts itself down.
+                    await dialled.close()
+                    throw error
+                }
                 return dialled
             }
             connecting = task
@@ -326,7 +370,14 @@ final class AgentBrowserProxy: @unchecked Sendable {
         } catch {
             let refused = (error as? NIOSSHError)?.type == .channelSetupRejected
             guard !fresh, !refused, !(error is CancellationError) else { throw error }
-            lock.withLock { if connection === link { connection = nil } }
+            // Retiring it is an epoch too: a caller still waiting on the
+            // dial that produced `link` must not adopt it again.
+            lock.withLock {
+                if connection === link {
+                    connection = nil
+                    epoch &+= 1
+                }
+            }
             Task { await link.close() }
             return try await ssh().connection.openDirectTCPIP(host: target, port: port, initialize: initialize)
         }
@@ -344,6 +395,8 @@ private final class HeadHandler: ChannelInboundHandler, RemovableChannelHandler,
     private let target: (host: String, port: Int)?
     private var buffered = Data()
     private var decided = false
+    /// Answered and closing: whatever else arrives is dropped.
+    private var refused = false
 
     init(proxy: AgentBrowserProxy, target: (host: String, port: Int)? = nil) {
         self.proxy = proxy
@@ -351,6 +404,7 @@ private final class HeadHandler: ChannelInboundHandler, RemovableChannelHandler,
     }
 
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
+        guard !refused else { return }
         var chunk = unwrapInboundIn(data)
         buffered.append(contentsOf: chunk.readBytes(length: chunk.readableBytes) ?? [])
         guard !decided else { return }
@@ -379,6 +433,8 @@ private final class HeadHandler: ChannelInboundHandler, RemovableChannelHandler,
     /// answer to give) then close.
     private func refuse(_ local: Channel, _ reply: Data?) {
         decided = true
+        refused = true
+        buffered = Data()
         guard let reply else { return local.close(promise: nil) }
         local.writeAndFlush(ByteBuffer(bytes: reply)).whenComplete { _ in local.close(promise: nil) }
     }
@@ -389,9 +445,8 @@ private final class HeadHandler: ChannelInboundHandler, RemovableChannelHandler,
     /// at accept: WebKit pre-opens spare connections, and one accepted
     /// before `--open` must follow the mode in force when it is used.
     private func admitForward(_ local: Channel, to target: (host: String, port: Int)) {
-        if proxy.isOpen(target.port) {
+        if proxy.admitIfOpen(local, port: target.port) {
             decided = true
-            proxy.admittedWhileOpen(local, port: target.port)
             return tunnel(local, to: target.host, port: target.port, reply: nil, headLength: 0)
         }
         switch AgentProxyHead.forwardVerdict(buffered, secret: proxy.forwardSecret) {
@@ -418,6 +473,10 @@ private final class HeadHandler: ChannelInboundHandler, RemovableChannelHandler,
         headLength: Int
     ) {
         let started = ContinuousClock.now
+        // Decided: stop reading until the splice can pass bytes on. Left
+        // reading, an upload that starts while the host side opens (an SSH
+        // dial can take seconds) would pile up here whole.
+        _ = local.setOption(ChannelOptions.autoRead, value: false)
         Task { [proxy] in
             let remote: Channel
             do {
@@ -434,6 +493,9 @@ private final class HeadHandler: ChannelInboundHandler, RemovableChannelHandler,
             let milliseconds = Int((ContinuousClock.now - started) / .milliseconds(1))
             AgentBrowserProxy.log.debug("host route: \(host, privacy: .private):\(port, privacy: .public) open in \(milliseconds, privacy: .public) ms")
             local.eventLoop.execute {
+                // The device side gave up while the host side opened: nothing
+                // is left to carry, and what it had sent must not go out now.
+                guard local.isActive else { return remote.close(promise: nil) }
                 // Anything sent after the head (rare for CONNECT) goes first.
                 let rest = Data(self.buffered.dropFirst(headLength))
                 self.buffered = Data()
@@ -448,9 +510,13 @@ private final class HeadHandler: ChannelInboundHandler, RemovableChannelHandler,
                 _ = local.setOption(ChannelOptions.writeBufferWaterMark, value: watermark)
                 let (fromDevice, fromHost) = AgentProxySplice.pair(local, remote)
                 _ = local.pipeline.addHandler(fromDevice)
-                _ = remote.pipeline.addHandler(fromHost)
+                // The host side lives on another loop and can end before its
+                // splice joins; its end then fired into nothing.
+                remote.pipeline.addHandler(fromHost).whenFailure { _ in local.close(promise: nil) }
                 if !rest.isEmpty { remote.writeAndFlush(ByteBuffer(bytes: rest), promise: nil) }
                 if let reply { local.writeAndFlush(ByteBuffer(bytes: reply), promise: nil) }
+                // The splice gates reads from here.
+                _ = local.setOption(ChannelOptions.autoRead, value: true)
             }
         }
     }

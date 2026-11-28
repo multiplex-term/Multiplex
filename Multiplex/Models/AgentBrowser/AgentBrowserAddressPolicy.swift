@@ -128,9 +128,18 @@ enum AgentBrowserAddressPolicy {
         let anyScheme = "^[a-z][a-z0-9+.-]*://"
         let loopbackHosts = [
             #"localhost"#, #"127\.[0-9.]+"#, #"\[::1\]"#, #"[^/:]*\.localhost"#, #"0\.0\.0\.0"#,
+            // The unspecified address connects to loopback, and an
+            // IPv4-mapped literal names its IPv4 payload (the URL parser
+            // spells `[::ffff:127.0.0.1]` as `[::ffff:7f00:1]`).
+            #"\[::\]"#, #"\[::ffff:[0-9a-f:.]+\]"#,
         ]
-        var rules: [[String: Any]] = loopbackHosts.map {
-            ["trigger": ["url-filter": anyScheme + $0 + "\\.?[:/]"], "action": ["type": "block"]]
+        // Twice: bare, and behind userinfo (`http://x@127.0.0.1:9000/`),
+        // which puts text between the scheme and the host. No forward's
+        // allow rule below matches the userinfo form, so it stays blocked.
+        var rules: [[String: Any]] = ["", "[^/]*@"].flatMap { userinfo in
+            loopbackHosts.map {
+                ["trigger": ["url-filter": anyScheme + userinfo + $0 + "\\.?[:/]"], "action": ["type": "block"]]
+            }
         }
         // Only the spellings a forward listens on (127.0.0.1 and ::1, which
         // `localhost` and `*.localhost` resolve to).

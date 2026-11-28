@@ -254,6 +254,7 @@ final class AgentBrowserService {
             case .failure(let error): return .failure(error)
             case .success(let offer):
                 if let error = await forwardIfLoopback(offer.url, hostID: host.id) { return .failure(error) }
+                if let error = gone(tab) { return .failure(error) }
                 controller.load(offer)
                 await AgentBrowserDriver.settle(controller)
                 return pageResult(tab)
@@ -317,7 +318,9 @@ final class AgentBrowserService {
         let text = params["text"]?.stringValue
         let selector = params["selector"]?.stringValue
         // Bounded both ways before any arithmetic: the value is the host's.
-        let timeoutMs = Int(params["timeoutMs"]?.wireInteger.map { min($0, 300_000) } ?? 15_000)
+        // The ceiling is the bridge's own (`MAX_TIMEOUT`, 600 s): a lower
+        // one here ended a long wait before the time its agent asked for.
+        let timeoutMs = Int(params["timeoutMs"]?.wireInteger.map { min($0, 600_000) } ?? 15_000)
         let started = ContinuousClock.now
         let deadline = started + .milliseconds(max(timeoutMs - 500, 0))
         let probe: JSONValue = .object([
@@ -343,7 +346,11 @@ final class AgentBrowserService {
                     .compactMap { $0 }.joined(separator: " and ")
                 return .failure(.timeout("\(what.isEmpty ? "The page load" : what) did not appear in time."))
             }
-            try? await Task.sleep(for: .milliseconds(200))
+            // Cancelled (the agent gave up, the link went): stop polling —
+            // see `settle` for what a swallowed cancellation does here.
+            guard await AgentBrowserDriver.pause(.milliseconds(200)) else {
+                return .failure(.timeout("The wait was cancelled."))
+            }
         }
     }
 
@@ -357,9 +364,10 @@ final class AgentBrowserService {
         case .success(let admitted): offer = admitted
         }
         let focus = params["focus"]?.boolValue ?? false
-        if params["newTab"]?.boolValue != true,
-           let existing = target(host.id, named: params["tab"]?.stringValue) {
+        let named = params["tab"]?.stringValue
+        if params["newTab"]?.boolValue != true, let existing = target(host.id, named: named) {
             if let error = await forwardIfLoopback(offer.url, hostID: host.id) { return .failure(error) }
+            if let error = gone(existing) { return .failure(error) }
             existing.controller.load(offer)
             hosts[host.id]?.lastUsed = existing.handle
             let verdict = focus ? requestFocus(host.id) : nil
@@ -367,6 +375,9 @@ final class AgentBrowserService {
             await AgentBrowserDriver.settle(existing.controller)
             return pageResult(existing, focus: verdict)
         }
+        // `--tab t9` names a tab to load into; opening another one instead
+        // would leave the agent driving a tab it did not ask for.
+        if params["newTab"]?.boolValue != true, let named { return .failure(.unknownTab(named)) }
 
         let session = params["session"].flatMap { value -> SessionKey? in
             guard let name = value["name"]?.stringValue, !name.isEmpty else { return nil }
@@ -425,24 +436,29 @@ final class AgentBrowserService {
             tabID: tabID,
             offer: offer,
             host: host,
-            agent: .init(handle: handle, ruleList: rules, route: route) { [weak self] in
-                self?.tabClosed(tabID, hostID: hostID)
-            }
+            agent: .init(
+                handle: handle,
+                ruleList: rules,
+                route: route,
+                forwardCookies: { [weak self] in self?.hosts[hostID]?.proxy?.forwardCookies ?? [] },
+                onClose: { [weak self] in self?.tabClosed(tabID, hostID: hostID) }
+            )
         )
         // Registered BEFORE the route sees the tab — the auxiliary rule.
         workspace.adoptAuxiliary(controller, tabID: tabID)
         let verdict = focus ? requestFocus(host.id) : nil
         dock.entry.dock(tabRoute, dock.anchorTabID, verdict == .allow)
+        // Docking makes the tab the window's active one; the window itself
+        // may be behind another, or behind the deck in the one-window Shell.
+        if verdict == .allow { dock.entry.reveal(tabID) }
         let tab = AgentTab(handle: handle, hostID: host.id, tabID: tabID, controller: controller)
         hosts[host.id]?.tabs.append(tab)
         hosts[host.id]?.lastUsed = handle
         Self.log.info("agent tab \(handle, privacy: .public) opened on \(host.name, privacy: .private)")
         // The forwards' cookie goes in through THIS tab's store: set on a
         // store no web view uses yet, WebKit drops it (measured on device).
-        if let proxy = hosts[host.id]?.proxy {
-            let cookies = controller.webView.configuration.websiteDataStore.httpCookieStore
-            for cookie in proxy.forwardCookies { await cookies.setCookie(cookie) }
-        }
+        await controller.installAgentCookies()
+        if let error = gone(tab) { return .failure(error) }
         controller.load(offer)
         await AgentBrowserDriver.settle(controller)
         return pageResult(tab, focus: verdict)
@@ -463,6 +479,16 @@ final class AgentBrowserService {
 
     private func tabs(of hostID: UUID) -> [AgentTab] {
         hosts[hostID]?.tabs ?? []
+    }
+
+    /// Why `tab` can no longer be driven, if it cannot: asked after each
+    /// wait that precedes a load into it. The user can switch the host off
+    /// or close the tab meanwhile, and a closed tab's web view would still
+    /// take the load, unseen and with its navigation gate gone.
+    private func gone(_ tab: AgentTab) -> AgentBrowserError? {
+        guard !Task.isCancelled, authorizedHost(tab.hostID) != nil else { return Self.revoked }
+        guard tabs(of: tab.hostID).contains(where: { $0.tabID == tab.tabID }) else { return .unknownTab(tab.handle) }
+        return nil
     }
 
     private func target(_ hostID: UUID, named: String?) -> AgentTab? {
@@ -535,6 +561,9 @@ final class AgentBrowserService {
         guard let host = store.host(id: hostID), let rules = await contentRules(for: host) else {
             return .init(code: "unavailable", message: "Multiplex could not update the tab's network rules.")
         }
+        // The compile was a wait as well.
+        guard !Task.isCancelled, authorizedHost(hostID) != nil else { return Self.revoked }
+        guard proxy.forwardedPorts.contains(port) else { return .noTab() }
         tabs(of: hostID).forEach { $0.controller.applyAgentRuleList(rules) }
         return nil
     }

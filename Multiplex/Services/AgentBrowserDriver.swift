@@ -55,6 +55,9 @@ enum AgentBrowserDriver {
                 guard let text = raw as? String, let answer = JSONValue.parse(text) else {
                     return .success(.object(["value": .null]))
                 }
+                // The agent's code ran and threw: that is the answer, never
+                // a reason to run it again as statements.
+                if let thrown = answer["thrown"]?.stringValue { return .failure(.script(thrown)) }
                 if answer["undefined"] != nil { return .success(.object([:])) }
                 if let size = answer["tooLarge"]?.wireInteger {
                     return .failure(.init(
@@ -65,8 +68,9 @@ enum AgentBrowserDriver {
                 return .success(.object(["value": answer["value"] ?? .null]))
             } catch {
                 lastError = message(of: error)
-                // Only a parse failure earns the statement-body retry; a
-                // thrown exception is the answer.
+                // The bodies catch what the code throws, so an exception
+                // here means the body did not compile and nothing ran. Only
+                // that earns the statement-body retry.
                 guard lastError.contains("SyntaxError") else { break }
             }
         }
@@ -75,12 +79,22 @@ enum AgentBrowserDriver {
 
     /// Waits for the current load to finish (or `timeout`). A just-issued
     /// load may not have flipped `isLoading` yet, hence the grace tick.
+    ///
+    /// Ends at once when the request is cancelled (its agent timed out, the
+    /// link redialled, the host was switched off). A cancelled task's sleep
+    /// throws without waiting — swallowed, this loop would spin on the main
+    /// actor until the deadline, and `isLoading` cannot change while it does.
     static func settle(_ controller: ViewportController, timeout: Duration = .seconds(20)) async {
-        try? await Task.sleep(for: .milliseconds(150))
+        guard await pause(.milliseconds(150)) else { return }
         let deadline = ContinuousClock.now + timeout
         while controller.webView.isLoading, ContinuousClock.now < deadline {
-            try? await Task.sleep(for: .milliseconds(100))
+            guard await pause(.milliseconds(100)) else { return }
         }
+    }
+
+    /// Sleeps; false when the task was cancelled instead.
+    static func pause(_ duration: Duration) async -> Bool {
+        (try? await Task.sleep(for: duration)) != nil
     }
 
     /// Whether the user can see the tab: in a window, no hidden ancestor
