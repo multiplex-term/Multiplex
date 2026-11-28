@@ -209,6 +209,31 @@ final class BidiRenderTests {
         #expect(abs(invalidated.maxY - view.bounds.maxY) < 0.5)
     }
 
+    @Test func lineFeedRedrawsBothPartsOfASplitArabicParagraph() throws {
+        let view = InvalidationTrackingView(
+            frame: NSRect(x: 0, y: 0, width: 400, height: 200))
+        let cellWidth = view.cellDimension.width
+        let cellHeight = view.cellDimension.height
+        view.setFrameSize(NSSize(width: cellWidth * 10 + 1, height: cellHeight * 5 + 1))
+        let cols = view.withTerminal { $0.cols }
+        view.feed(text: String(repeating: "ب", count: cols + 2))
+        view.feed(text: "\u{1b}[H")
+        view.frameTick()
+
+        let before = segmentText(view, row: 0).trimmingCharacters(in: .whitespaces)
+        #expect(before.first == "\u{FE92}")
+        view.invalidatedRects.removeAll()
+
+        view.feed(text: "\n")
+        view.frameTick()
+
+        let after = segmentText(view, row: 0).trimmingCharacters(in: .whitespaces)
+        #expect(after.first == "\u{FE90}")
+        let invalidated = try #require(view.invalidatedRects.last)
+        #expect(abs(invalidated.maxY - view.bounds.maxY) < 0.5)
+        #expect(invalidated.height >= 2 * cellHeight)
+    }
+
     @Test func caretIsDrawnAtVisualColumn() throws {
         // After feeding مرحبا (5 cells) the logical cursor is at column 5.
         // In the RTL paragraph the text occupies the right edge, so the caret
@@ -290,6 +315,37 @@ final class BidiRenderTests {
         view.withTerminal { $0.bidiArrowKeySwap = false }
         view.sendKeyLeft()
         #expect(delegate.sent == EscapeSequences.moveLeftNormal)
+    }
+
+    @Test func optionArrowsFollowTheBidiSwap() throws {
+        let view = makeView(feed: "אב")
+        let delegate = CapturingDelegate()
+        view.terminalDelegate = delegate
+        let left = try #require(NSEvent.keyEvent(
+            with: .keyDown, location: .zero,
+            modifierFlags: [.option, .function, .numericPad], timestamp: 0,
+            windowNumber: 0, context: nil, characters: "\u{F702}",
+            charactersIgnoringModifiers: "\u{F702}", isARepeat: false, keyCode: 123))
+        let right = try #require(NSEvent.keyEvent(
+            with: .keyDown, location: .zero,
+            modifierFlags: [.option, .function, .numericPad], timestamp: 0,
+            windowNumber: 0, context: nil, characters: "\u{F703}",
+            charactersIgnoringModifiers: "\u{F703}", isARepeat: false, keyCode: 124))
+
+        for optionAsMeta in [false, true] {
+            view.optionAsMetaKey = optionAsMeta
+            delegate.sent.removeAll()
+            view.keyDown(with: left)
+            view.keyDown(with: right)
+            #expect(delegate.sent == EscapeSequences.emacsBack + EscapeSequences.emacsForward)
+
+            view.withTerminal { $0.bidiArrowKeySwap = true }
+            delegate.sent.removeAll()
+            view.keyDown(with: left)
+            view.keyDown(with: right)
+            #expect(delegate.sent == EscapeSequences.emacsForward + EscapeSequences.emacsBack)
+            view.withTerminal { $0.bidiArrowKeySwap = false }
+        }
     }
 
     @Test func forcedDirectionsRenderAllRows() throws {

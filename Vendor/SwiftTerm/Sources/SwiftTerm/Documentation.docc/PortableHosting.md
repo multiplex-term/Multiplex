@@ -9,6 +9,9 @@ scrollback while SwiftTerm continues to own terminal parsing and state. They
 are useful for a custom native renderer and are the core APIs behind the WASM
 browser package.
 
+To show a terminal that runs in another process or on another machine with
+the renderer of `TerminalView`, see <doc:ExternalRendering>.
+
 The host has two directions of data flow:
 
 1. Feed output received from a process or remote peer into the terminal.
@@ -48,6 +51,15 @@ buffer lines or cells. A `.full` snapshot includes the complete viewport. A
 ``TerminalRenderSnapshot/lines`` when it is not clean. The normal dirty range
 uses viewport rows, while the scroll-invariant range uses buffer rows.
 
+For content inspection that should not mutate damage state, use
+``Terminal/contentSnapshot(region:buffer:)`` instead. It can copy the whole
+retained buffer, the viewport, a bounded history window or a row range, from
+the normal or the alternate buffer, with scroll-invariant row numbers and the
+palette in force, but intentionally omits renderer-only details such as images
+and hyperlinks.
+It takes ``Terminal/terminalLock`` itself, so do not call it from code that
+already holds that lock or from a terminal delegate callback.
+
 For a direct native host, serialize its feed, input, render, and damage-clear
 operations with the terminal lock (or a single host executor). Do not clear
 damage before a frame is successfully drawn. If drawing is asynchronous, clear
@@ -77,7 +89,7 @@ exports copied graphics snapshots; see the repository's
 
 ## Keyboard, paste, and pointer input
 
-Use ``Terminal/sendHostKey(key:code:modifiers:eventType:text:shiftedKey:baseLayoutKey:)``
+Use ``Terminal/sendHostKey(key:code:modifiers:eventType:text:shiftedKey:baseLayoutKey:composing:backspaceSendsControlH:)``
 for physical keys, ``Terminal/sendHostText(_:)`` for committed text (including
 IME results), and ``Terminal/sendHostTextPaste(_:allowUnsafe:)`` for paste.
 Committed text follows the active keyboard modes; paste separately follows the
@@ -129,7 +141,7 @@ for build instructions, lifecycle rules, and a Canvas example.
 
 ### Host Input
 
-- ``Terminal/sendHostKey(key:code:modifiers:eventType:text:shiftedKey:baseLayoutKey:)``
+- ``Terminal/sendHostKey(key:code:modifiers:eventType:text:shiftedKey:baseLayoutKey:composing:backspaceSendsControlH:)``
 - ``Terminal/sendHostText(_:)``
 - ``Terminal/sendHostTextPaste(_:allowUnsafe:)``
 - ``Terminal/sendHostMouse(action:button:modifiers:col:row:pixelX:pixelY:)``

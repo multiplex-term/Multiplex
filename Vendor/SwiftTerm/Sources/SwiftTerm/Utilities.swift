@@ -18,53 +18,29 @@ struct UnicodeUtil {
         case extend
     }
     /**
-     * Returns the number of expected bytes on a well-formed UTF8 string based on the first byte of the sequence
+     * Returns the number of expected bytes on a well-formed UTF8 string based on the first byte of the sequence,
+     * or -1 for a byte that cannot start a sequence (a continuation byte, an overlong lead byte C0 or C1,
+     * or a lead byte above F4).
      */
+    @inline(__always)
     static func expectedSizeFromFirstByte (_ b: UInt8) -> Int
     {
-        let x = first [Int (b)];
-
-        // Invalid unicode codepoints, just return 1 for byte, and let higher level pass to print
-        if x == xx {
-            return -1
-        }
-        if x == a1 {
+        // Comparisons, not a table: a static array costs an access check and
+        // a bounds check for each character on the print path.
+        if b < 0x80 {
             return 1
         }
-        return Int(x & 0xf)
+        if b < 0xC2 {
+            return -1
+        }
+        if b < 0xE0 {
+            return 2
+        }
+        if b < 0xF0 {
+            return 3
+        }
+        return b < 0xF5 ? 4 : -1
     }
-
-    static let xx: UInt8 = 0xF1 // invalid: size 1
-    static let a1: UInt8 = 0xF0 // a1CII: size 1
-    static let s1: UInt8 = 0x02 // accept 0, size 2
-    static let s2: UInt8 = 0x13 // accept 1, size 3
-    static let s3: UInt8 = 0x03 // accept 0, size 3
-    static let s4: UInt8 = 0x23 // accept 2, size 3
-    static let s5: UInt8 = 0x34 // accept 3, size 4
-    static let s6: UInt8 = 0x04 // accept 0, size 4
-    static let s7: UInt8 = 0x44 // accept 4, size 4
-
-    private static let first : [UInt8] =  [
-        //   1   2   3   4   5   6   7   8   9   A   B   C   D   E   F
-        a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, // 0x00-0x0F
-        a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, // 0x10-0x1F
-        a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, // 0x20-0x2F
-        a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, // 0x30-0x3F
-        a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, // 0x40-0x4F
-        a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, // 0x50-0x5F
-        a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, // 0x60-0x6F
-        a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, a1, // 0x70-0x7F
-
-        //   1   2   3   4   5   6   7   8   9   A   B   C   D   E   F
-        xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, // 0x80-0x8F
-        xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, // 0x90-0x9F
-        xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, // 0xA0-0xAF
-        xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, // 0xB0-0xBF
-        xx, xx, s1, s1, s1, s1, s1, s1, s1, s1, s1, s1, s1, s1, s1, s1, // 0xC0-0xCF
-        s1, s1, s1, s1, s1, s1, s1, s1, s1, s1, s1, s1, s1, s1, s1, s1, // 0xD0-0xDF
-        s2, s3, s3, s3, s3, s3, s3, s3, s3, s3, s3, s3, s3, s4, s3, s3, // 0xE0-0xEF
-        s5, s6, s6, s6, s7, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, // 0xF0-0xFF
-    ]
     
     struct LH {
         var lo: UInt32
@@ -311,12 +287,13 @@ struct UnicodeUtil {
     /// Mongolian free variation selectors, VS1-16, and VS17-256.
     @inline(__always)
     static func isVariationSelector (_ value: UInt32) -> Bool {
-        switch value {
-        case 0xFE00...0xFE0F, 0x180B...0x180D, 0x180F, 0xE0100...0xE01EF:
-            return true
-        default:
+        // Plain comparisons: range patterns call the generic `~=` on the print path.
+        if value < 0x180B {
             return false
         }
+        return (value >= 0xFE00 && value <= 0xFE0F)
+            || (value <= 0x180F && value != 0x180E)
+            || (value >= 0xE0100 && value <= 0xE01EF)
     }
 
     /// Same result as Unicode.Scalar.Properties.isEmojiModifier without the
@@ -514,6 +491,91 @@ struct UnicodeUtil {
         // cannot tell those apart from a mark this table has not classified,
         // so let the standard library decide.
         return incomingWidth == 0 ? .undecided : .breaks
+    }
+
+    /// Classifies the boundary between `previous` and any `incoming` scalar:
+    /// the UTS #51 emoji-modifier rule, then
+    /// ``graphemeJoinNonEmojiModifier(previous:previousProperties:incoming:incomingProperties:incomingWidth:)``.
+    ///
+    /// UTS #51 defines an emoji modifier sequence as an emoji modifier base
+    /// followed immediately by an emoji modifier. A standalone modifier must
+    /// remain visible.
+    @inline(__always)
+    static func graphemeJoin(
+        previous: UInt32, incoming: UInt32, incomingProperties: UInt8,
+        incomingWidth: Int
+    ) -> GraphemeJoin
+    {
+        if isEmojiModifier(incoming) {
+            return isEmojiModifierBase(previous) ? .joins : .breaks
+        }
+        return graphemeJoinNonEmojiModifier(
+            previous: previous,
+            previousProperties: graphemeProperties(previous),
+            incoming: incoming, incomingProperties: incomingProperties,
+            incomingWidth: incomingWidth)
+    }
+
+    /// True when the terminal makes a narrow cell wide after `incoming`
+    /// joins it: a scalar with a column width, or a spacing mark that is not
+    /// an Indic linker or a virama. The variation selectors and narrow
+    /// regional indicators have rules of their own.
+    @inline(__always)
+    static func widensJoinedCell(incoming: UInt32, properties: UInt8, width: Int) -> Bool {
+        width > 0 || (isSpacingMarkWidth(incoming) &&
+                      indicConjunctBreak(properties: properties) != .linker &&
+                      !isVirama(incoming))
+    }
+
+    /// True when the terminal makes a narrow cell wide as `incoming` joins it
+    /// after the scalar `previous`: VS16 after an emoji VS16 base, or a scalar
+    /// that ``widensJoinedCell(incoming:properties:width:)`` accepts. Narrow
+    /// regional indicators have a rule of their own.
+    static func widensJoinedCell(previous: UInt32, incoming: Unicode.Scalar) -> Bool {
+        switch incoming.value {
+        case 0xFE0F:
+            return Unicode.Scalar(previous).map { isEmojiVs16Base(rune: $0) } ?? false
+        case 0xFE0E:
+            return false
+        default:
+            return widensJoinedCell(incoming: incoming.value,
+                                    properties: graphemeProperties(incoming.value),
+                                    width: columnWidth(rune: incoming))
+        }
+    }
+
+    /// The number of columns the terminal gives `character` when it writes it
+    /// into a cell of its own, or 0 when it writes no cell for it (a zero-width
+    /// or unprintable character, or a mark with no base). This follows the
+    /// insert path of ``Terminal``, which builds the cell one scalar at a time.
+    static func columnWidth(of character: Character, regionalIndicatorWidth: RegionalIndicatorWidth) -> Int {
+        var width = 0
+        var previous: UInt32 = 0
+        for scalar in character.unicodeScalars {
+            var scalarWidth = columnWidth(rune: scalar)
+            if scalarWidth < 0 {
+                continue
+            }
+            let narrowRegionalIndicator = regionalIndicatorWidth == .narrow && isRegionalIndicator(scalar)
+            if narrowRegionalIndicator && scalarWidth == 2 {
+                scalarWidth = 1
+            }
+            if width == 0 {
+                width = scalarWidth
+            } else if scalar.value == 0xFE0F || scalar.value == 0xFE0E {
+                // The terminal drops a variation selector after a scalar that is not an emoji VS16 base.
+                guard let base = Unicode.Scalar(previous), isEmojiVs16Base(rune: base) else {
+                    continue
+                }
+                width = scalar.value == 0xFE0F ? 2 : 1
+            } else if width == 1 && (narrowRegionalIndicator || widensJoinedCell(previous: previous, incoming: scalar)) {
+                width = 2
+            }
+            if width > 0 {
+                previous = scalar.value
+            }
+        }
+        return width
     }
 
     /**

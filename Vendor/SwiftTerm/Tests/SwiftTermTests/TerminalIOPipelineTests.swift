@@ -16,6 +16,11 @@ import Darwin
 import Glibc
 #endif
 
+private enum PipelineDescriptorTestError: Error {
+    case couldNotCreateTemporaryFile(String)
+    case couldNotOpenFile(String, Int32)
+}
+
 // Serialized: these tests assert scheduling-dependent properties (delivery
 // latency, producer stalls), so they should not also compete with each other.
 // They still run in parallel with other suites, which is why the assertions
@@ -382,6 +387,241 @@ final class TerminalIOPipelineTests {
         close(pty.slave)
     }
 
+    @Test func startupFailureInvalidatesBeforeCloseAndShutdownCompletion() throws {
+        // Break caught: start() closes the primary and publishes zero workers
+        // before pipelineDidReachEOF runs. A concurrent shutdown then completes
+        // and clears the sink while invalidation is still pending.
+        let pty = try Self.makeRawPty()
+        let capture = EOFBlockingPipelineCapture()
+        let identity = try descriptorIdentity(pty.master)
+        // Open the unrelated file while the primary is live so this descriptor
+        // cannot land on the former primary number. Only the reservation
+        // returned by F_DUPFD_CLOEXEC below may be closed before teardown.
+        let unrelatedPath = try Self.makeUnrelatedTemporaryFile()
+        let unrelated = try Self.openOwnedFile(unrelatedPath)
+        let unrelatedIdentity = try descriptorIdentity(unrelated)
+        var reserved: Int32 = -1
+        var startDone: ThreadCompletion?
+        var shutdownDone: ThreadCompletion?
+        defer {
+            capture.releaseEOF()
+            if let startDone {
+                _ = startDone.wait(timeout: 2)
+            }
+            if let shutdownDone {
+                _ = shutdownDone.wait(timeout: 2)
+            }
+            if reserved >= 0 {
+                close(reserved)
+            }
+            close(unrelated)
+            close(pty.slave)
+            try? FileManager.default.removeItem(atPath: unrelatedPath)
+        }
+
+        do {
+            let pipeline = TerminalIOPipeline(
+                fd: pty.master,
+                delegate: capture,
+                prepareDescriptor: { _ in false })
+
+            let startCompletion = ThreadCompletion()
+            startDone = startCompletion
+            let startThread = Thread {
+                pipeline.start()
+                startCompletion.signal()
+            }
+            startThread.name = "swiftterm-test-startup-failure-start"
+            startThread.start()
+
+            let eofEntered = capture.waitForEOFEntry(timeout: 5)
+            #expect(eofEntered)
+            let primaryValidWhilePaused = descriptorRefersToSameOpenFile(
+                pty.master,
+                as: identity)
+            #expect(primaryValidWhilePaused)
+            let stoppedWhilePaused = pipeline.waitUntilStopped(timeout: 0.05)
+            #expect(!stoppedWhilePaused)
+            let eofCountWhilePaused = capture.eofCount
+            #expect(eofCountWhilePaused == 1)
+
+            let stopCompletion = ThreadCompletion()
+            shutdownDone = stopCompletion
+            let shutdownThread = Thread {
+                pipeline.shutdown()
+                stopCompletion.signal()
+            }
+            shutdownThread.name = "swiftterm-test-startup-failure-shutdown"
+            shutdownThread.start()
+
+            let shutdownFinishedEarly = stopCompletion.wait(timeout: 0.2)
+            #expect(!shutdownFinishedEarly)
+            let primaryStillValid = descriptorRefersToSameOpenFile(
+                pty.master,
+                as: identity)
+            #expect(primaryStillValid)
+            let eofCountAfterShutdownStarted = capture.eofCount
+            #expect(eofCountAfterShutdownStarted == 1)
+
+            capture.releaseEOF()
+            let startFinished = startCompletion.wait(timeout: 2)
+            let shutdownFinished = stopCompletion.wait(timeout: 2)
+            #expect(startFinished)
+            #expect(shutdownFinished)
+
+            let finalEOFCount = capture.eofCount
+            #expect(finalEOFCount == 1)
+            let callbackReturned = capture.waitForEOFCallbackReturn(timeout: 2)
+            #expect(callbackReturned)
+            let stopped = pipeline.waitUntilStopped(timeout: 1)
+            #expect(stopped)
+            let primaryClosed = !descriptorRefersToSameOpenFile(
+                pty.master,
+                as: identity)
+            #expect(primaryClosed)
+
+            reserved = try reserveDescriptor(at: pty.master, from: unrelated)
+            let currentReservation = try descriptorIdentity(reserved)
+            #expect(currentReservation == unrelatedIdentity)
+
+            // Repeated shutdown, drain and deferred destruction must not close
+            // the reservation that now occupies the former primary slot.
+            pipeline.shutdown()
+            let drained = pipeline.drainAvailableAndShutdown(timeout: 0.2)
+            #expect(drained)
+            pipeline.shutdown()
+            let stoppedAgain = pipeline.waitUntilStopped(timeout: 1)
+            #expect(stoppedAgain)
+            let reservationSurvived = try descriptorIdentity(reserved) == currentReservation
+            #expect(reservationSurvived)
+        }
+
+        let reservationAfterDestruction = try descriptorIdentity(reserved)
+        #expect(reservationAfterDestruction == unrelatedIdentity)
+    }
+
+    @Test func startupFailureEOFCallbackCanShutDown() throws {
+        // Break caught: start() calls the EOF callback while it still counts
+        // two workers, on a thread that is not a worker. A shutdown() from
+        // the callback then waits for itself and start() never returns.
+        let pty = try Self.makeRawPty()
+        defer { close(pty.slave) }
+        let capture = ShutdownOnEOFCapture()
+        let pipeline = TerminalIOPipeline(
+            fd: pty.master,
+            delegate: capture,
+            prepareDescriptor: { _ in false })
+        capture.pipeline = pipeline
+
+        let startDone = ThreadCompletion()
+        let startThread = Thread {
+            pipeline.start()
+            startDone.signal()
+        }
+        startThread.name = "swiftterm-test-startup-failure-shutdown-in-eof"
+        startThread.start()
+
+        let returned = startDone.wait(timeout: 5)
+        #expect(returned)
+        #expect(capture.eofCount == 1)
+        #expect(pipeline.waitUntilStopped(timeout: 1))
+    }
+
+    @Test func shutdownBeforeStartClosesOwnedPrimaryOnlyOnce() throws {
+        // Break caught: repeated shutdown or deferred destruction closes a
+        // descriptor that reused the primary's old number.
+        let pty = try Self.makeRawPty()
+        let capture = PipelineCapture()
+        let identity = try descriptorIdentity(pty.master)
+        let unrelatedPath = try Self.makeUnrelatedTemporaryFile()
+        let unrelated = try Self.openOwnedFile(unrelatedPath)
+        let unrelatedIdentity = try descriptorIdentity(unrelated)
+        var reserved: Int32 = -1
+        defer {
+            if reserved >= 0 {
+                close(reserved)
+            }
+            close(unrelated)
+            close(pty.slave)
+            try? FileManager.default.removeItem(atPath: unrelatedPath)
+        }
+
+        do {
+            let pipeline = TerminalIOPipeline(fd: pty.master, delegate: capture)
+            pipeline.shutdown()
+            pipeline.shutdown()
+            let primaryClosed = !descriptorRefersToSameOpenFile(
+                pty.master,
+                as: identity)
+            #expect(primaryClosed)
+
+            reserved = try reserveDescriptor(at: pty.master, from: unrelated)
+            let currentReservation = try descriptorIdentity(reserved)
+            #expect(currentReservation == unrelatedIdentity)
+
+            pipeline.shutdown()
+            let drained = pipeline.drainAvailableAndShutdown(timeout: 0.2)
+            #expect(drained)
+            pipeline.shutdown()
+            let stopped = pipeline.waitUntilStopped(timeout: 1)
+            #expect(stopped)
+            let reservationSurvived = try descriptorIdentity(reserved) == currentReservation
+            #expect(reservationSurvived)
+        }
+
+        let reservationAfterDestruction = try descriptorIdentity(reserved)
+        #expect(reservationAfterDestruction == unrelatedIdentity)
+        let didReachEOF = capture.didReachEOF
+        #expect(!didReachEOF)
+    }
+
+    @Test func drainBeforeStartClosesOwnedPrimaryOnlyOnce() throws {
+        // Break caught: drain/shutdown before workers start closes the primary
+        // more than once or closes a later reservation at its old number.
+        let pty = try Self.makeRawPty()
+        let capture = PipelineCapture()
+        let identity = try descriptorIdentity(pty.master)
+        let unrelatedPath = try Self.makeUnrelatedTemporaryFile()
+        let unrelated = try Self.openOwnedFile(unrelatedPath)
+        let unrelatedIdentity = try descriptorIdentity(unrelated)
+        var reserved: Int32 = -1
+        defer {
+            if reserved >= 0 {
+                close(reserved)
+            }
+            close(unrelated)
+            close(pty.slave)
+            try? FileManager.default.removeItem(atPath: unrelatedPath)
+        }
+
+        do {
+            let pipeline = TerminalIOPipeline(fd: pty.master, delegate: capture)
+            let firstDrain = pipeline.drainAvailableAndShutdown(timeout: 0.5)
+            #expect(firstDrain)
+            let primaryClosed = !descriptorRefersToSameOpenFile(
+                pty.master,
+                as: identity)
+            #expect(primaryClosed)
+
+            reserved = try reserveDescriptor(at: pty.master, from: unrelated)
+            let currentReservation = try descriptorIdentity(reserved)
+            #expect(currentReservation == unrelatedIdentity)
+
+            let secondDrain = pipeline.drainAvailableAndShutdown(timeout: 0.2)
+            #expect(secondDrain)
+            pipeline.shutdown()
+            let stopped = pipeline.waitUntilStopped(timeout: 1)
+            #expect(stopped)
+            let reservationSurvived = try descriptorIdentity(reserved) == currentReservation
+            #expect(reservationSurvived)
+        }
+
+        let reservationAfterDestruction = try descriptorIdentity(reserved)
+        #expect(reservationAfterDestruction == unrelatedIdentity)
+        let didReachEOF = capture.didReachEOF
+        #expect(!didReachEOF)
+    }
+
     @Test func interactiveTrickleIsDeliveredImmediately() throws {
         // The property: a tiny write is delivered on its own, without the
         // pipeline waiting for more input or for EOF. The slave stays open, so
@@ -399,6 +639,8 @@ final class TerminalIOPipelineTests {
         #expect(capture.waitForBytes(payload.count, timeout: 5))
         #expect(!capture.didReachEOF)
         #expect(capture.receivedData() == payload)
+        // The first read after idle never waits to coalesce with more.
+        #expect(pipeline.coalescingNaps == 0)
 
         writer.closeFd()
         #expect(capture.waitForEOF(timeout: 5))
@@ -434,6 +676,220 @@ final class TerminalIOPipelineTests {
         #expect(pipeline.waitUntilStopped(timeout: 1))
     }
 
+    /// A line-buffered program: thousands of tiny writes back to back. Each
+    /// lands as its own small read unless the gather thread coalesces them.
+    @Test func sustainedTinyWritesCoalesceIntoFewerBatches() throws {
+        let chunk = 8
+        let writes = 100_000
+        let payload = Self.printablePattern(byteCount: chunk * writes)
+        let pty = try Self.makeRawPty()
+        let capture = PipelineCapture()
+        let pipeline = TerminalIOPipeline(fd: pty.master, delegate: capture)
+        pipeline.start()
+
+        let writer = PtyWriter(fd: pty.slave, payload: payload, chunkSizes: [chunk])
+        writer.start()
+
+        #expect(capture.waitForEOF(timeout: 30))
+        #expect(writer.waitUntilDone(timeout: 1))
+        #expect(capture.receivedData() == payload)
+        // How much coalescing gathers depends on scheduling, so the count is
+        // reported rather than asserted; that it happened at all is not.
+        print("tiny writes: \(capture.deliveryCount) batches for \(writes) writes, mean \(Int(capture.meanBatchSize)) bytes, \(pipeline.coalescingNaps) naps")
+        #expect(pipeline.coalescingNaps > 0)
+        #expect(pipeline.waitUntilStopped(timeout: 1))
+    }
+
+    // MARK: When the gather thread naps
+
+    private static let streamStart: UInt64 = 1_000_000_000_000
+
+    /// A coalescer whose input has flowed for `duration`: a batch every 10 µs,
+    /// each after a 2 µs wait. Returns it at the start of the next batch.
+    private static func streaming(for duration: UInt64) -> (coalescer: TerminalIOCoalescer, now: UInt64) {
+        var coalescer = TerminalIOCoalescer()
+        var now = streamStart
+        coalescer.beginBatch(at: now, afterIdle: .max)
+        while now - streamStart < duration {
+            now += 10_000
+            coalescer.beginBatch(at: now, afterIdle: 2_000)
+        }
+        return (coalescer, now)
+    }
+
+    @Test func firstReadAfterIdleIsNeverHeld() {
+        var fresh = TerminalIOCoalescer()
+        fresh.beginBatch(at: Self.streamStart, afterIdle: .max)
+        let heldFresh = fresh.shouldNap(total: 5, now: Self.streamStart + 5_000)
+        #expect(!heldFresh)
+
+        var coalescer = Self.streaming(for: 10_000_000).coalescer
+        let now = Self.streamStart + 60_000_000
+        coalescer.beginBatch(at: now, afterIdle: 50_000_000)
+        let heldAfterIdle = coalescer.shouldNap(total: 5, now: now + 5_000)
+        #expect(!heldAfterIdle)
+    }
+
+    /// An echo, or any burst shorter than the warm-up, goes out as before.
+    @Test func aStreamNapsOnlyOnceWarm() {
+        let young = Self.streaming(for: TerminalIOCoalescer.warmupNs - 100_000)
+        var youngCoalescer = young.coalescer
+        let heldYoung = youngCoalescer.shouldNap(total: 40, now: young.now + 5_000)
+        #expect(!heldYoung)
+
+        let warm = Self.streaming(for: TerminalIOCoalescer.warmupNs)
+        var warmCoalescer = warm.coalescer
+        let heldWarm = warmCoalescer.shouldNap(total: 40, now: warm.now + 5_000)
+        #expect(heldWarm)
+    }
+
+    /// Waiting for input, not the time between batches, ends a stream: a batch
+    /// that took long to fill, as a bridged one can, leaves the stream warm.
+    @Test func onlyAnIdleWaitEndsAStream() {
+        let stream = Self.streaming(for: 5_000_000)
+        var coalescer = stream.coalescer
+        let afterSlowBatch = stream.now + 3_000_000
+        coalescer.beginBatch(at: afterSlowBatch, afterIdle: 0)
+        let heldAfterSlowBatch = coalescer.shouldNap(total: 40, now: afterSlowBatch + 5_000)
+        #expect(heldAfterSlowBatch)
+
+        let afterPause = afterSlowBatch + 2_000_000
+        coalescer.beginBatch(at: afterPause, afterIdle: TerminalIOCoalescer.idleGapNs)
+        let heldAfterPause = coalescer.shouldNap(total: 40, now: afterPause + 5_000)
+        #expect(!heldAfterPause)
+    }
+
+    @Test func aNapThatBringsNothingEndsTheBatch() {
+        let stream = Self.streaming(for: 5_000_000)
+        var coalescer = stream.coalescer
+        let now = stream.now
+        let heldEmpty = coalescer.shouldNap(total: 0, now: now + 5_000)
+        #expect(!heldEmpty)
+        let heldFirst = coalescer.shouldNap(total: 40, now: now + 5_000)
+        #expect(heldFirst)
+        let heldGrown = coalescer.shouldNap(total: 300, now: now + 30_000)
+        #expect(heldGrown)
+        let heldUnchanged = coalescer.shouldNap(total: 300, now: now + 55_000)
+        #expect(!heldUnchanged)
+
+        coalescer.beginBatch(at: now + 60_000, afterIdle: 2_000)
+        let heldNext = coalescer.shouldNap(total: 40, now: now + 70_000)
+        #expect(heldNext)
+    }
+
+    @Test func aBatchIsHeldNoLongerThanItsBound() {
+        let stream = Self.streaming(for: 5_000_000)
+        var coalescer = stream.coalescer
+        let now = stream.now
+        let hold = TerminalIOCoalescer.holdNs
+        let heldInside = coalescer.shouldNap(total: 40, now: now + hold - 100_000)
+        #expect(heldInside)
+        let heldAtBound = coalescer.shouldNap(total: 80, now: now + hold)
+        #expect(!heldAtBound)
+    }
+
+    /// In a stream of large writes a small read is the tail of one of them:
+    /// holding it back would join it to the next, so it goes out as before.
+    @Test func aSmallReadAfterABridgedBatchIsNotHeld() {
+        let stream = Self.streaming(for: 5_000_000)
+        var coalescer = stream.coalescer
+        var now = stream.now
+        coalescer.published(bridged: true)
+        coalescer.beginBatch(at: now, afterIdle: 2_000)
+        let heldTail = coalescer.shouldNap(total: 300, now: now + 5_000)
+        #expect(!heldTail)
+
+        coalescer.published(bridged: false)
+        now += 30_000
+        coalescer.beginBatch(at: now, afterIdle: 2_000)
+        let heldAfterSmall = coalescer.shouldNap(total: 40, now: now + 5_000)
+        #expect(heldAfterSmall)
+    }
+
+    /// A batch gathered by napping ends at the bridge threshold rather than
+    /// bridging; one that never napped bridges as before.
+    @Test func aNappedBatchEndsAtTheBridge() {
+        let stream = Self.streaming(for: 5_000_000)
+        var coalescer = stream.coalescer
+        #expect(!coalescer.batchNapped)
+        let held = coalescer.shouldNap(total: 900, now: stream.now + 5_000)
+        #expect(held)
+        #expect(coalescer.batchNapped)
+
+        coalescer.beginBatch(at: stream.now + 30_000, afterIdle: 2_000)
+        #expect(!coalescer.batchNapped)
+    }
+
+    /// Ends a batch whose last nap, taken at `total` bytes, brought `yield`.
+    private static func nappedBatch(
+        _ coalescer: inout TerminalIOCoalescer, at now: UInt64, total: Int = 100, yield: Int
+    ) -> Bool {
+        coalescer.beginBatch(at: now, afterIdle: 2_000)
+        let held = coalescer.shouldNap(total: total, now: now + 5_000)
+        coalescer.endNappedBatch(total: total + yield, now: now + 30_000)
+        return held
+    }
+
+    /// A writer that fills the pty within every nap, like `cat`, or a machine
+    /// too busy to wake on time, stops the stream napping for a while.
+    @Test func twoSaturatingNapsInARowBackOff() {
+        let stream = Self.streaming(for: 5_000_000)
+        var coalescer = stream.coalescer
+        var now = stream.now
+        let full = TerminalIOCoalescer.saturatingNapBytes
+        let first = Self.nappedBatch(&coalescer, at: now, yield: full)
+        now += 40_000
+        let second = Self.nappedBatch(&coalescer, at: now, yield: full)
+        #expect(first && second)
+
+        now += 40_000
+        coalescer.beginBatch(at: now, afterIdle: 2_000)
+        let heldInBackoff = coalescer.shouldNap(total: 100, now: now + 5_000)
+        #expect(!heldInBackoff)
+
+        now += TerminalIOCoalescer.backoffNs
+        coalescer.beginBatch(at: now, afterIdle: 2_000)
+        let heldAfterBackoff = coalescer.shouldNap(total: 100, now: now + 5_000)
+        #expect(heldAfterBackoff)
+    }
+
+    /// `seq` sometimes fills the pty in one nap when it is preempted; one at a
+    /// time never stops the stream napping.
+    @Test func aLoneSaturatingNapIsForgiven() {
+        let stream = Self.streaming(for: 5_000_000)
+        var coalescer = stream.coalescer
+        var now = stream.now
+        let full = TerminalIOCoalescer.saturatingNapBytes
+        for _ in 0..<4 {
+            _ = Self.nappedBatch(&coalescer, at: now, yield: full)
+            now += 40_000
+            _ = Self.nappedBatch(&coalescer, at: now, yield: 200)
+            now += 40_000
+        }
+        coalescer.beginBatch(at: now, afterIdle: 2_000)
+        let held = coalescer.shouldNap(total: 100, now: now + 5_000)
+        #expect(held)
+    }
+
+    /// An idle terminal starts over: a new stream is not held to the backoff
+    /// of the one before it, only to the warm-up.
+    @Test func goingIdleClearsTheBackoff() {
+        let stream = Self.streaming(for: 5_000_000)
+        var coalescer = stream.coalescer
+        var now = stream.now
+        let full = TerminalIOCoalescer.saturatingNapBytes
+        _ = Self.nappedBatch(&coalescer, at: now, yield: full)
+        now += 40_000
+        _ = Self.nappedBatch(&coalescer, at: now, yield: full)
+
+        now += 2_000_000
+        coalescer.beginBatch(at: now, afterIdle: TerminalIOCoalescer.idleGapNs)
+        now += TerminalIOCoalescer.warmupNs
+        coalescer.beginBatch(at: now, afterIdle: 2_000)
+        let held = coalescer.shouldNap(total: 100, now: now + 5_000)
+        #expect(held)
+    }
+
     private static func makeRawPty() throws -> (master: Int32, slave: Int32) {
         var master: Int32 = -1
         var slave: Int32 = -1
@@ -447,6 +903,26 @@ final class TerminalIOPipelineTests {
             _ = tcsetattr(slave, TCSANOW, &terminalSettings)
         }
         return (master, slave)
+    }
+
+    private static func makeUnrelatedTemporaryFile() throws -> String {
+        let path = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("swiftterm-pipeline-reservation-\(UUID().uuidString).dat")
+            .path
+        guard FileManager.default.createFile(
+            atPath: path,
+            contents: Data("reserved".utf8)) else {
+            throw PipelineDescriptorTestError.couldNotCreateTemporaryFile(path)
+        }
+        return path
+    }
+
+    private static func openOwnedFile(_ path: String) throws -> Int32 {
+        let fd = open(path, O_RDONLY | O_CLOEXEC)
+        guard fd >= 0 else {
+            throw PipelineDescriptorTestError.couldNotOpenFile(path, errno)
+        }
+        return fd
     }
 
     private static func countingPattern(byteCount: Int) -> [UInt8] {
@@ -769,6 +1245,81 @@ private final class BlockingPipelineCapture: TerminalIOPipelineDelegate {
 
     func release() {
         resume.signal()
+    }
+}
+
+/// Shuts the pipeline down from its EOF callback.
+private final class ShutdownOnEOFCapture: TerminalIOPipelineDelegate, @unchecked Sendable {
+    weak var pipeline: TerminalIOPipeline?
+    private let count = Locked(0)
+
+    var eofCount: Int { count.withLock { $0 } }
+
+    func pipeline(_ pipeline: TerminalIOPipeline, received data: Span<UInt8>) {}
+
+    func pipelineDidReachEOF(_ pipeline: TerminalIOPipeline) {
+        count.withLock { $0 += 1 }
+        pipeline.shutdown()
+    }
+}
+
+private final class EOFBlockingPipelineCapture: TerminalIOPipelineDelegate {
+    private let condition = NSCondition()
+    private var entries = 0
+    private var entered = false
+    private var released = false
+    private var returned = false
+
+    var eofCount: Int {
+        condition.lock()
+        let count = entries
+        condition.unlock()
+        return count
+    }
+
+    func pipeline(_ pipeline: TerminalIOPipeline, received data: Span<UInt8>) {
+        // The startup-failure path must not deliver bytes.
+    }
+
+    func pipelineDidReachEOF(_ pipeline: TerminalIOPipeline) {
+        condition.lock()
+        entries += 1
+        entered = true
+        condition.broadcast()
+        while !released {
+            condition.wait()
+        }
+        returned = true
+        condition.broadcast()
+        condition.unlock()
+    }
+
+    func waitForEOFEntry(timeout: TimeInterval) -> Bool {
+        wait(timeout: timeout) { self.entered }
+    }
+
+    func waitForEOFCallbackReturn(timeout: TimeInterval) -> Bool {
+        wait(timeout: timeout) { self.returned }
+    }
+
+    func releaseEOF() {
+        condition.lock()
+        released = true
+        condition.broadcast()
+        condition.unlock()
+    }
+
+    private func wait(timeout: TimeInterval, predicate: () -> Bool) -> Bool {
+        let limit = Date().addingTimeInterval(timeout)
+        condition.lock()
+        while !predicate() {
+            if !condition.wait(until: limit) {
+                condition.unlock()
+                return false
+            }
+        }
+        condition.unlock()
+        return true
     }
 }
 

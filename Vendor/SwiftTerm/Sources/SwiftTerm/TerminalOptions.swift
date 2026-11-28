@@ -119,7 +119,27 @@ public struct KittyGraphicsConfiguration: Sendable, Equatable {
     /// A trusted directory for `t=t` temporary files.
     ///
     /// Temporary-file transmission is rejected when this value is `nil`.
-    public var trustedTemporaryDirectory: TerminalTemporaryDirectory?
+    public var trustedTemporaryDirectory: TerminalTemporaryDirectory? {
+        get { trustedTemporaryDirectoryBox?.value }
+        set { trustedTemporaryDirectoryBox = newValue.map(TemporaryDirectoryBox.init) }
+    }
+
+    /// `URL` is a resilient Foundation type, so its size is known only at run
+    /// time. Stored inline, it gives this struct, `TerminalOptions`, and
+    /// `Terminal` a run-time layout, and each `Terminal` field read after
+    /// `_options` must first load its offset. A reference has a fixed size.
+    private var trustedTemporaryDirectoryBox: TemporaryDirectoryBox?
+
+    private final class TemporaryDirectoryBox: Sendable {
+        let value: TerminalTemporaryDirectory
+        init(_ value: TerminalTemporaryDirectory) { self.value = value }
+    }
+
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.storageLimitBytesPerScreen == rhs.storageLimitBytesPerScreen
+            && lhs.localMediaPolicy == rhs.localMediaPolicy
+            && lhs.trustedTemporaryDirectory == rhs.trustedTemporaryDirectory
+    }
 
     /// Creates a Kitty graphics configuration.
     ///
@@ -180,6 +200,25 @@ public struct TerminalOptions: Sendable {
     /// Maximum bytes accepted for one OSC sequence.
     /// Lower this limit to reduce memory exposure to untrusted OSC 1337 or OSC 52 payloads.
     public var maximumOscBytes: Int
+    /// Accept OSC 8 hyperlinks. The default is true.
+    /// Set this to false to keep implicit URL and path detection only.
+    public var enableOsc8Hyperlinks: Bool
+    /// Answer DECRQCRA (Request Checksum of Rectangular Area, `CSI Pi ; Pg ; Pt ; Pl ; Pb ; Pr * y`)
+    /// with the real checksum of the screen contents.
+    ///
+    /// DECRQCRA lets the application that runs in the terminal read back the screen.
+    /// A program can request the checksum of each cell, one at a time, and get the
+    /// text on the screen. This is a screen-scraping channel: it can expose text
+    /// that a different program wrote, for example output from before an `ssh`
+    /// session started, or a password prompt that echoes input.
+    ///
+    /// When this is false, the terminal answers each request with a checksum of
+    /// zero, so an application that waits for a response does not stop.
+    /// Test suites such as esctest and vttest use DECRQCRA to examine the screen.
+    ///
+    /// The default is true in debug builds and false in release builds.
+    /// The ``TerminalDelegate/isProcessTrusted(source:)`` check also applies.
+    public var enableRectangularAreaChecksum: Bool
     /// Host policy for the Kitty clipboard protocol. Capabilities are still explicit.
     ///
     /// The default is empty, so a host must opt in. Mode 5522 is reported as
@@ -231,7 +270,15 @@ public struct TerminalOptions: Sendable {
                                                        kittyClipboardPolicy: [],
                                                        kittyClipboardWriteLimitBytes: TerminalOptions.minimumKittyClipboardWriteLimitBytes,
                                                        kittyClipboardMaximumRepresentations: 256,
-                                                       kittyClipboardMaximumAliases: 256)
+                                                       kittyClipboardMaximumAliases: 256,
+                                                       enableOsc8Hyperlinks: true,
+                                                       enableRectangularAreaChecksum: TerminalOptions.defaultEnableRectangularAreaChecksum)
+
+    #if DEBUG
+    static let defaultEnableRectangularAreaChecksum = true
+    #else
+    static let defaultEnableRectangularAreaChecksum = false
+    #endif
 
     /// The smallest decoded write-transaction limit that the protocol permits.
     public static let minimumKittyClipboardWriteLimitBytes = 64 * 1024 * 1024
@@ -247,7 +294,9 @@ public struct TerminalOptions: Sendable {
               kittyClipboardPolicy: KittyClipboardPolicy = Self.default.kittyClipboardPolicy,
               kittyClipboardWriteLimitBytes: Int = Self.default.kittyClipboardWriteLimitBytes,
               kittyClipboardMaximumRepresentations: Int = Self.default.kittyClipboardMaximumRepresentations,
-              kittyClipboardMaximumAliases: Int = Self.default.kittyClipboardMaximumAliases) {
+              kittyClipboardMaximumAliases: Int = Self.default.kittyClipboardMaximumAliases,
+              enableOsc8Hyperlinks: Bool = Self.default.enableOsc8Hyperlinks,
+              enableRectangularAreaChecksum: Bool = Self.default.enableRectangularAreaChecksum) {
         self.cols = cols
         self.rows = rows
         self.convertEol = convertEol
@@ -265,6 +314,8 @@ public struct TerminalOptions: Sendable {
         self.initialBidiArrowKeySwap = initialBidiArrowKeySwap
         self.featureReport = featureReport
         self.maximumOscBytes = maximumOscBytes
+        self.enableOsc8Hyperlinks = enableOsc8Hyperlinks
+        self.enableRectangularAreaChecksum = enableRectangularAreaChecksum
         self.kittyClipboardPolicy = kittyClipboardPolicy
         // The accessors apply the floors, so one rule covers init and assignment.
         self.storedKittyClipboardWriteLimitBytes = kittyClipboardWriteLimitBytes

@@ -13,7 +13,7 @@ options:
     visionOS: "1.0"
 
 packages:
-  # Vendored 1.99.0 (rev 2dad6a1, MIT; the SwiftTerm 2.0 API preview).
+  # Vendored 1.99.4 (rev b306696, MIT; the SwiftTerm 2.0 API preview).
   # Multiplex keeps keyboardType settable and `.default` for multilingual/IME
   # input, routes pans to remote scrolling and copy mode, suppresses
   # obscured-tab frames, keeps UIKit composition visible, and preserves

@@ -11,12 +11,17 @@ input encoding, or terminal rendering.
   - `swift-nio-ssh` — Citadel 0.12.0's resolved fork (`Joannis` 0.3.5),
     patched to declare the `NIO` product it imports (Xcode 27 rejects the
     undeclared import); also freezes the SSH transport supply chain.
-  - `SwiftTerm` — 1.99.0 (rev `2dad6a1`, the SwiftTerm 2.0 API preview;
-    bumped from 1.18.0 on 2026-10-11 by reconstructing the patch set as a
-    commit on the old rev and 3-way merging it onto the new tag — do the same
-    next time, but expect the view files to need a hand port: 1.99 rewrote
-    the view layer, so AppleTerminalView / iOSTerminalView were rebuilt from
-    upstream's files with each group re-applied). Patched in the behavior
+  - `SwiftTerm` — 1.99.4 (rev `b306696`, the SwiftTerm 2.0 API preview;
+    bumped from 1.99.0 / `2dad6a1` on 2026-11-28, and from 1.18.0 on
+    2026-10-11, each time by reconstructing the patch set as a commit on the
+    old rev and 3-way merging it onto the new tag — do the same next time.
+    A bump inside 1.99 merges mostly by itself (seven files conflicted at
+    1.99.4, all small except the link lookup below); the jump across 1.99.0
+    needed a hand port, because 1.99 rewrote the view layer and
+    AppleTerminalView / iOSTerminalView were rebuilt from upstream's files
+    with each group re-applied. After a bump, run the vendored suite too
+    (`swift test` in `Vendor/SwiftTerm`, macOS) — it is the only build of
+    the Mac view and the only run of upstream's own tests. Patched in the behavior
     groups below plus a remote-input hardening set (all marked
     `Multiplex patch`). Upstream 1.18.0 added `implicitLinkCouldBeVisible`,
     an early-out that skips implicit link detection when the highlight mode
@@ -61,6 +66,11 @@ input encoding, or terminal rendering.
       it bounds the PNG decode's RGBA allocation; the vendored
       `KittyPNGHeaderBoundsTests` is resized to match), the title-stack
       depth cap, and the bounded OSC 1337 inline-image decode.
+    - **Retired at 1.99.4**: the #739 Metal viewport backport (upstream
+      1.99.1 carries it) and the full-reset alternate-screen clear
+      (upstream's RIS now clears the alternate buffer and its kitty images
+      itself; `TerminalFullResetTests` still pins the behavior the Rex tab
+      relies on).
     - **Manifest**: upstream's `swift-png` dependency (and its transitive
       `rarestype/h`) is dropped — it is linked only for non-Apple platforms,
       but SwiftPM resolves every declared dependency, so the app fetched two
@@ -77,6 +87,36 @@ input encoding, or terminal rendering.
       wheel / two-finger scrollback split (`forwardWheelDrag` is left in
       place, unwired). `hasText` stays patched to true although upstream
       made it `open`.
+    - **Deliberate divergences added at 1.99.4**:
+      - *Implicit links still join rows by the shape of the text.* Upstream
+        #853 joins rows only at a recorded full-width wrap
+        (`isScreenEdgeWrapped`) and deleted the heuristic and its helpers.
+        The fork keeps both shape joins — whole-row
+        (`heuristicImplicitGroup`, tried only when the recorded wraps leave
+        the pressed row alone) and pane-segment — re-seated on upstream's
+        new line-map builder, because a multiplexer pane or an agent TUI
+        wraps a path with cursor addressing and no terminal records that
+        wrap. The cost is upstream's list of false joins (an address above
+        a `====` rule, a URL ending at the edge above a word); the thirteen
+        `LinkLookupTests` that pin upstream's rule are disabled with
+        `shapeJoinKept`, not deleted, and are that list. New fact that would
+        reopen this: tmux/herdr/agent output arriving with recorded wraps.
+      - *Upstream's pointer-scroll recognizers never begin*
+        (`shouldCapturePointerScroll` answers false). The remote-scroll pan
+        already takes trackpad and wheel scrolls (`allowedScrollTypesMask =
+        .all`) and sends them from the anchored coordinate; both running
+        would report each scroll twice.
+      - *Touch link activation stays the fork's.* Upstream grew
+        `touchLinkActivation` / `linkRequestForTap` and a
+        `requestOpenLink(source:request:)` delegate call; `singleTap` and
+        the long press still go through `activateLink`, which falls back to
+        that new delegate call when no `linkActivationHandler` is set.
+        `linkForClick` returns upstream's `isExplicit` and the fork's
+        `rowTexts` in one tuple.
+      - Upstream's block selection and smart word selection (URL, path,
+        quoted string) are merged under the selection clamp: every path
+        still ends in `rectClamped`, and a clamped row selection spans the
+        pane's columns instead of upstream's whole logical line.
     Behavior groups:
     - `keyboardType` settable; kept `.default` so the user's language and
       multistage IME survive.
@@ -139,7 +179,11 @@ input encoding, or terminal rendering.
       redraw. The CG renderer is the live path — Metal is opt-in, see
       below). `drawTerminalContents` narrows its
       row loop only for a well-formed sub-viewport rect
-      (`partialRedrawRows`, pure + app-tested); anomalous rects — UIKit's
+      (`partialRedrawRows`, pure + app-tested), and only when the paint
+      host is the scrolling `TerminalView` — since 1.99.4 the painter is a
+      `CoreGraphicsPaintHost` extension shared with upstream's
+      `TerminalRenderView`, whose dirty rects are not in content
+      coordinates; anomalous rects — UIKit's
       scroll-coalesced y=0 shapes, viewport-spanning unions, the
       `setNeedsDisplay(frame)` legacy callers — keep the full-screen
       redraw, so the contentOffset workaround's semantics are unchanged.
@@ -204,7 +248,7 @@ input encoding, or terminal rendering.
       edge, seam forming a link. Border-free rows keep the whole-row path
       untouched. Locked by `TerminalSplitPaneLinkTests`.
     - Both row-join heuristics (whole-row and pane-segment; never the
-      `isWrapped` chain) decline a seam that butts a FINISHED file name
+      recorded-wrap chain) decline a seam that butts a FINISHED file name
       against a plain word (`Terminal.seamGluesFinishedFileToWord`):
       upper side ends in `.` + 2–8 word chars, lower side opens with ≥ 3
       word chars before any `/` or `.`. Listing rows (`git status`, build
@@ -239,9 +283,9 @@ input encoding, or terminal rendering.
       window size, tmux and herdr alike. Shipped in the 1.5.1 build, never in
       1.5.0: 1.18 set `drawableSize = bounds * scale` itself. The simulator
       cannot show it (nativeScale == scale there) — verify on a device with
-      display zoom. Upstream #739 (1.99.1) is also backported: the viewport
-      comes from the drawable TEXTURE, not the fractional `drawableSize`.
-      Drop that backport when the fork moves to ≥ 1.99.1; keep the scale pin
+      display zoom. Upstream #739 (in the tree since 1.99.4) is the other half:
+      the viewport comes from the drawable TEXTURE, not the fractional
+      `drawableSize`. Keep the scale pin
       unless upstream sizes the drawable from the layout scale. Do NOT judge Metal
       performance in the simulator: `com.apple.metal.simulator` presents at
       ~2–4 fps under streaming load with the row cache warm (rows rebuilt
@@ -263,9 +307,10 @@ input encoding, or terminal rendering.
       `sendResponse`; re-check that on a bump, or mouse input would be
       classed as a report and a Rex tab would lose its clicks.
     - **A full reset empties the alternate screen too**
-      (`Terminal.setup(isReset:)`). Upstream's RIS replaces the normal
-      buffer and steps back to it with `activateNormalBuffer(clearAlt:
-      false)`; the alternate buffer is otherwise emptied only on the way
+      (`Terminal.setup(isReset:)`) — upstream's own behavior since 1.99.4,
+      a fork patch before it. Until then upstream's RIS replaced the normal
+      buffer and stepped back to it with `activateNormalBuffer(clearAlt:
+      false)`; the alternate buffer was otherwise emptied only on the way
       OUT of it (1047/1049), and `fillViewportRows` returns at once for a
       buffer that already has rows. So after an RIS sent while a
       full-screen program was up, the next `?1049h` showed that program's
@@ -275,7 +320,7 @@ input encoding, or terminal rendering.
       (`backends-and-probe.md`): switching from one terminal running an
       agent to another left the first one's screen under the second
       (user-reported 2026-11-20; with two stand-in full-screen programs
-      the whole first screen stayed). The reset now also clears the
+      the whole first screen stayed). The reset also clears the
       alternate buffer and its kitty images. Pinned by
       `TerminalFullResetTests`; mosh's resync reset rides the same path.
     - The visible screen's links are enumerable (`Terminal

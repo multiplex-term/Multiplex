@@ -30,16 +30,63 @@ public final class BufferLine: CustomDebugStringConvertible {
         /// Renders the bottom of a character, using two cells
         case doubledDown
     }
-    private var isWrappedValue: Bool
+    /// Why a line continues the previous line.
+    enum WrapCause: UInt8, Sendable {
+        /// The line starts after a hard line break, or is the first line.
+        case none
+        /// The line continues the previous line, but no automatic wrap at
+        /// the last column of the screen is recorded for it. An automatic
+        /// wrap at an internal right margin (DECLRMM) gives this value.
+        case soft
+        /// A printed character caused an automatic wrap at the last column
+        /// of the screen. Only this value lets implicit link lookup read
+        /// the two lines as one, as Ghostty does with its row wrap flag.
+        case screenEdge
+    }
+    private var wrapValue: WrapCause
     /// True when this line is a continuation of the previous line: the text
     /// soft-wrapped onto it rather than starting after an explicit newline.
     public internal(set) var isWrapped: Bool {
-        get { isWrappedValue }
+        get { wrapValue != .none }
         set {
-            guard newValue != isWrappedValue else { return }
-            isWrappedValue = newValue
+            guard newValue != (wrapValue != .none) else { return }
+            // A cleared wrap also clears the screen-edge mark. A wrap set
+            // here has no recorded cause.
+            wrapValue = newValue ? .soft : .none
             bump()
         }
+    }
+    /// The recorded cause of the wrap onto this line. `isWrapped` is true
+    /// for each value other than `.none`.
+    var wrapCause: WrapCause {
+        get { wrapValue }
+        @inline(__always) set {
+            guard newValue != wrapValue else { return }
+            let wrapChanged = (newValue != .none) != (wrapValue != .none)
+            wrapValue = newValue
+            // The cause is not drawn and not selected. Only a change of
+            // `isWrapped` is a change of the line.
+            if wrapChanged { bump() }
+        }
+    }
+    /// True when an automatic wrap at the last column of the screen moved
+    /// the output onto this line. Implicit link lookup uses this value, and
+    /// not `isWrapped`, to join lines.
+    var isScreenEdgeWrapped: Bool { wrapValue == .screenEdge }
+
+    /// Records that a full-width automatic wrap made this line a
+    /// continuation. It has no effect on a line that is not wrapped.
+    @inline(__always)
+    func markScreenEdgeWrap() {
+        if wrapValue == .soft { wrapValue = .screenEdge }
+    }
+
+    /// Removes the screen-edge mark and keeps `isWrapped`. Use it when a
+    /// command changes the end of the previous line: reflow keeps its
+    /// paragraph, but a link must not continue across the changed cells.
+    @inline(__always)
+    func clearScreenEdgeWrap() {
+        if wrapValue == .screenEdge { wrapValue = .soft }
     }
     private var bidiStateValue: BidiPresentationState
     /// BiDi state for the paragraph that contains this row.
@@ -57,7 +104,7 @@ public final class BufferLine: CustomDebugStringConvertible {
         set {
             guard newValue != renderModeValue else { return }
             renderModeValue = newValue
-            bump()
+            bumpRenderOnly()
         }
     }
 #if DEBUG
@@ -72,7 +119,7 @@ public final class BufferLine: CustomDebugStringConvertible {
         set {
             guard newValue != semanticMarksValue else { return }
             semanticMarksValue = newValue
-            bump()
+            bumpRenderOnly()
         }
     }
     /// The prompt-group epoch of a line created by a hard line feed inside a
@@ -91,7 +138,7 @@ public final class BufferLine: CustomDebugStringConvertible {
         set {
             guard newValue != semanticHardContinuationGroupValue else { return }
             semanticHardContinuationGroupValue = newValue
-            bump()
+            bumpRenderOnly()
         }
     }
     /// Link to the owning buffer, used only so `copyFrom` can ask which of two
@@ -125,8 +172,8 @@ public final class BufferLine: CustomDebugStringConvertible {
     /// Upper bound on the cells that can contain data other than a blank cell
     /// with ``tailBlankCell``.
     ///
-    /// **Invariant:** Each cell in `usedLength ..< storage.count` is
-    /// `tailBlankCell`.
+    /// **Invariant:** Each cell in `0 ..< usedStart` and in
+    /// `usedLength ..< storage.count` is `tailBlankCell`.
     ///
     /// This value lets ``clear(with:)`` clear only the written part of a row.
     /// Terminal rows are usually shorter than `cols`, so the tail often does
@@ -137,24 +184,54 @@ public final class BufferLine: CustomDebugStringConvertible {
     /// The `storage` property is private, so this file contains all updates.
     private var usedLength: Int
 
+    /// Lower bound on the cells that can contain data other than a blank cell
+    /// with ``tailBlankCell``. The written part is `usedStart ..< usedLength`,
+    /// and it is empty when `usedStart >= usedLength`.
+    ///
+    /// Text that starts after column 0, such as a right-aligned prompt or a
+    /// cursor that stays in the last column, then needs a clear of only the
+    /// cells that it wrote.
+    private var usedStart: Int
+
     /// The packed blank stored after ``usedLength``.
     /// This value is valid only when `usedLength < storage.count`.
     private var tailBlankCell = PackedCell()
 
     /// Marks the full row as potentially dirty.
     @inline(__always)
-    private func invalidateUsedLength () { usedLength = storage.count }
+    private func invalidateUsedLength () {
+        usedStart = 0
+        usedLength = storage.count
+    }
 
-    /// Records that cells before `end` can contain written data.
+    /// Records that cells in `start ..< end` can contain written data.
     @inline(__always)
-    private func noteWritten (upTo end: Int) {
+    private func noteWritten (from start: Int, upTo end: Int) {
+        if start < usedStart { usedStart = max(start, 0) }
         if end > usedLength { usedLength = min(end, storage.count) }
     }
+
+#if DEBUG
+    /// Row-walking checks on every recycle; too slow for debug hosts, so opt-in (CI sets it).
+    static let expensiveAssertsEnabled: Bool = {
+#if SWIFTTERM_EMBEDDED
+        return false
+#else
+        return ProcessInfo.processInfo.environment["SWIFTTERM_EXPENSIVE_ASSERTS"] == "1"
+#endif
+    }()
+#endif
 
     /// Checks the ``usedLength`` invariant against the stored cells.
     @inline(__always)
     private func assertTailIsBlank () {
         #if DEBUG
+        guard BufferLine.expensiveAssertsEnabled else { return }
+        for i in 0..<min(usedStart, storage.count) {
+            assert(storage.rawCell(at: i) == tailBlankCell,
+                   "BufferLine.usedStart invariant failed at cell \(i) of \(storage.count) " +
+                   "(usedStart=\(usedStart)). A writer changed a cell before usedStart.")
+        }
         guard usedLength < storage.count else { return }
         for i in usedLength..<storage.count {
             assert(storage.rawCell(at: i) == tailBlankCell,
@@ -171,19 +248,35 @@ public final class BufferLine: CustomDebugStringConvertible {
             // The common recycle and snapshot path writes nil to an empty row.
             guard newValue != nil || imagesValue != nil else { return }
             imagesValue = newValue
-            bump()
+            bumpRenderOnly()
         }
     }
 
-    /// Monotonically increasing counter incremented on every mutation of this line's
-    /// contents (cells, isWrapped, renderMode, images). Renderers that cache per-line
+    /// Counter that changes on every mutation of this line's contents (cells,
+    /// isWrapped, renderMode, images). Renderers that cache per-line
     /// draw state can compare this counter against a cached value to detect in-place
     /// changes without diffing individual cells.
     public var generation: UInt64 { _generation }
     private(set) var _generation: UInt64 = 0
+    /// A change that a selection of this line does not see adds this step
+    /// to `_generation` instead of 1. The low bits then count only the
+    /// changes a selection sees, so ``contentGeneration`` needs no counter
+    /// of its own and a cell write still costs one increment. The carry out
+    /// of the high bits only wraps `_generation`, which readers compare for
+    /// equality.
+    private static let renderOnlyStep: UInt64 = 1 << 40
+    /// Changes with what a selection of this line holds: the cells,
+    /// `isWrapped` and `bidiState`, and not the prompt marks, images,
+    /// render mode or blank cells a resize adds or drops at the end. A feed
+    /// compares it to keep a selection whose rows it didn't touch without
+    /// copying their cells.
+    var contentGeneration: UInt64 { _generation & (BufferLine.renderOnlyStep - 1) }
 
     @inline(__always)
     private func bump() { _generation &+= 1 }
+
+    @inline(__always)
+    private func bumpRenderOnly() { _generation &+= BufferLine.renderOnlyStep }
 
     public convenience init (cols: Int, fillData: CharData? = nil, isWrapped: Bool = false,
                              bidiState: BidiPresentationState = .default)
@@ -208,16 +301,17 @@ public final class BufferLine: CustomDebugStringConvertible {
          isWrapped: Bool = false, bidiState: BidiPresentationState = .default,
          arena: CellArena)
     {
-        isWrappedValue = isWrapped
+        wrapValue = isWrapped ? .soft : .none
         bidiStateValue = bidiState
         storage = CellStoragePage(count: cols, repeating: packedFill, arena: arena)
         usedLength = blankTailCell == nil ? cols : 0
+        usedStart = blankTailCell == nil ? 0 : cols
         tailBlankCell = blankTailCell ?? PackedCell()
     }
 
     public init (from other: BufferLine)
     {
-        isWrappedValue = other.isWrappedValue
+        wrapValue = other.wrapValue
         bidiStateValue = other.bidiStateValue
         renderModeValue = other.renderModeValue
         semanticMarksValue = other.semanticMarksValue
@@ -228,6 +322,7 @@ public final class BufferLine: CustomDebugStringConvertible {
         imagesValue = other.imagesValue
         storage = CellStoragePage(copying: other.storage)
         usedLength = other.usedLength
+        usedStart = other.usedStart
         tailBlankCell = other.tailBlankCell
     }
 
@@ -258,6 +353,7 @@ public final class BufferLine: CustomDebugStringConvertible {
         let target = min(index, storage.count - 1)
         storage.setRawCell(cell, at: target)
         if target >= usedLength { usedLength = target &+ 1 }
+        if target < usedStart { usedStart = target }
         bump()
     }
 
@@ -369,13 +465,8 @@ public final class BufferLine: CustomDebugStringConvertible {
         let source = bytes.span
             .extracting(droppingFirst: sourceStart - bytes.startIndex)
             .extracting(first: count)
-        for offset in source.indices {
-            let rawValue = template |
-                (UInt64(source[offset]) << PackedCell.contentShift)
-            storage.setRawCell(PackedCell(rawValue: rawValue),
-                               at: destinationStart + offset)
-        }
-        noteWritten(upTo: destinationEnd)
+        storage.setPackedAsciiRun(source, template: template, at: destinationStart)
+        noteWritten(from: destinationStart, upTo: destinationEnd)
         bump()
     }
 
@@ -406,24 +497,26 @@ public final class BufferLine: CustomDebugStringConvertible {
                                                 semanticContentCode: semanticContentCode).rawValue
         let source = bytes.extracting(sourceStart..<(sourceStart + count))
         storage.setPackedAsciiRun(source, template: template, at: destinationStart)
-        noteWritten(upTo: destinationEnd)
+        noteWritten(from: destinationStart, upTo: destinationEnd)
         bump()
     }
 
-    /// Writes validated Unicode scalars that all have the same cell width.
+    /// Writes validated Unicode scalars. `widths` gives the cell width of
+    /// each scalar, 1 or 2, and `columns` is the sum of those widths in the
+    /// written range.
     func setPackedScalarRun(_ scalars: UnsafeBufferPointer<UInt32>,
-                            sourceStart: Int, count: Int,
+                            widths: UnsafeBufferPointer<UInt8>,
+                            sourceStart: Int, count: Int, columns: Int,
                             at destinationStart: Int,
-                            widthState: PackedCell.WidthState,
                             styleID: UInt16, payloadCode: UInt16 = 0,
                             semanticContentCode: UInt8)
     {
         guard count > 0 else { return }
-        precondition(widthState == .narrow || widthState == .wide)
+        precondition(widths.count == scalars.count)
         precondition(sourceStart >= 0 && sourceStart <= scalars.count)
         precondition(count <= scalars.count - sourceStart)
-        let cellWidth = widthState == .wide ? 2 : 1
-        let destinationEnd = destinationStart + count * cellWidth
+        let destinationEnd = destinationStart + columns
+        precondition(destinationStart >= 0 && destinationEnd <= storage.count)
         if destinationStart > 0, destinationStart < storage.count,
            storage.rawCell(at: destinationStart).widthState == .spacerTail {
             let headIndex = destinationStart - 1
@@ -436,33 +529,51 @@ public final class BufferLine: CustomDebugStringConvertible {
                 storage.setRawCell(tail.demotedToNarrowBlank(), at: destinationEnd)
             }
         }
-        let headTemplate = PackedCell.makeUnchecked(
+        let narrowTemplate = PackedCell.makeUnchecked(
             contentTag: .codepoint, content: 0, styleID: styleID,
-            widthState: widthState, isProtected: false,
+            widthState: .narrow, isProtected: false,
             payloadCode: payloadCode,
             semanticContentCode: semanticContentCode).rawValue
-        if widthState == .wide {
-            let tail = PackedCell.makeUnchecked(
-                contentTag: .codepoint, content: 0, styleID: styleID,
-                widthState: .spacerTail, isProtected: false,
-                payloadCode: payloadCode,
-                semanticContentCode: semanticContentCode)
+        let wideTemplate = PackedCell.makeUnchecked(
+            contentTag: .codepoint, content: 0, styleID: styleID,
+            widthState: .wide, isProtected: false,
+            payloadCode: payloadCode,
+            semanticContentCode: semanticContentCode).rawValue
+        let tail = PackedCell.makeUnchecked(
+            contentTag: .codepoint, content: 0, styleID: styleID,
+            widthState: .spacerTail, isProtected: false,
+            payloadCode: payloadCode,
+            semanticContentCode: semanticContentCode)
+        // Most runs have one width; `columns` shows it without a pass over `widths`.
+        if columns == count {
+            for offset in 0..<count {
+                let content = UInt64(scalars[sourceStart + offset]) << PackedCell.contentShift
+                storage.setRawCell(PackedCell(rawValue: narrowTemplate | content),
+                                   at: destinationStart + offset)
+            }
+        } else if columns == count * 2 {
             for offset in 0..<count {
                 let destination = destinationStart + offset * 2
-                let rawValue = headTemplate |
-                    (UInt64(scalars[sourceStart + offset]) << PackedCell.contentShift)
-                storage.setRawCell(PackedCell(rawValue: rawValue), at: destination)
+                let content = UInt64(scalars[sourceStart + offset]) << PackedCell.contentShift
+                storage.setRawCell(PackedCell(rawValue: wideTemplate | content), at: destination)
                 storage.setRawCell(tail, at: destination + 1)
             }
         } else {
-            for offset in 0..<count {
-                let rawValue = headTemplate |
-                    (UInt64(scalars[sourceStart + offset]) << PackedCell.contentShift)
-                storage.setRawCell(PackedCell(rawValue: rawValue),
-                                   at: destinationStart + offset)
+            var destination = destinationStart
+            for index in sourceStart ..< (sourceStart + count) {
+                let content = UInt64(scalars[index]) << PackedCell.contentShift
+                if widths[index] == 2 {
+                    storage.setRawCell(PackedCell(rawValue: wideTemplate | content), at: destination)
+                    storage.setRawCell(tail, at: destination + 1)
+                    destination += 2
+                } else {
+                    storage.setRawCell(PackedCell(rawValue: narrowTemplate | content), at: destination)
+                    destination += 1
+                }
             }
+            precondition(destination == destinationEnd)
         }
-        noteWritten(upTo: destinationEnd)
+        noteWritten(from: destinationStart, upTo: destinationEnd)
         bump()
     }
 
@@ -504,14 +615,19 @@ public final class BufferLine: CustomDebugStringConvertible {
         (0..<storage.count).map { storage.cell(at: $0) }
     }
 
+    /// Calls `body` with the payload code of each cell that holds one, without unpacking cells.
+    func forEachPayloadCode(_ body: (UInt16) -> Void) {
+        storage.forEachPayloadCode(body)
+    }
+
     /// Accesses the CharIndex at the specified position
     public subscript (index : Int /*, callingMethod: String = #function */) -> CharData {
         get {
-            // The x value in a buffer can point beyond the column, due to the way that we allow
-            // buffer.x to grow (this is to support some wrapmodes and write on the edge)
+            // `buffer.x` is always less than `cols` (a pending wrap is a flag,
+            // not a column past the line). The clamp stays for callers that
+            // pass other indexes.
             let dataSize = storage.count
             if index >= dataSize {
-                /* print ("Warning: the method \(callingMethod) has not been audited to clamp buffer.x to cols-1; fixing") */
                 return storage.cell(at: dataSize - 1)
             }
             return storage.cell(at: index)
@@ -523,9 +639,11 @@ public final class BufferLine: CustomDebugStringConvertible {
                 print("BufferLine: You passed an index out of range, adjusting to prevent crash, but you should debug")
                 storage.setCell(value, at: storage.count - 1)
                 usedLength = storage.count
+                usedStart = min(usedStart, storage.count - 1)
             } else {
                 storage.setCell(value, at: index)
                 if index >= usedLength { usedLength = index &+ 1 }
+                if index < usedStart { usedStart = index }
             }
             bump()
         }
@@ -541,13 +659,14 @@ public final class BufferLine: CustomDebugStringConvertible {
     @inline(__always)
     private func clearCellState(with empty: PackedCell) {
         assertTailIsBlank()
-        if usedLength == storage.count || empty != tailBlankCell {
+        if empty != tailBlankCell || (usedStart == 0 && usedLength == storage.count) {
             storage.fill(with: empty)
-        } else if usedLength > 0 {
-            storage.fill(with: empty, in: 0..<usedLength)
+        } else if usedStart < usedLength {
+            storage.fill(with: empty, in: usedStart..<usedLength)
         }
         tailBlankCell = empty
         usedLength = 0
+        usedStart = storage.count
         // Most recycled lines have no images. Do not call ARC for an
         // optional array that is already nil.
         if imagesValue != nil {
@@ -562,10 +681,20 @@ public final class BufferLine: CustomDebugStringConvertible {
         bump()
     }
 
+    /// `recycle(with:wrapCause:bidiState:)` for a wrap with no recorded
+    /// cause.
+    @discardableResult
+    @inline(__always)
+    func recycle(with empty: PackedCell, isWrapped: Bool,
+                 bidiState: BidiPresentationState) -> Bool {
+        recycle(with: empty, wrapCause: isWrapped ? .soft : .none, bidiState: bidiState)
+    }
+
     /// Resets a line object for reuse. This is one logical mutation, so it
     /// bypasses the individual metadata setters and changes `generation` once.
     @discardableResult
-    func recycle(with empty: PackedCell, isWrapped: Bool,
+    @inline(__always)
+    func recycle(with empty: PackedCell, wrapCause: WrapCause,
                  bidiState: BidiPresentationState) -> Bool {
         let hadImages = imagesValue != nil
         clearCellState(with: empty)
@@ -573,7 +702,7 @@ public final class BufferLine: CustomDebugStringConvertible {
             semanticMarksValue.removeAll(keepingCapacity: true)
         }
         semanticHardContinuationGroupValue = nil
-        isWrappedValue = isWrapped
+        wrapValue = wrapCause
         bidiStateValue = bidiState
         renderModeValue = .single
         recycleGeneration &+= 1
@@ -591,7 +720,7 @@ public final class BufferLine: CustomDebugStringConvertible {
             semanticMarksValue.removeAll(keepingCapacity: true)
         }
         semanticHardContinuationGroupValue = nil
-        bump()
+        bumpRenderOnly()
     }
     /// Test whether contains any chars.
     public func hasContent (index: Int) -> Bool {
@@ -728,7 +857,7 @@ public final class BufferLine: CustomDebugStringConvertible {
         if start < idx {
             storage.fill(with: fill, in: start..<idx)
         }
-        noteWritten(upTo: idx)
+        noteWritten(from: start, upTo: idx)
         bump()
     }
 
@@ -746,7 +875,14 @@ public final class BufferLine: CustomDebugStringConvertible {
         if len == cols {
             return
         }
-        defer { bump() }
+        // The selection check compares a row's columns, which stop at the
+        // line's end, so a resize matters to a selection only through a cell
+        // it drops and a later resize adds back. That cell keeps its value
+        // when both are blank.
+        let changesContent = cols < len
+            ? (cols..<len).contains { storage.rawCell(at: $0) != PackedCell() }
+            : fill != PackedCell()
+        defer { changesContent ? bump() : bumpRenderOnly() }
 
         storage = storage.resized(to: cols, fill: fill)
         if cols < len {
@@ -780,7 +916,7 @@ public final class BufferLine: CustomDebugStringConvertible {
     func fill(with packed: PackedCell, atCol: Int, len: Int)
     {
         storage.fill(with: packed, in: atCol..<(atCol + len))
-        noteWritten(upTo: atCol + len)
+        noteWritten(from: atCol, upTo: atCol + len)
         bump()
     }
 
@@ -797,6 +933,7 @@ public final class BufferLine: CustomDebugStringConvertible {
                     : line.storage.rehomed(to: storage.arena)
             }
             usedLength = line.usedLength
+            usedStart = line.usedStart
             if line.storage.arena === storage.arena {
                 tailBlankCell = line.tailBlankCell
             } else {
@@ -805,7 +942,7 @@ public final class BufferLine: CustomDebugStringConvertible {
                                                    widthState: .narrow)!
             }
         }
-        isWrapped = line.isWrapped
+        wrapCause = line.wrapCause
         semanticMarks = line.semanticMarks
         semanticHardContinuationGroup = line.semanticHardContinuationGroup
         bidiState = line.bidiState
@@ -828,10 +965,11 @@ public final class BufferLine: CustomDebugStringConvertible {
                                           arena: snapshotArena)
             }
             usedLength = line.usedLength
+            usedStart = line.usedStart
             // Snapshot arenas preserve terminal identifiers exactly.
             tailBlankCell = line.tailBlankCell
         }
-        isWrapped = line.isWrapped
+        wrapCause = line.wrapCause
         bidiState = line.bidiState
         renderMode = line.renderMode
         semanticMarks.removeAll(keepingCapacity: true)
@@ -847,10 +985,42 @@ public final class BufferLine: CustomDebugStringConvertible {
         for i in (0..<storage.count).reversed() {
             let code = storage.logicalCode(at: i)
             if code != 0 {
-                return i + Int(storage.width(at: i))
+                // A wide head on the last column must not report a length
+                // past the line.
+                return min (i + Int(storage.width(at: i)), storage.count)
             }
         }
         return 0
+    }
+
+    /// The trimmed length of the first `limit` cells. Reflow uses it while a
+    /// row can still have old cells after the new width.
+    func getTrimmedLength (limit: Int) -> Int
+    {
+        let count = min (limit, storage.count)
+        for i in (0..<max (count, 0)).reversed() {
+            if storage.logicalCode(at: i) != 0 {
+                return min (i + Int(storage.width(at: i)), count)
+            }
+        }
+        return 0
+    }
+
+    /// True when `getTrimmedLength (limit: cols) >= cols - 1`. Only the
+    /// last three cells can give that length, so the cost has a limit.
+    @inline(__always)
+    func textReachesCellBeforeLast (cols: Int) -> Bool
+    {
+        let count = min (cols, storage.count)
+        var i = count - 1
+        let first = max (cols - 3, 0)
+        while i >= first {
+            if storage.logicalCode(at: i) != 0 {
+                return min (i + Int(storage.width(at: i)), count) >= cols - 1
+            }
+            i -= 1
+        }
+        return false
     }
 
     /// Copies a range of CharData elements from another bufferline into this one
@@ -859,9 +1029,13 @@ public final class BufferLine: CustomDebugStringConvertible {
     ///  - srcCol: the column index in the other buffer line
     ///  - dstCol: the destination in this buffer line
     ///  - len: the number of elements to copy
-    public func copyFrom (_ src: BufferLine, srcCol: Int, dstCol: Int, len: Int)
+    public func copyFrom (_ src: BufferLine, srcCol: Int, dstCol: Int, len requestedLen: Int)
     {
-        defer { noteWritten(upTo: dstCol + len) }
+        // The storage copy does no range check, also in debug builds. Keep
+        // the copy inside both lines; a caller with a bad range copies less.
+        guard srcCol >= 0, dstCol >= 0 else { return }
+        let len = max (0, min (requestedLen, src.count - srcCol, count - dstCol))
+        defer { noteWritten(from: dstCol, upTo: dstCol + len) }
         let movesSemanticHardContinuation = srcCol == 0 && dstCol == 0 && len >= count
         let movedSemanticHardContinuationGroup = src.semanticHardContinuationGroup
         if len > 0 {
@@ -944,12 +1118,12 @@ public final class BufferLine: CustomDebugStringConvertible {
     /// - Returns: a string containing the contents of the BufferLine from [startCol..<endCol]
     public func translateToString (trimRight: Bool = false, startCol: Int = 0, endCol: Int = -1, skipNullCellsFollowingWide: Bool = false, characterProvider: ((CharData) -> Character)? = nil, textProvider: ((CharData) -> String)? = nil) -> String
     {
-        var ec = endCol == -1 ? storage.count : endCol
-        if trimRight {
-            ec = max (startCol, min (ec, getTrimmedLength()))
-        }
-        let limit = max(ec, startCol)
         if !skipNullCellsFollowingWide {
+            var ec = endCol == -1 ? storage.count : endCol
+            if trimRight {
+                ec = max (startCol, min (ec, getTrimmedLength()))
+            }
+            let limit = max(ec, startCol)
             var result = ""
             for i in startCol..<limit {
                 let text = textProvider.map { $0(storage.cell(at: i)) }
@@ -959,29 +1133,18 @@ public final class BufferLine: CustomDebugStringConvertible {
             }
             return result
         }
-        var result = ""
-        var idx = startCol
-        while idx < limit {
-            let code = storage.logicalCode(at: idx)
-            let width = storage.width(at: idx)
-            if idx > 0 && code == 0 && storage.width(at: idx - 1) == 2 {
-                idx += 1
-                continue
-            }
-            let text = textProvider.map { $0(storage.cell(at: idx)) }
-                ?? characterProvider.map { String($0(storage.cell(at: idx))) }
-                ?? storage.text(at: idx)
-            result.append(contentsOf: text)
-            if width == 2 {
-                let nextIndex = idx + 1
-                if nextIndex < limit && storage.logicalCode(at: nextIndex) == 0 {
-                    idx += 2
-                    continue
-                }
-            }
-            idx += 1
-        }
-        return result
+        return terminalRowText(
+            cellCount: storage.count,
+            trimRight: trimRight,
+            startCol: startCol,
+            endCol: endCol,
+            logicalCode: { Int32(storage.logicalCode(at: $0)) },
+            width: { Int(storage.width(at: $0)) },
+            text: { index in
+                textProvider.map { provider in provider(storage.cell(at: index)) }
+                    ?? characterProvider.map { provider in String(provider(storage.cell(at: index))) }
+                    ?? storage.text(at: index)
+            })
     }
 
     /// Attaches the specified terminal image to this buffer line.

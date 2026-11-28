@@ -23,6 +23,7 @@ final class LockedTerminalTestAccess: @unchecked Sendable {
 }
 
 /// Exposes only the thread-safe queued input operation of HeadlessTerminal.
+#if os(macOS) || os(Linux)
 final class HeadlessInputTestAccess: @unchecked Sendable {
     private let headless: HeadlessTerminal
 
@@ -34,6 +35,7 @@ final class HeadlessInputTestAccess: @unchecked Sendable {
         headless.send(data: data)
     }
 }
+#endif
 
 final class TerminalTestDelegate: TerminalDelegate {
     private(set) var sentData: [[UInt8]] = []
@@ -49,7 +51,11 @@ final class TerminalTestDelegate: TerminalDelegate {
         terminalTitles.append(title)
     }
     func setTerminalIconTitle(source: Terminal, title: String) {}
-    func windowCommand(source: Terminal, command: Terminal.WindowManipulationCommand) -> [UInt8]? { return nil }
+    private(set) var windowCommands: [Terminal.WindowManipulationCommand] = []
+    func windowCommand(source: Terminal, command: Terminal.WindowManipulationCommand) -> [UInt8]? {
+        windowCommands.append(command)
+        return nil
+    }
     func sizeChanged(source: Terminal) {}
     func bufferActivated(source: Terminal) { bufferActivatedCount += 1 }
     func bell(source: Terminal) {}
