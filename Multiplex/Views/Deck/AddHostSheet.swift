@@ -58,6 +58,7 @@ struct AddHostFormState {
     /// silently changes the other.
     var secondaryBackends: Set<Host.SessionBackend> = []
     var useMosh = false
+    var agentBrowser = false
     var moshServerPath = ""
     var moshPorts = ""
     var workingDirectories: [WorkingDirectory] = []
@@ -96,6 +97,7 @@ struct AddHostFormState {
         sessionBackend = host.sessionBackend
         secondaryBackends = host.secondaryBackends
         useMosh = host.useMosh
+        agentBrowser = host.agentBrowser
         moshServerPath = host.moshServerPath ?? ""
         moshPorts = host.moshPorts ?? ""
         workingDirectories = host.workingDirs.map { WorkingDirectory(path: $0) }
@@ -143,10 +145,16 @@ struct AddHostFormState {
 
     var enabledBackends: Set<Host.SessionBackend> { backendSelection.enabled }
 
-    var testFingerprint: [String] {
+    /// What a throwaway SSH connection made from this form depends on.
+    var connectionFingerprint: [String] {
         [
             hostname, port, username, authMethod.rawValue,
             password, privateKey, passphrase,
+        ]
+    }
+
+    var testFingerprint: [String] {
+        connectionFingerprint + [
             useMosh ? "mosh" : "ssh", moshServerPath,
             sessionBackend.rawValue,
         ]
@@ -189,6 +197,7 @@ struct AddHostFormState {
         host.backgroundKeepAlive = backgroundKeepAlive
         host.backendSelection = backendSelection
         host.useMosh = useMosh
+        host.agentBrowser = agentBrowser
         let serverPath = moshServerPath.trimmingCharacters(in: .whitespaces)
         host.moshServerPath = serverPath.isEmpty ? nil : serverPath
         let ports = moshPorts.trimmingCharacters(in: .whitespaces)
@@ -265,6 +274,13 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         case failed(String)
     }
 
+    /// The Agent browser section's INSTALL SKILL button.
+    enum SkillInstallState: Equatable {
+        case idle
+        case running
+        case finished(AgentSkillInstall.Outcome)
+    }
+
     enum Metrics {
         static let contentMaximumWidth: CGFloat = 680
         static let outerInset: CGFloat = 18
@@ -274,6 +290,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
     typealias SecretWriter = (Host.AuthMethod, HostSecrets, UUID) -> Void
     typealias HostWriter = (Host, Bool) -> Void
     typealias TestRunner = (Host, HostSecrets) async -> HostTest.Outcome
+    typealias SkillInstaller = (Host, HostSecrets) async -> AgentSkillInstall.Outcome
 
     let store: HostStore
     let entitlements: EntitlementStore
@@ -281,6 +298,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
     private(set) var form: AddHostFormState
     private(set) var mode: Mode = .bind
     private(set) var testState = TestState.idle
+    private(set) var skillInstallState = SkillInstallState.idle
 
     var onDismiss: (() -> Void)?
     /// Native DeckWindow owns the presentation queue. Interactive sheet
@@ -312,6 +330,9 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
     private(set) var backgroundKeepAliveControl: SettingsBooleanRow?
     private(set) var moshControl: SettingsBooleanRow?
     private(set) var testChip: UIKitChassisChip?
+    private(set) var agentBrowserControl: SettingsBooleanRow?
+    /// nil while the Agent browser switch is off — the row is not there.
+    private(set) var skillInstallChip: UIKitChassisChip?
     private(set) var newWorkingDirectoryField = UITextField()
     private(set) var newSessionTmuxConfView: AddHostGrowingTextView!
     private(set) var agentModelViews: [AgentKind: AddHostGrowingTextView] = [:]
@@ -326,6 +347,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
 
     private var hostSection: AddHostSectionView!
     private var monitoringSection: AddHostSectionView!
+    private var agentBrowserSection: AddHostSectionView!
     private var credentialsSection: AddHostSectionView!
     private var testSection: AddHostSectionView!
     /// Not "Host identity" — that title belongs to the address section above.
@@ -357,6 +379,8 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
     private let hostWriter: HostWriter?
     private let testRunner: TestRunner?
     private var testTask: Task<Void, Never>?
+    private let skillInstaller: SkillInstaller?
+    private var skillInstallTask: Task<Void, Never>?
     private var debugScrollTask: Task<Void, Never>?
     private var observesStores = true
     private var observationGeneration = 0
@@ -372,7 +396,8 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         secretLoader: ((Host) -> HostSecrets)? = nil,
         secretWriter: SecretWriter? = nil,
         hostWriter: HostWriter? = nil,
-        testRunner: TestRunner? = nil
+        testRunner: TestRunner? = nil,
+        skillInstaller: SkillInstaller? = nil
     ) {
         self.store = store
         self.entitlements = entitlements
@@ -380,6 +405,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         self.secretWriter = secretWriter
         self.hostWriter = hostWriter
         self.testRunner = testRunner
+        self.skillInstaller = skillInstaller
         let secrets = editing.map { host in
             secretLoader?(host) ?? HostSecrets(
                 password: KeychainStore.get(for: host.id, kind: .password),
@@ -403,6 +429,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
     deinit {
         observesStores = false
         testTask?.cancel()
+        skillInstallTask?.cancel()
         debugScrollTask?.cancel()
     }
 
@@ -455,6 +482,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
     func prepareForRemoval() {
         observesStores = false
         testTask?.cancel()
+        skillInstallTask?.cancel()
         debugScrollTask?.cancel()
         pendingPaywallPresentation = false
         bindPaneController?.prepareForRemoval()
@@ -698,6 +726,9 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
     /// baked at `renderTestSection()` time, which never re-runs while the test
     /// state is idle — the state a brand-new (invalid) form starts in.
     private func updateTestAvailability() {
+        if let skillInstallChip {
+            setChip(skillInstallChip, enabled: form.isValid && skillInstallState != .running)
+        }
         guard let testChip else { return }
         setChip(testChip, enabled: form.isValid && testState != .running)
     }
@@ -763,6 +794,10 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         )
         scriptsSection.accessibilityIdentifier = "addhost.section.scripts"
         agentModelsSection = makeAgentModelsSection()
+        agentBrowserSection = AddHostSectionView(
+            title: String(localized: "Agent browser"), detail: nil, rows: []
+        )
+        agentBrowserSection.accessibilityIdentifier = "addhost.section.agentbrowser"
         transportSection = AddHostSectionView(
             title: String(localized: "Transport"), detail: nil, rows: []
         )
@@ -786,6 +821,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
             tmuxConfSection,
             scriptsSection,
             agentModelsSection,
+            agentBrowserSection,
             transportSection,
             hostKeySection,
         ].forEach { manualStack.addArrangedSubview($0) }
@@ -797,6 +833,7 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         renderScripts()
         renderTransport()
         renderBackend()
+        renderAgentBrowser()
     }
 
     private func makeHostSection() -> AddHostSectionView {
@@ -882,6 +919,159 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         )
         section.accessibilityIdentifier = "addhost.section.monitoring"
         return section
+    }
+
+    // MARK: Agent browser
+
+    private func renderAgentBrowser() {
+        let control = SettingsBooleanRow(
+            title: String(localized: "Let agents drive a browser"),
+            isOn: form.agentBrowser,
+            accessibilityHint: String(
+                localized: "Agents on this host can open and operate web pages in Multiplex"
+            )
+        ) { [weak self] enabled in
+            guard let self else { return }
+            self.form.agentBrowser = enabled
+            // Off takes the button away, and whatever it was doing with it.
+            if !enabled { self.retireSkillInstall() }
+            self.renderAgentBrowser()
+        }
+        agentBrowserControl = control
+        var rows: [UIView] = [control]
+        skillInstallChip = nil
+        if form.agentBrowser {
+            let chip = UIKitChassisChip(
+                "INSTALL SKILL",
+                accessibilityLabel: String(localized: "Install the agent skill on this host")
+            ) { [weak self] in
+                self?.runSkillInstall()
+            }
+            chip.accessibilityIdentifier = "addhost.agentbrowser.installskill"
+            skillInstallChip = chip
+            let chipRow = UIStackView(arrangedSubviews: [chip, addHostFlexibleSpacer()])
+            chipRow.axis = .horizontal
+            chipRow.alignment = .center
+            chipRow.spacing = 12
+            if skillInstallState == .running {
+                chipRow.addArrangedSubview(UIKitTallyLamp(
+                    caption: "INSTALLING",
+                    color: TallyPalette.caution
+                ))
+            }
+            rows.append(AddHostInsetRow(contentView: chipRow))
+            if case .finished(let outcome) = skillInstallState {
+                rows.append(AddHostInsetRow(contentView: skillInstallResult(outcome)))
+            }
+        }
+        agentBrowserSection.setDetail(agentBrowserDetail)
+        agentBrowserSection.setRows(rows)
+        updateTestAvailability()
+    }
+
+    /// The files mpx wrote, then whatever it could not do — an install can
+    /// be both (one skills directory written, the other refused).
+    private func skillInstallResult(_ outcome: AgentSkillInstall.Outcome) -> UIView {
+        let host = formHost()
+        let result = UIStackView()
+        result.axis = .vertical
+        result.alignment = .fill
+        result.spacing = 10
+        let installed: [String]
+        switch outcome {
+        case .installed(let paths), .incomplete(let paths, _): installed = paths
+        default: installed = []
+        }
+        if !installed.isEmpty {
+            let text = UIStackView(arrangedSubviews: [
+                addHostLabel(
+                    String(localized: """
+                        The multiplex skill is on \(host.hostname). Agents started from \
+                        now on can use it.
+                        """),
+                    font: UIKitChassis.uiFont(11, weight: .medium),
+                    color: UIKitChassis.signal
+                ),
+                addHostLabel(
+                    installed.joined(separator: "\n"),
+                    font: UIKitChassis.uiFont(10),
+                    color: UIKitChassis.signal2
+                ),
+            ])
+            text.axis = .vertical
+            text.alignment = .fill
+            text.spacing = 4
+            let row = UIStackView(arrangedSubviews: [
+                UIKitTallyLamp(caption: "INSTALLED", color: TallyPalette.ok),
+                text,
+            ])
+            row.axis = .horizontal
+            row.alignment = .top
+            row.spacing = 10
+            result.addArrangedSubview(row)
+        }
+        if let message = AgentSkillInstaller.failureMessage(for: outcome, host: host) {
+            let row = UIStackView(arrangedSubviews: [
+                UIKitTallyLamp(
+                    caption: installed.isEmpty ? "NOT INSTALLED" : "CHECK",
+                    color: TallyPalette.caution
+                ),
+                addHostLabel(message, font: UIKitChassis.uiFont(11), color: UIKitChassis.signal),
+            ])
+            row.axis = .horizontal
+            row.alignment = .top
+            row.spacing = 10
+            result.addArrangedSubview(row)
+        }
+        return result
+    }
+
+    private func runSkillInstall() {
+        guard form.isValid, form.agentBrowser, skillInstallState != .running else { return }
+        skillInstallTask?.cancel()
+        skillInstallState = .running
+        renderAgentBrowser()
+        let host = formHost()
+        let secrets = currentSecrets
+        let fingerprint = form.connectionFingerprint
+        let installer = skillInstaller
+        skillInstallTask = Task { [weak self] in
+            let outcome: AgentSkillInstall.Outcome
+            if let installer {
+                outcome = await installer(host, secrets)
+            } else {
+                outcome = await AgentSkillInstaller.run(host: host, secrets: secrets)
+            }
+            // An edit that changes where the form connects retired this run
+            // (`updateTestSensitive`): its answer is about another host.
+            guard let self,
+                  !Task.isCancelled,
+                  fingerprint == self.form.connectionFingerprint
+            else { return }
+            self.skillInstallState = .finished(outcome)
+            self.renderAgentBrowser()
+        }
+    }
+
+    private func retireSkillInstall() {
+        skillInstallTask?.cancel()
+        skillInstallTask = nil
+        skillInstallState = .idle
+    }
+
+    private var agentBrowserDetail: String {
+        form.agentBrowser
+            ? String(localized: """
+                While Multiplex is open, agents on this host can open web pages beside \
+                your terminal and read, click, and type in them with `mpx browser` \
+                (mpx 0.2 or later). INSTALL SKILL teaches them how: it runs \
+                `mpx skill install` on this host. Agent tabs load through this host \
+                over SSH, so they see the host's network and never your device's; \
+                they keep their own cookies and never see your own tabs.
+                """)
+            : String(localized: """
+                Off: agents on this host cannot open pages in Multiplex.
+                """)
     }
 
     /// One caption for both switches — they answer the same question at two
@@ -1410,11 +1600,16 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
 
     private func updateTestSensitive(_ mutation: (inout AddHostFormState) -> Void) {
         let fingerprint = form.testFingerprint
+        let connection = form.connectionFingerprint
         mutation(&form)
         if fingerprint != form.testFingerprint, testState != .idle {
             testTask?.cancel()
             testState = .idle
             renderTestSection()
+        }
+        if connection != form.connectionFingerprint, skillInstallState != .idle {
+            retireSkillInstall()
+            renderAgentBrowser()
         }
         updateSaveAvailability()
     }
@@ -2169,14 +2364,24 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         let shouldScrollModels = requestedSection == "models"
         let shouldScrollBackend = requestedSection == "backend"
         let shouldScrollDirectories = requestedSection == "directories"
+        // `skillinstall` also flips the section's switch on in the form and
+        // presses INSTALL SKILL — no headless tap reaches the chip.
+        let shouldInstallSkill = requestedSection == "skillinstall"
+        let shouldScrollAgentBrowser = requestedSection == "agentbrowser" || shouldInstallSkill
         let shouldScrollElsewhere = AddHostAutoOpen.requested == .bindElsewhere
         guard shouldScrollModels || shouldScrollBackend || shouldScrollDirectories
-            || shouldScrollElsewhere
+            || shouldScrollAgentBrowser || shouldScrollElsewhere
         else { return }
         didScheduleDebugScroll = true
         debugScrollTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(700))
             guard let self, !Task.isCancelled else { return }
+            if shouldInstallSkill {
+                self.form.agentBrowser = true
+                self.renderAgentBrowser()
+                self.runSkillInstall()
+                self.view.layoutIfNeeded()
+            }
             let targetY: CGFloat
             if shouldScrollModels {
                 targetY = self.agentModelsSection.convert(.zero, to: self.scrollView).y
@@ -2188,6 +2393,9 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
             } else if shouldScrollDirectories {
                 targetY = self.workingDirectoriesSection
                     .convert(.zero, to: self.scrollView).y
+                    - self.scrollView.adjustedContentInset.top
+            } else if shouldScrollAgentBrowser {
+                targetY = self.agentBrowserSection.convert(.zero, to: self.scrollView).y
                     - self.scrollView.adjustedContentInset.top
             } else if let bindContainer = self.bindContainer {
                 targetY = bindContainer.convert(

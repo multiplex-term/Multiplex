@@ -76,14 +76,211 @@ link/path resolution, the ⌗ viewport, or the ▤ file viewer.
   Inventory, sizing rules, and the resize-bar/anchor traps live in
   `input-and-windows.md`; Shell/iPad keep the in-window rails.
   `WKNavigationDelegate` re-applies the allowlist per navigation
-  (`multiplex:` never navigable; mailto re-presents the sheet); no JS
-  bridge, no send path into any terminal. One app-scoped persistent
-  `WKWebsiteDataStore` shared by every viewport; **Clear Browsing Data…**
+  (`multiplex:` never navigable; mailto re-presents the sheet); the PAGE
+  gets no JS bridge (no message handler in any world — agent tabs below
+  included), no send path into any terminal. One app-scoped persistent
+  `WKWebsiteDataStore` shared by every user viewport; **Clear Browsing Data…**
   on the readout's long-press menu wipes it globally after a confirmation.
   A viewport never claims `TerminalFocusArbiter` (switching to ⌗ releases
   the previous responder). ATS is relaxed for web content only
   (`NSAllowsArbitraryLoadsInWebContent`); app networking keeps full ATS.
   Load failures render a chassis NO ROUTE panel naming the network.
+- **Agent tabs: the host drives a viewport, the page still gets nothing**
+  (`AgentBrowserService`, `AgentBrowserLink`, `AgentBrowserDriver`; pure
+  `Models/AgentBrowser/`; experiment log `local-plan/agent-browser.md`).
+  Opt-in per host (`Host.agentBrowser`, synced, default off; excluded from
+  `connectionModelConfiguration`). A dedicated SSH connection runs
+  `mpx bridge` as a PTY-less login shell (`SSHConnection.openLineChannel`,
+  login PATH finds Homebrew/cargo; no sshd forwarding needed); the bridge
+  serves `~/.mpx/run/browser-<device>.sock` (dir 0700) to `mpx browser`.
+  Wire = JSON lines, one contract with mpx-cli's `bridge.rs`. Rules:
+  - An agent drives only tabs it opened (`⌗ AGENT …`, rail `AGENT ·`),
+    never the user's. Each agent tab uses the host's own data store
+    (`WKWebsiteDataStore(forIdentifier: host.id)`).
+  - Helpers live in the isolated `WKContentWorld` `multiplex-agent`; a
+    page-world console hook only re-dispatches DOM events. Answers are
+    JSON strings, so error codes survive.
+  - ROUTE: agent tabs load THROUGH THE HOST (`AgentBrowserProxy`; DEBUG
+    `MULTIPLEX_AGENT_ROUTE=device` restores the older device route for
+    measurement). The per-host data store's `proxyConfigurations` points at
+    a loopback CONNECT proxy (random credential, no failover, set before
+    the store's first load) that opens every connection from the host over
+    SSH direct-tcpip — a page sees the host's network, never the device's,
+    so DNS-to-private-address tricks have nothing to reach. Everything
+    arrives as CONNECT, plain HTTP included, so keep-alive lives inside each
+    tunnel (non-CONNECT gets 501). Tunnels are backpressured both ways
+    (`AgentProxySplice`); only the device socket takes a write watermark —
+    NIOSSH's child channel `setOption` traps on unsupported options. A
+    splice joined to a partner that already ended closes its own side:
+    WebKit drops spare connections while the host side is still opening,
+    and that end fired into no splice (one host connection leaked per
+    abandoned load). Bulk
+    throughput is capped by NIOSSH's per-channel receive window (= max
+    packet size, 128 KiB): ~7 MB/s at Wi-Fi RTT; raising it naively hung
+    fetches.
+  - ⚠ A real device NEVER proxies `localhost`, `127.0.0.1`, `*.localhost`
+    (the simulator does) — they reach the phone itself. Host loopback ports
+    are FORWARDED: a listener on the device's 127.0.0.1 (+ ::1, best
+    effort) at the same port, piped to the host's `localhost:<port>`.
+    `open`/`navigate` forward the URL's port; links and redirects to
+    another loopback port wait in the navigation policy for theirs (a
+    FRAME gets one only inside a page that is itself host loopback — a
+    page from elsewhere could spend the host's forwards with hidden
+    frames; unforwarded, the frame meets the loopback guard); a port
+    only `fetch`ed or used by a WebSocket needs `mpx browser forward`.
+    Device loopback is shared by every app, so a forward admits a
+    connection only when its first request carries `__mpx_forward` — a
+    random per-proxy cookie set HttpOnly for `localhost`/`127.0.0.1` in the
+    agent store (`AgentProxyHead.forwardVerdict`); others get 403, TLS is
+    closed. ⚠ The cookie must go in through the NEW TAB's own store before
+    its first load (agent tabs don't auto-load at init): set on a
+    `WKWebsiteDataStore(forIdentifier:)` no web view uses yet, WebKit drops
+    it. Clear Browsing Data wipes it with the rest, for every agent tab of
+    the host (one store): `clearBrowsingData` re-seeds it before the reload
+    (`installAgentCookies`), or every forward answers 403 until a new tab
+    opens. Admission is decided at a connection's first bytes, not at accept
+    (WebKit pre-opens spare connections). Measured on iPhone: navigations, same-origin fetches, and
+    WebSocket handshakes carry it; a cross-port fetch WITHOUT credentials
+    does not (Fetch spec) and is refused unless the agent opens that port
+    explicitly (`mpx browser forward <port> --open`: no cookie check, any
+    device app can reach it while the tab lives; `tabs` marks it `(open)`;
+    a plain `forward` restores the check AND closes the kept-alive
+    connections the open mode admitted; the mode belongs to a forward —
+    `setOpen` ignores a port that is not forwarded, and `admitIfOpen`
+    checks and records a client under one lock, or a connection could
+    outlive the mode that admitted it). `*.localhost` is not admitted;
+    `https://localhost` only on an open port. `matchDomains` listing loopback
+    does NOT make a device proxy it (tried). Forwards close with the
+    host's last agent tab — and with an `open` that made no tab (no
+    window, a revoke): the slot's `opening` count holds them only while a
+    tab is on its way. A forward left bound made the same port `port_busy`
+    for another host. At most 16 per host (`AgentBrowserProxy.maxForwards`,
+    `too_many_forwards`): a page can ask for one per loopback port it
+    navigates a frame to, and each is two listeners. ⚠ A forward's
+    listener binds plain first and with `SO_REUSEADDR` only when nothing
+    accepts on the port (`listen(on:port:)`): a connection the forward
+    closed FIRST (a refused client, a host that closed an idle keep-alive)
+    sits in TIME_WAIT for ~30 s and fails a plain re-bind — close the last
+    tab, open the port again, `port_busy` (reproduced in the simulator).
+    `SO_REUSEADDR` alone would also bind over another app's wildcard
+    listener (measured on Darwin) and take its loopback clients.
+    While a tunnel's host side opens, the device socket is not read
+    (`autoRead` off until the splice joins): an upload that starts during
+    an SSH dial would otherwise buffer whole.
+  - Loopback guard (`loopbackRuleListJSON`): every loopback URL is blocked
+    except forwarded ports — otherwise a page could reach other apps'
+    servers on the device — in every spelling: bare and behind userinfo
+    (`http://x@127.0.0.1/` puts text between scheme and host), `[::]`, and
+    IPv4-mapped literals (`[::ffff:7f00:1]`); a test compiles both rule
+    lists in WebKit, since one it refuses opens no tab at all.
+    Recompiled when forwards change and swapped
+    into the host's open tabs; no rules → no tab (fail closed). A compile
+    is a wait: `contentRules` answers only with rules for the forwards as
+    they are when it returns (two ports forwarded at once used to race,
+    and the older set applied last blocked a forwarded port). The device
+    route's private-network rules (`AgentBrowserAddressPolicy.admit`,
+    `contentRuleListJSON`) remain only behind the DEBUG switch.
+    WebRTC is removed from agent tabs (page world, all frames, best
+    effort): its UDP leaves the device directly, past any proxy or rule.
+  - Docks beside the agent's tmux session tab (`$TMUX` → `session`), else
+    the host's active tab — windows on screen first (a restored background
+    window for the same session lays the tab out at 0×0). Never takes focus
+    unless `--focus`/`show`, and `AgentFocusGate` refuses those while the
+    user typed in the last 5 s and past once per 30 s per host (the
+    phishing-interrupt bound). No terminal open for the host → `no_window`.
+    A granted focus also reveals the window: `WindowEntry.reveal` raised a
+    scene only through a tab's terminal, which a ⌗ tab does not have, and a
+    new tab's dock never called it (compact Shell: behind the deck). The
+    same bound covers the external-link sheet: a non-web navigation in an
+    agent tab raises it only while the tab is on screen (`policy(for:)`) —
+    it is a sheet over the whole window, and a hidden tab's pane is still
+    mounted. A typed address in an agent tab is admitted like the agent's
+    (`admitViaHost`: `localhost` stays the host's).
+  - Several devices on one host each run a bridge; the socket is
+    `browser-<name>-<install id>.sock` (iOS names devices generically —
+    two iPads are both "iPad" — and a shared name made the newer bridge
+    evict the older). `mpx browser` picks the newest unless `--device` /
+    `MPX_BROWSER_DEVICE` names one; a substring matching several is an
+    error. Each device has its own tabs.
+  - Input is synthetic DOM events (`isTrusted` false); typing prefers
+    `execCommand("insertText")`. No network interception. Only HTML
+    elements have `click()` — an `<svg>` button gets a dispatched click.
+    `eval` bodies catch what the code throws (`{thrown}`): the only
+    exception WebKit then reports is a body that did not compile, the one
+    case for the statement-body retry. A SyntaxError thrown at run time
+    (`r.json()` on an HTML error page) used to retry too, and a POST went
+    out twice.
+  - Polls end on cancellation (`AgentBrowserDriver.pause`): a cancelled
+    task's sleep returns at once, and `try?` around it turned `settle` /
+    `wait` into a main-actor spin until their deadline (the bridge's
+    `cancel`, a redial, and a revoke all cancel requests mid-load).
+  - Scheduling (measured 2026-10-08, sims): an inactive tab's pane is
+    `isHidden`, not unmounted, and WebKit keeps it fully live (rAF,
+    timers, `takeSnapshot`); `inactiveSchedulingPolicy = .none` covers a
+    truly unparented view. visionOS: another app opening does NOT
+    background Multiplex. iPad: answers through `inactive` and the first
+    ~6 s of `background` (`visibilityState` hidden, rAF stops, timers run),
+    then suspension → bridge timeouts; the SSH channel survived a ~40 s
+    suspension and answered at once on resume.
+  - A request queued during suspension must not run late: the bridge
+    stamps `t`/`ttl` on its monotonic clock, pongs carry `t`, and
+    `BridgeClock` skips requests older than their TTL (a `cancel` line
+    alone loses the race — request and cancel arrive in separate reads).
+    Only the pong answering the ping in flight, back within 2 s, teaches
+    the clock (a pong queued through a suspension would make every stale
+    request look fresh); the clock resets per bridge process. A session
+    that never says hello ends after `helloDeadline` (45 s from the dial):
+    only the connect has a deadline of its own, pings start at the hello,
+    and a channel that opened onto a stalled shell sat in `.connecting`
+    for good.
+  - The host is untrusted input: wire integers go through `wireInteger`
+    (finite, whole, 0…2^53 — an unchecked `Double`→`Int` traps the app);
+    8 requests in flight per link, 6 agent tabs per host (counted again
+    after `open`'s waits), 16 forwards per host, one screenshot
+    at a time, answers capped (16 MiB line, 4 M chars from the page), a
+    bounded SSH read stream that drops the session when flooded.
+  - Permission is re-checked after every wait before a side effect;
+    switching the host off (or disabling/deleting it) cancels in-flight
+    requests and closes its agent tabs. No content rules → no agent tab
+    (fail closed). Work in flight at a teardown undoes itself: a link
+    session torn down before its SSH connection exists does not dial
+    (`AgentBrowserLink.adopt` — it would start a second bridge nobody reads
+    or ends, which takes the socket from the live one); a proxy dial
+    retired by a host edit, a network change, or `stop` is closed, not
+    adopted (`epoch`); a stopped proxy binds nothing.
+  - The page is untrusted too: forged console events are size-checked,
+    levels allowlisted, the buffer has a character budget.
+  - **The skill comes from the host's own `mpx`, never from the app**
+    (Host Settings ▸ Agent browser ▸ INSTALL SKILL; `AgentSkillInstaller`,
+    pure `AgentSkillInstall`). The button runs `mpx skill install --json`
+    on the host, which writes the `SKILL.md` embedded in that binary into
+    `~/.agents/skills` (Codex and the agents that share it) and
+    `~/.claude/skills` (Claude Code reads only its own) — so what an agent
+    reads matches the `mpx browser` it calls, and upgrading `mpx` is the
+    only way the text changes. Rejected: bundling the skill in the app and
+    writing it over SFTP/exec (two copies, and the app's would describe a
+    CLI the host may not have), and a Claude Code plugin marketplace in
+    mpx-cli (a second channel with its own version, for one agent only).
+    Rules:
+    - It rides the bridge's road — a throwaway connection, a PTY-less
+      login shell, the one `mpx` search (`AgentBrowserLaunch.exec`) — not
+      an exec. An exec gets sshd's bare PATH and would say "mpx wasn't
+      found" on a host whose agent browser is working.
+    - A login shell prints what it likes (motd, rc chatter), so the
+      answer is the one JSON line carrying `skill` + `installed`; nothing
+      else on stdout is read. No answer line + a clap usage error on
+      stderr = an `mpx` from before the command (`outdatedCLI`).
+    - It uses the form's credentials like the Signal check, so it works
+      on a host not saved yet; an edit to where the form connects retires
+      the result (`connectionFingerprint` — narrower than the Signal
+      check's, which mosh and the backend also retire). The button exists
+      only while the switch is on; the install itself does not depend on
+      the switch being saved.
+    - `mpx` counts a skill directory that is a symlink to the other one as
+      installed (skill managers link `~/.claude/skills/x` to
+      `~/.agents/skills/x`); a symlink that leads anywhere else is refused
+      and comes back in `failed`, shown as a CHECK row under what did
+      install.
 - **The file viewer is the viewport's sibling for paths — and path presses
   confirm instead of falling to selection** (`TerminalRoute.Mode
   .fileViewer`; pure models in `Models/FileViewer/`; records in

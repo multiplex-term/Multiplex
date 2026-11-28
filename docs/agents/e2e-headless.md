@@ -36,6 +36,37 @@ app.multiplexterm.multiplex`):
   prompt); `"enabled": false` proves the never-dials promise against a
   silent `state/sshd.log`; `"backgroundKeepAlive": true` starts the host
   opted into background keep-alive (nothing can tap that switch headlessly).
+  `"agentBrowser": true` starts the agent browser's bridge for the host.
+- `MULTIPLEX_AGENT_MPX=<path on the host>` — the bridge launch tries this
+  `mpx` first (a dev build: `../mpx-cli/target/debug/mpx`; the Mac's
+  Homebrew `mpx` may predate `bridge` → the link reports `outdatedCLI`).
+  Then drive it from the Mac: `mpx browser open localhost:<port> --session
+  main`, `snapshot`, `click eN`, … The hidden `mpx browser probe` reports
+  in-window / on-screen / scene + app state and timer/rAF health — the
+  scheduling instrument. `MULTIPLEX_AGENT_INACTIVE=throttle|suspend|none`
+  overrides the agent tab's `inactiveSchedulingPolicy`. iPad: launching
+  Safari backgrounds the app; on visionOS it does not.
+  `MULTIPLEX_AGENT_ROUTE=device` switches back to the old device route;
+  `MULTIPLEX_AGENT_BROWSER_HOST=<name>|first` opts a host in for one
+  launch without writing its synced record (real-device runs: pass env
+  with `devicectl device process launch --environment-variables`; crash
+  logs via `devicectl device copy from --domain-type systemCrashLogs`).
+  ⚠ The simulator proxies `localhost`; a real device never does — prove
+  loopback forwarding on hardware. The simulator also SHARES the Mac's
+  loopback, so a forward binds the Mac's own `127.0.0.1:<port>`: a dev
+  server already on that address is `port_busy`, and with nothing there
+  the forward tunnels to `localhost:<port>` — itself. A forward's tunnel
+  can still be driven here: serve the fixture on `[::1]:<port>` ONLY (the
+  forward takes 127.0.0.1, skips the taken ::1, and sshd resolves
+  `localhost` to ::1 first), then `mpx browser forward <port> --open` and
+  `curl http://127.0.0.1:<port>/` from the Mac — head replay, uploads,
+  downloads, keep-alive, and the 403 once `forward <port>` restores the
+  cookie check. Page URLs for the proxy path: the Mac's LAN address, not
+  `localhost`. `lsof -nP -a -p <app pid> -iTCP -sTCP:LISTEN` shows the
+  proxy and every forward the app holds. The bridge's socket path must
+  fit `sun_path` (104 bytes): an `MPX_RUNTIME_DIR` deep in a temp tree
+  fails with `path must be shorter than SUN_LEN`; the default
+  `~/.mpx/run` fits.
 - `MULTIPLEX_AUTO_ATTACH=main,scratch` — opens a terminal per entry via the
   real Attach route; `+` inside an entry groups sessions as tabs of one
   window. Fires once per process. `MULTIPLEX_AUTO_ATTACH_HOST=devbox` names
@@ -106,14 +137,25 @@ app.multiplexterm.multiplex`):
   presentations — a restored terminal-only scene shows nothing — and the
   notification-permission alert iOS raises on a fresh install sits over the
   middle of the sheet with no headless way to dismiss it.
-- `MULTIPLEX_AUTO_HOST_SETTINGS=1|models|backend|directories` — opens the
-  first host's edit sheet (regression-checks the Observation environment
-  across the sheet boundary — a missing HostStore is a fatal error);
-  `models` scrolls to the Agent launch models section, `backend` to the
-  tmux/herdr Backend section, `directories` to the New session defaults
-  working-directories editor (shown for BOTH backends — the herdr mint
-  roots a session's world with these; only the tmux options editor stays
-  tmux-scoped).
+- `MULTIPLEX_AUTO_HOST_SETTINGS=1|models|backend|directories|agentbrowser|skillinstall`
+  — opens the first host's edit sheet (regression-checks the Observation
+  environment across the sheet boundary — a missing HostStore is a fatal
+  error); `models` scrolls to the Agent launch models section, `backend`
+  to the tmux/herdr Backend section, `directories` to the New session
+  defaults working-directories editor (shown for BOTH backends — the herdr
+  mint roots a session's world with these; only the tmux options editor
+  stays tmux-scoped), `agentbrowser` to the Agent browser section.
+  `skillinstall` scrolls there too, turns the section's switch on IN THE
+  FORM (nothing is saved) and presses INSTALL SKILL — no headless tap
+  reaches the chip. ⚠ The harness sshd logs in as YOU, so a real install
+  lands in the Mac's own `~/.agents/skills` and `~/.claude/skills`. Pass
+  `MULTIPLEX_AGENT_MPX` a wrapper instead of the dev build itself — three
+  lines of `sh`: `HOME=<scratch dir>; export HOME; exec <dev mpx> "$@"` —
+  and read the result out of that directory. Without `MULTIPLEX_AGENT_MPX`
+  the login shell finds whatever `mpx` the Mac has installed; a Homebrew
+  0.1.x has no `skill` command, which is the NOT INSTALLED / "too old"
+  answer (2026-11-28). A file where `<scratch>/.claude/skills` should be
+  gives the INSTALLED + CHECK pair.
 - **Attention alerts** need Pro AND the `attention.alertsEnabled` switch;
   both live in the app container's defaults, and `simctl spawn <UDID>
   defaults write <bundle-id>` lands in a domain the sandboxed app never

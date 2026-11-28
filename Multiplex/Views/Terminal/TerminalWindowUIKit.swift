@@ -1335,8 +1335,14 @@ final class TerminalWindowViewController: UIViewController,
                 noteActiveSessionOpened()
                 if let shell = self.shell {
                     shell.revealTab(tabID)
-                } else {
-                    self.workspace.controller(for: tabID)?.revealWindow()
+                } else if let terminal = self.workspace.controller(for: tabID) {
+                    terminal.revealWindow()
+                } else if let scene = self.view.window?.windowScene {
+                    // An auxiliary tab (an agent's ⌗ tab under `show`) has
+                    // no terminal to bring its window forward with.
+                    UIApplication.shared.activateSceneSession(
+                        for: UISceneSessionActivationRequest(session: scene.session)
+                    )
                 }
             },
             surrender: { [weak self] in
@@ -1359,6 +1365,16 @@ final class TerminalWindowViewController: UIViewController,
                 else { return false }
                 openFileViewer(target: target)
                 return true
+            },
+            activeTabID: { [weak self] in self?.route.activeTabID },
+            dock: { [weak self] tab, anchorID, activate in
+                self?.dock(tab, after: anchorID, activate: activate)
+            },
+            close: { [weak self] tabID in
+                self?.closeTab(tabID)
+            },
+            isForeground: { [weak self] in
+                self?.view.window?.windowScene?.activationState == .foregroundActive
             }
         ))
     }
@@ -1724,14 +1740,14 @@ final class TerminalWindowViewController: UIViewController,
         dock(tab, after: anchorID)
     }
 
-    private func dock(_ tab: TerminalRoute, after anchorID: UUID) {
+    private func dock(_ tab: TerminalRoute, after anchorID: UUID, activate: Bool = true) {
         mutateRoute { route in
             if let index = route.tabs.firstIndex(where: { $0.id == anchorID }) {
                 route.tabs.insert(tab, at: index + 1)
             } else {
                 route.tabs.append(tab)
             }
-            route.activate(tab.id)
+            if activate { route.activate(tab.id) }
         }
     }
 
