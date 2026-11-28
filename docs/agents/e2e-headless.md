@@ -52,7 +52,21 @@ app.multiplexterm.multiplex`):
   with `devicectl device process launch --environment-variables`; crash
   logs via `devicectl device copy from --domain-type systemCrashLogs`).
   ⚠ The simulator proxies `localhost`; a real device never does — prove
-  loopback forwarding on hardware.
+  loopback forwarding on hardware. The simulator also SHARES the Mac's
+  loopback, so a forward binds the Mac's own `127.0.0.1:<port>`: a dev
+  server already on that address is `port_busy`, and with nothing there
+  the forward tunnels to `localhost:<port>` — itself. A forward's tunnel
+  can still be driven here: serve the fixture on `[::1]:<port>` ONLY (the
+  forward takes 127.0.0.1, skips the taken ::1, and sshd resolves
+  `localhost` to ::1 first), then `mpx browser forward <port> --open` and
+  `curl http://127.0.0.1:<port>/` from the Mac — head replay, uploads,
+  downloads, keep-alive, and the 403 once `forward <port>` restores the
+  cookie check. Page URLs for the proxy path: the Mac's LAN address, not
+  `localhost`. `lsof -nP -a -p <app pid> -iTCP -sTCP:LISTEN` shows the
+  proxy and every forward the app holds. The bridge's socket path must
+  fit `sun_path` (104 bytes): an `MPX_RUNTIME_DIR` deep in a temp tree
+  fails with `path must be shorter than SUN_LEN`; the default
+  `~/.mpx/run` fits.
 - `MULTIPLEX_AUTO_ATTACH=main,scratch` — opens a terminal per entry via the
   real Attach route; `+` inside an entry groups sessions as tabs of one
   window. Fires once per process. `MULTIPLEX_AUTO_ATTACH_HOST=devbox` names
