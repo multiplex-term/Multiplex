@@ -341,6 +341,65 @@ final class AgentBrowserTests: XCTestCase {
         XCTAssertTrue(AgentFocusGate.Verdict.coolingDown(19.2).refusalMessage?.contains("in 20 s") == true)
     }
 
+    // MARK: Forwards
+
+    /// Forwards the next port from `port` up that this process can bind
+    /// (another process may hold some), within a bounded number of tries.
+    private func forwardNextFreePort(_ proxy: AgentBrowserProxy, from port: inout Int) async throws {
+        for _ in 0..<200 {
+            port += 1
+            do {
+                try await proxy.forward(port: port)
+                return
+            } catch is AgentBrowserProxy.PortBusy {}
+        }
+        XCTFail("no bindable loopback port near \(port)")
+        throw AgentBrowserProxy.PortBusy()
+    }
+
+    /// Each forward is two listeners on the device, and a page can ask for
+    /// one per loopback port it navigates a frame to.
+    func testAHostHoldsABoundedNumberOfForwards() async throws {
+        let proxy = AgentBrowserProxy(host: host)
+        defer { proxy.stop() }
+        var port = 40_000 + Int.random(in: 0..<10_000)
+        for _ in 0..<AgentBrowserProxy.maxForwards {
+            try await forwardNextFreePort(proxy, from: &port)
+        }
+        XCTAssertEqual(proxy.forwardedPorts.count, AgentBrowserProxy.maxForwards)
+        do {
+            try await proxy.forward(port: port + 1)
+            XCTFail("a forward past the bound was bound")
+        } catch is AgentBrowserProxy.TooManyForwards {}
+        XCTAssertEqual(proxy.forwardedPorts.count, AgentBrowserProxy.maxForwards)
+        // Asking again for one already held is not a new forward.
+        try await proxy.forward(port: proxy.forwardedPorts[0])
+
+        // The host's last agent tab closing releases them all.
+        proxy.stopForwards()
+        XCTAssertTrue(proxy.forwardedPorts.isEmpty)
+        try await forwardNextFreePort(proxy, from: &port)
+        XCTAssertEqual(proxy.forwardedPorts, [port])
+    }
+
+    /// A revoked host's proxy binds nothing more: no listener, no forward.
+    func testAStoppedProxyBindsNothing() async throws {
+        let proxy = AgentBrowserProxy(host: host)
+        _ = try await proxy.start()
+        proxy.stop()
+        XCTAssertNil(proxy.port)
+        do {
+            try await proxy.forward(port: 40_000 + Int.random(in: 0..<10_000))
+            XCTFail("a stopped proxy bound a forward")
+        } catch {}
+        XCTAssertTrue(proxy.forwardedPorts.isEmpty)
+        do {
+            _ = try await proxy.start()
+            XCTFail("a stopped proxy listened again")
+        } catch {}
+        XCTAssertNil(proxy.port)
+    }
+
     // MARK: Docking
 
     /// A restored window for the agent's session can sit in the background;

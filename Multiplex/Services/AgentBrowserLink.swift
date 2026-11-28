@@ -115,6 +115,11 @@ final class AgentBrowserLink {
         switch state {
         case .ready:
             guard let token = sendPing() else { return }
+            // The periodic check slept through the suspension and wakes
+            // with the app: left running it can find THIS ping "unanswered"
+            // an instant after it left, and redial a healthy link. Re-arm
+            // it from now; the check below is this ping's deadline.
+            startPinging()
             Task { [weak self] in
                 try? await Task.sleep(for: .seconds(5))
                 guard let self, self.outstandingPing?.token == token else { return }
@@ -158,7 +163,11 @@ final class AgentBrowserLink {
         session = Task { [weak self] in
             let secrets = await HostSecrets.loadOffMain(for: host)
             let connection = SSHConnection(host: host, secrets: secrets)
-            self?.connection = connection
+            // Torn down during that wait (a redial, a stop, the link let
+            // go): `tearDown` had no connection to close yet, so dialling on
+            // would start a second bridge nobody reads or ends — and it
+            // would take the socket from the live one.
+            guard self?.adopt(connection, generation: generation) == true else { return }
             do {
                 // Citadel connects can black-hole and ignore cancellation.
                 try await deadlined(seconds: HostTest.connectDeadline) { try await connection.connect() }
@@ -195,6 +204,14 @@ final class AgentBrowserLink {
                 }
             }
         }
+    }
+
+    /// Takes a session's connection, unless the session was already torn
+    /// down. From here on `tearDown` closes it.
+    private func adopt(_ connection: SSHConnection, generation: Int) -> Bool {
+        guard self.generation == generation else { return false }
+        self.connection = connection
+        return true
     }
 
     /// Set from SSH callbacks when the bounded stream drops a read.

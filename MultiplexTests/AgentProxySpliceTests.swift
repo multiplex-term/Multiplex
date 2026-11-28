@@ -17,9 +17,17 @@ final class AgentProxySpliceTests: XCTestCase {
         }
     }
 
+    /// An `EmbeddedChannel` is inactive until it connects — and a splice
+    /// closes the side it joins when the partner is not active.
+    private func connectedChannel() throws -> EmbeddedChannel {
+        let channel = EmbeddedChannel()
+        try channel.connect(to: SocketAddress(ipAddress: "127.0.0.1", port: 1)).wait()
+        return channel
+    }
+
     func testReadsWaitWhileThePartnerIsFullAndResumeWhenItDrains() throws {
-        let device = EmbeddedChannel()
-        let host = EmbeddedChannel()
+        let device = try connectedChannel()
+        let host = try connectedChannel()
         let (fromDevice, fromHost) = AgentProxySplice.pair(device, host)
         let counter = ReadCounter()
         try device.pipeline.syncOperations.addHandlers([counter, fromDevice])
@@ -44,11 +52,12 @@ final class AgentProxySpliceTests: XCTestCase {
     }
 
     func testBytesCrossAndAnEndClosesThePartner() throws {
-        let device = EmbeddedChannel()
-        let host = EmbeddedChannel()
+        let device = try connectedChannel()
+        let host = try connectedChannel()
         let (fromDevice, fromHost) = AgentProxySplice.pair(device, host)
         try device.pipeline.syncOperations.addHandler(fromDevice)
         try host.pipeline.syncOperations.addHandler(fromHost)
+        XCTAssertTrue(device.isActive && host.isActive, "joining two live sides ends neither")
 
         try device.writeInbound(ByteBuffer(string: "GET / HTTP/1.1\r\n\r\n"))
         XCTAssertEqual(try host.readOutbound(as: ByteBuffer.self), ByteBuffer(string: "GET / HTTP/1.1\r\n\r\n"))
@@ -58,5 +67,19 @@ final class AgentProxySpliceTests: XCTestCase {
         try host.close().wait()
         device.embeddedEventLoop.run()
         XCTAssertFalse(device.isActive, "the host side ended; the device side follows")
+    }
+
+    /// WebKit drops connections it pre-opened; when that happens while the
+    /// host side is still opening, the device side's end fired into no
+    /// splice. The host side must not stay open for it.
+    func testASideJoinedToAPartnerThatAlreadyEndedIsClosed() throws {
+        let device = try connectedChannel()
+        let host = try connectedChannel()
+        try device.close().wait()
+
+        let (_, fromHost) = AgentProxySplice.pair(device, host)
+        try host.pipeline.syncOperations.addHandler(fromHost)
+        host.embeddedEventLoop.run()
+        XCTAssertFalse(host.isActive)
     }
 }

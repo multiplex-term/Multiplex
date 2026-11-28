@@ -92,6 +92,9 @@ final class AgentBrowserService {
         /// The tab the host's agent used last — the default target.
         var lastUsed: String?
         var nextHandle = 0
+        /// `open` calls between their first wait and their tab: with no
+        /// tab yet, nothing else says the host still needs its forwards.
+        var opening = 0
         /// Host route: the proxy, created with the host's first tab.
         var proxy: AgentBrowserProxy?
         /// Compiled content rules, keyed by what they were compiled for
@@ -370,11 +373,21 @@ final class AgentBrowserService {
             let backend = Host.SessionBackend(token: value["backend"]?.stringValue) ?? host.sessionBackend
             return SessionKey(backend: backend, name: name)
         }
-        guard tabs(of: host.id).count < Self.maxTabsPerHost else {
-            return .failure(.init(
-                code: "too_many_tabs",
-                message: "This host already has \(Self.maxTabsPerHost) agent tabs — `close` one first."
-            ))
+        let tooManyTabs = AgentBrowserError(
+            code: "too_many_tabs",
+            message: "This host already has \(Self.maxTabsPerHost) agent tabs — `close` one first."
+        )
+        guard tabs(of: host.id).count < Self.maxTabsPerHost else { return .failure(tooManyTabs) }
+        let hostID = host.id
+        let link = hosts[hostID]?.link
+        hosts[hostID]?.opening += 1
+        defer {
+            // However this ends: an `open` that made no tab (no window, a
+            // revoke, a failed route) must not leave its forward bound. The
+            // count belongs to the slot it was taken in — a host switched
+            // off and on again meanwhile has a new one.
+            if hosts[hostID]?.link === link { hosts[hostID]?.opening -= 1 }
+            releaseForwardsIfIdle(hostID)
         }
         let unavailable = AgentBrowserError(
             code: "unavailable",
@@ -394,10 +407,12 @@ final class AgentBrowserService {
             route = .device
         }
         guard let rules = await contentRules(for: host) else { return .failure(unavailable) }
-        // The compiles were waits: re-check before the side effects.
+        // The compiles were waits: re-check before the side effects — the
+        // permission, and the quota (several `open`s can wait at once).
         guard !Task.isCancelled, let host = authorizedHost(host.id), hosts[host.id] != nil else {
             return .failure(Self.revoked)
         }
+        guard tabs(of: host.id).count < Self.maxTabsPerHost else { return .failure(tooManyTabs) }
         guard let dock = workspace.agentDockTarget(hostID: host.id, session: session) else {
             return .failure(.noWindow(hostName: host.name))
         }
@@ -405,7 +420,6 @@ final class AgentBrowserService {
         hosts[host.id]?.nextHandle = handleNumber
         let handle = "t\(handleNumber)"
         let tabRoute = TerminalRoute(hostID: host.id, mode: .viewport(urlString: offer.url.absoluteString))
-        let hostID = host.id
         let tabID = tabRoute.id
         let controller = ViewportController(
             tabID: tabID,
@@ -463,7 +477,15 @@ final class AgentBrowserService {
     /// reachable by every app on the device.
     private func tabClosed(_ tabID: UUID, hostID: UUID) {
         hosts[hostID]?.tabs.removeAll { $0.tabID == tabID }
-        if tabs(of: hostID).isEmpty { hosts[hostID]?.proxy?.stopForwards() }
+        releaseForwardsIfIdle(hostID)
+    }
+
+    /// Forwards live only while the host has an agent tab, or one on its
+    /// way: each holds a device port (another host's tab cannot forward the
+    /// same one meanwhile).
+    private func releaseForwardsIfIdle(_ hostID: UUID) {
+        guard let slot = hosts[hostID], slot.tabs.isEmpty, slot.opening == 0 else { return }
+        slot.proxy?.stopForwards()
     }
 
     private func loopbackForwarder(hostID: UUID) -> @MainActor (URL) async -> Bool {
@@ -489,13 +511,25 @@ final class AgentBrowserService {
         guard !before.contains(port) else { return nil }
         do {
             try await proxy.forward(port: port)
-        } catch {
+        } catch is AgentBrowserProxy.PortBusy {
             return .init(
                 code: "port_busy",
                 message: "Port \(port) is already in use on the device (another app, or another host's agent tab)."
             )
+        } catch is AgentBrowserProxy.TooManyForwards {
+            return .init(
+                code: "too_many_forwards",
+                message: "This host already forwards \(AgentBrowserProxy.maxForwards) localhost ports — "
+                    + "they are released when its last agent tab closes."
+            )
+        } catch {
+            // The proxy stopped (the host was switched off) during the bind.
+            return Self.revoked
         }
-        guard proxy.forwardedPorts != before else { return nil }
+        // The bind was a wait: the tab that wanted the port may be gone, and
+        // with the host's last tab go its forwards — this one included.
+        releaseForwardsIfIdle(hostID)
+        guard proxy.forwardedPorts.contains(port) else { return .noTab() }
         // The host's open tabs must let the new port through before
         // anything loads from it.
         guard let host = store.host(id: hostID), let rules = await contentRules(for: host) else {
@@ -598,26 +632,39 @@ final class AgentBrowserService {
     /// forwards (host route), or the private-network block (device route).
     /// Compiled once per key, kept in the host's slot.
     private func contentRules(for host: Host) async -> WKContentRuleList? {
-        let (key, json): (String, String)
-        if Self.routesViaHost {
-            let ports = hosts[host.id]?.proxy?.forwardedPorts ?? []
-            key = "loopback:" + ports.map(String.init).joined(separator: ",")
-            json = AgentBrowserAddressPolicy.loopbackRuleListJSON(forwardedPorts: ports)
-        } else {
-            key = "device:" + host.hostname
-            json = AgentBrowserAddressPolicy.contentRuleListJSON(host: host)
-        }
-        if let cached = hosts[host.id]?.rules, cached.key == key { return cached.list }
-        do {
-            guard let list = try await WKContentRuleListStore.default().compileContentRuleList(
-                forIdentifier: "agent-browser-\(host.id.uuidString)",
-                encodedContentRuleList: json
-            ) else { return nil }
+        while true {
+            let (key, json) = ruleSource(for: host)
+            if let cached = hosts[host.id]?.rules, cached.key == key { return cached.list }
+            let list: WKContentRuleList
+            do {
+                guard let compiled = try await WKContentRuleListStore.default().compileContentRuleList(
+                    forIdentifier: "agent-browser-\(host.id.uuidString)",
+                    encodedContentRuleList: json
+                ) else { return nil }
+                list = compiled
+            } catch {
+                Self.log.error("agent browser rules did not compile: \(String(describing: error), privacy: .public)")
+                return nil
+            }
+            // The forwards can change during a compile (two ports forwarded
+            // at once). Rules for the older set are not an answer: applied
+            // last, they would block a port that is forwarded.
+            guard ruleSource(for: host).key == key else { continue }
             hosts[host.id]?.rules = (key, list)
             return list
-        } catch {
-            Self.log.error("agent browser rules did not compile: \(String(describing: error), privacy: .public)")
-            return nil
         }
+    }
+
+    /// What the rules are compiled from, and the key naming it: the
+    /// forwarded ports, or the device route's host address.
+    private func ruleSource(for host: Host) -> (key: String, json: String) {
+        if Self.routesViaHost {
+            let ports = hosts[host.id]?.proxy?.forwardedPorts ?? []
+            return (
+                "loopback:" + ports.map(String.init).joined(separator: ","),
+                AgentBrowserAddressPolicy.loopbackRuleListJSON(forwardedPorts: ports)
+            )
+        }
+        return ("device:" + host.hostname, AgentBrowserAddressPolicy.contentRuleListJSON(host: host))
     }
 }

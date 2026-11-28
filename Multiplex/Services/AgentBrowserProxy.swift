@@ -38,6 +38,12 @@ final class AgentBrowserProxy: @unchecked Sendable {
     private var host: Host
     private var connection: SSHConnection?
     private var connecting: Task<SSHConnection, Error>?
+    /// Bumped whenever the connection is retired (host edit, network
+    /// change, stop): a dial that began before then is not adopted.
+    private var epoch = 0
+    /// Set by `stop()`. Work that was in flight then (a dial, a bind) must
+    /// undo itself instead of outliving the host's permission.
+    private var stopped = false
     private var server: Channel?
     private var opened = 0
     private var forwards: [Int: [Channel]] = [:]
@@ -67,7 +73,7 @@ final class AgentBrowserProxy: @unchecked Sendable {
         let retired = lock.withLock { () -> SSHConnection? in
             defer { host = newHost }
             guard !newHost.hasSameConnectionModelConfiguration(as: host) else { return nil }
-            defer { connection = nil; connecting = nil }
+            defer { connection = nil; connecting = nil; epoch &+= 1 }
             return connection
         }
         if let retired { Task { await retired.close() } }
@@ -77,7 +83,7 @@ final class AgentBrowserProxy: @unchecked Sendable {
     /// path. Drop it; the next tunnel dials fresh.
     func dropConnection() {
         let dropped = lock.withLock { () -> SSHConnection? in
-            defer { connection = nil; connecting = nil }
+            defer { connection = nil; connecting = nil; epoch &+= 1 }
             return connection
         }
         if let dropped { Task { await dropped.close() } }
@@ -121,6 +127,7 @@ final class AgentBrowserProxy: @unchecked Sendable {
     /// Binds `127.0.0.1:<ephemeral>` and returns the port.
     func start() async throws -> Int {
         if let port { return port }
+        guard !lock.withLock({ stopped }) else { throw SSHConnectionError.notConnected }
         let channel = try await ServerBootstrap(group: MultiThreadedEventLoopGroup.singleton)
             .serverChannelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
             .childChannelInitializer { [weak self] child in
@@ -129,13 +136,22 @@ final class AgentBrowserProxy: @unchecked Sendable {
             }
             .bind(host: "127.0.0.1", port: 0)
             .get()
-        lock.withLock { server = channel }
-        guard let port = channel.localAddress?.port else { throw SSHConnectionError.notConnected }
+        // Two first tabs can get here together, and a stop can land during
+        // the bind: keep one listener, and none once stopped.
+        let kept = lock.withLock { () -> Channel? in
+            if stopped { return nil }
+            if let server { return server }
+            server = channel
+            return channel
+        }
+        if kept !== channel { channel.close(promise: nil) }
+        guard let port = kept?.localAddress?.port else { throw SSHConnectionError.notConnected }
         Self.log.info("host route proxy on 127.0.0.1:\(port, privacy: .public)")
         return port
     }
 
     func stop() {
+        lock.withLock { stopped = true }
         stopForwards()
         dropConnection()
         lock.withLock { () -> Channel? in
@@ -148,6 +164,14 @@ final class AgentBrowserProxy: @unchecked Sendable {
 
     /// The device's port is taken (another app, or another host's forward).
     struct PortBusy: Error {}
+
+    /// The host already holds `maxForwards` ports.
+    struct TooManyForwards: Error {}
+
+    /// Device ports one host may hold at once. Each is two listeners, and a
+    /// page can ask for one per loopback port it navigates a frame to — so
+    /// without a bound a page could spend the app's file descriptors.
+    static let maxForwards = 16
 
     var forwardedPorts: [Int] { lock.withLock { forwards.keys.sorted() } }
 
@@ -176,9 +200,11 @@ final class AgentBrowserProxy: @unchecked Sendable {
     /// Makes the device's `localhost:<port>` reach the host's. Idempotent;
     /// concurrent callers for one port share the bind.
     func forward(port: Int) async throws {
-        let task: Task<Void, Error>? = lock.withLock {
+        let task: Task<Void, Error>? = try lock.withLock {
             if forwards[port] != nil { return nil }
             if let pending = binding[port] { return pending }
+            guard !stopped else { throw CancellationError() }
+            guard forwards.count + binding.count < Self.maxForwards else { throw TooManyForwards() }
             let task = Task { try await self.bindForward(port: port) }
             binding[port] = task
             return task
@@ -208,7 +234,16 @@ final class AgentBrowserProxy: @unchecked Sendable {
                 continue
             }
         }
-        lock.withLock { forwards[port] = listeners }
+        // A stop during the bind has already closed every forward it knew.
+        let kept = lock.withLock { () -> Bool in
+            guard !stopped else { return false }
+            forwards[port] = listeners
+            return true
+        }
+        guard kept else {
+            listeners.forEach { $0.close(promise: nil) }
+            throw CancellationError()
+        }
         Self.log.info("host route: device localhost:\(port, privacy: .public) → host localhost:\(port, privacy: .public)")
     }
 
@@ -237,9 +272,10 @@ final class AgentBrowserProxy: @unchecked Sendable {
     /// One SSH connection for every tunnel, dialled on first use and again
     /// after it dies. `fresh` says it was dialled for this caller.
     private func ssh() async throws -> (connection: SSHConnection, fresh: Bool) {
-        let (existing, task): (SSHConnection?, Task<SSHConnection, Error>?) = lock.withLock {
-            if let connection { return (connection, nil) }
-            if let connecting { return (nil, connecting) }
+        let (existing, task, dialEpoch): (SSHConnection?, Task<SSHConnection, Error>?, Int) = try lock.withLock {
+            guard !stopped else { throw SSHConnectionError.notConnected }
+            if let connection { return (connection, nil, epoch) }
+            if let connecting { return (nil, connecting, epoch) }
             let host = host
             let task = Task {
                 let secrets = await HostSecrets.loadOffMain(for: host)
@@ -249,18 +285,32 @@ final class AgentBrowserProxy: @unchecked Sendable {
                 return dialled
             }
             connecting = task
-            return (nil, task)
+            return (nil, task, epoch)
         }
         if let existing { return (existing, false) }
         guard let task else { throw SSHConnectionError.notConnected }
+        let ready: SSHConnection
         do {
-            let ready = try await task.value
-            lock.withLock { connection = ready; connecting = nil }
-            return (ready, true)
+            ready = try await task.value
         } catch {
-            lock.withLock { connecting = nil }
+            lock.withLock { if epoch == dialEpoch { connecting = nil } }
             throw error
         }
+        // Retired while it dialled (the old address, the old network, or a
+        // stopped proxy): this connection is nobody's. Close it rather than
+        // adopt it — nothing else ever would — and dial for what is current
+        // (a stopped proxy refuses that).
+        let adopted = lock.withLock { () -> Bool in
+            guard epoch == dialEpoch, !stopped else { return false }
+            connection = ready
+            connecting = nil
+            return true
+        }
+        guard adopted else {
+            await ready.close()
+            return try await ssh()
+        }
+        return (ready, true)
     }
 
     /// Opens `target:port` from the host. A REUSED connection that fails is
@@ -445,6 +495,11 @@ final class AgentProxySplice: ChannelDuplexHandler, @unchecked Sendable {
 
     func handlerAdded(context: ChannelHandlerContext) {
         self.context = context
+        // The partner can end while this side is still opening (WebKit drops
+        // the spare and cancelled connections it pre-opened). Its
+        // `channelInactive` then fired into no splice, so nothing would ever
+        // end this side: a host connection left open per abandoned load.
+        if !partner.isActive { context.close(promise: nil) }
     }
 
     func handlerRemoved(context: ChannelHandlerContext) {

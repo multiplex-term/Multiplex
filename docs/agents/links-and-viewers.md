@@ -110,7 +110,11 @@ link/path resolution, the ⌗ viewport, or the ▤ file viewer.
     arrives as CONNECT, plain HTTP included, so keep-alive lives inside each
     tunnel (non-CONNECT gets 501). Tunnels are backpressured both ways
     (`AgentProxySplice`); only the device socket takes a write watermark —
-    NIOSSH's child channel `setOption` traps on unsupported options. Bulk
+    NIOSSH's child channel `setOption` traps on unsupported options. A
+    splice joined to a partner that already ended closes its own side:
+    WebKit drops spare connections while the host side is still opening,
+    and that end fired into no splice (one host connection leaked per
+    abandoned load). Bulk
     throughput is capped by NIOSSH's per-channel receive window (= max
     packet size, 128 KiB): ~7 MB/s at Wi-Fi RTT; raising it naively hung
     fetches.
@@ -138,11 +142,19 @@ link/path resolution, the ⌗ viewport, or the ▤ file viewer.
     connections the open mode admitted). `*.localhost` is not admitted;
     `https://localhost` only on an open port. `matchDomains` listing loopback
     does NOT make a device proxy it (tried). Forwards close with the
-    host's last agent tab.
+    host's last agent tab — and with an `open` that made no tab (no
+    window, a revoke): the slot's `opening` count holds them only while a
+    tab is on its way. A forward left bound made the same port `port_busy`
+    for another host. At most 16 per host (`AgentBrowserProxy.maxForwards`,
+    `too_many_forwards`): a page can ask for one per loopback port it
+    navigates a frame to, and each is two listeners.
   - Loopback guard (`loopbackRuleListJSON`): every loopback URL is blocked
     except forwarded ports — otherwise a page could reach other apps'
     servers on the device. Recompiled when forwards change and swapped
-    into the host's open tabs; no rules → no tab (fail closed). The device
+    into the host's open tabs; no rules → no tab (fail closed). A compile
+    is a wait: `contentRules` answers only with rules for the forwards as
+    they are when it returns (two ports forwarded at once used to race,
+    and the older set applied last blocked a forwarded port). The device
     route's private-network rules (`AgentBrowserAddressPolicy.admit`,
     `contentRuleListJSON`) remain only behind the DEBUG switch.
     WebRTC is removed from agent tabs (page world, all frames, best
@@ -178,13 +190,19 @@ link/path resolution, the ⌗ viewport, or the ▤ file viewer.
     request look fresh); the clock resets per bridge process.
   - The host is untrusted input: wire integers go through `wireInteger`
     (finite, whole, 0…2^53 — an unchecked `Double`→`Int` traps the app);
-    8 requests in flight per link, 6 agent tabs per host, one screenshot
+    8 requests in flight per link, 6 agent tabs per host (counted again
+    after `open`'s waits), 16 forwards per host, one screenshot
     at a time, answers capped (16 MiB line, 4 M chars from the page), a
     bounded SSH read stream that drops the session when flooded.
   - Permission is re-checked after every wait before a side effect;
     switching the host off (or disabling/deleting it) cancels in-flight
     requests and closes its agent tabs. No content rules → no agent tab
-    (fail closed).
+    (fail closed). Work in flight at a teardown undoes itself: a link
+    session torn down before its SSH connection exists does not dial
+    (`AgentBrowserLink.adopt` — it would start a second bridge nobody reads
+    or ends, which takes the socket from the live one); a proxy dial
+    retired by a host edit, a network change, or `stop` is closed, not
+    adopted (`epoch`); a stopped proxy binds nothing.
   - The page is untrusted too: forged console events are size-checked,
     levels allowlisted, the buffer has a character budget.
 - **The file viewer is the viewport's sibling for paths — and path presses
