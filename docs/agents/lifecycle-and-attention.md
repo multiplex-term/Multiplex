@@ -126,6 +126,17 @@ enable/disable, session resume, background keep-alive/refresh, or alerts.
     *suspended* app cannot receive a notify poke — so `debug.bgrefresh`
     runs the same probe under the same window and must be fired while the
     app is running. Scheduling itself is only provable on device.
+- **Keep screen on follows the terminal, not the app** (Settings → Screen,
+  iPhone/iPad only, default off, device-local). `ScreenAwakeCenter` owns
+  the app-wide `isIdleTimerDisabled`: a classic terminal window reports
+  itself on appear/disappear (every tab is a terminal or ▤, which covers
+  the file viewer too); the Shell reports for its terminal pane only while
+  it is expanded or paged to the terminal, so a compact shell on the deck
+  sleeps like the deck window. A reporting view counts only while its
+  scene is foreground, so an iPad terminal window shelved behind the deck
+  releases the hold. The deck alone never holds it: attention alerts are
+  its answer to an unattended wall. Hidden on visionOS — the display does
+  not idle out under the wearer.
 - **Keyboard focus only silences an alert while the app is frontmost**
   (`AttentionFocusPolicy`, pure + tested; `AttentionCenter.isFocused`).
   The arbiter answers "which terminal would receive a keystroke", NOT

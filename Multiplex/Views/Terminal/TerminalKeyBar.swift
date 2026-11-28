@@ -23,6 +23,16 @@ final class TerminalTallyKeyControl: UIControl, UIDragInteractionDelegate {
             refreshAppearance()
         }
     }
+    /// State without a latch: the key has something to show (the shortcut
+    /// key of a session with several windows). Primary ink and the signal
+    /// border — the UMD chips' `prominent` — and never the latch's fill,
+    /// which says the key is ON.
+    var isLit = false {
+        didSet {
+            guard isLit != oldValue else { return }
+            refreshAppearance()
+        }
+    }
     var faceInset: CGFloat = 0 {
         didSet { setNeedsLayout() }
     }
@@ -376,7 +386,9 @@ final class TerminalTallyKeyControl: UIControl, UIDragInteractionDelegate {
     private func refreshAppearance() {
         accessibilityTraits = isLatched ? [.button, .selected] : .button
         alpha = isDraggedAway ? 0.3 : isEnabled ? 1 : 0.45
-        let foreground = isLatched ? UIKitChassis.chassis : UIKitChassis.signal2
+        let foreground = isLatched
+            ? UIKitChassis.chassis
+            : isLit ? UIKitChassis.signal : UIKitChassis.signal2
         textLabel.textColor = foreground
         symbolView.tintColor = foreground
         // PROTOTYPE(GLASS): resting key faces take the chip treatment —
@@ -393,7 +405,7 @@ final class TerminalTallyKeyControl: UIControl, UIDragInteractionDelegate {
             ? UIKitChassis.signal2
             : isHighlighted || isDropTarget ? UIKitChassis.bezelHi : restingFace
         // The drop target wears the signal border a tab cell does.
-        faceView.tallyBorderColor = isLatched || isDropTarget
+        faceView.tallyBorderColor = isLatched || isLit || isDropTarget
             ? UIKitChassis.signal2
             : UIKitChassis.bezelHi
     }
@@ -1006,16 +1018,23 @@ enum TerminalKeyBarLayout {
         return result
     }
 
+    /// `returnOnlyWhileLocked`: this rail has RET only because the keyboard is
+    /// locked (a phone). Locking must not change which keys a roomy row shows,
+    /// so RET does not count against a tier on the regular faces and
+    /// `keyFrames` narrows the faces for it. The tight and floor tiers still
+    /// count it: `SingleWindowShellLayout`'s 390 / 420 cutoffs read them.
     static func specification(
         width: CGFloat,
         contentSafeArea: UIEdgeInsets,
         showsTmux: Bool,
-        includesReturn: Bool
+        includesReturn: Bool,
+        returnOnlyWhileLocked: Bool = false
     ) -> Specification {
         let usable = max(0, width - contentSafeArea.left - contentSafeArea.right)
         let candidates = candidates(showsTmux: showsTmux, includesReturn: includesReturn)
         return candidates.first {
-            $0.idealWidth(includesReturn: includesReturn) <= usable + 0.5
+            let returnCounts = includesReturn && !(returnOnlyWhileLocked && $0.metric == .regular)
+            return $0.idealWidth(includesReturn: returnCounts) <= usable + 0.5
         } ?? candidates[candidates.count - 1]
     }
 
@@ -1125,8 +1144,10 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback, KeyBarDropSurface 
     /// The rail's height for a pane that does (or does not) spend the bottom
     /// strip. `barHeight` is the plain case, kept as a constant because the
     /// top rail mirrors it for its own minimum height.
-    static func barHeight(spendsBottomStrip: Bool) -> CGFloat {
-        keyTopInset + keyHeight + keyBottomInset(
+    /// A hidden rail (full screen) takes no rows.
+    static func barHeight(spendsBottomStrip: Bool, hidden: Bool = false) -> CGFloat {
+        guard !hidden else { return 0 }
+        return keyTopInset + keyHeight + keyBottomInset(
             isIOSAppOnMac: ProcessInfo.processInfo.isiOSAppOnMac,
             spendsBottomStrip: spendsBottomStrip
         )
@@ -1154,6 +1175,17 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback, KeyBarDropSurface 
             guard bareChrome != oldValue else { return }
             backgroundColor = bareChrome ? .clear : UIKitChassis.bezel
             topBorder.isHidden = bareChrome
+        }
+    }
+
+    /// The tab's session has more than one window to switch between
+    /// (`TmuxSession.hasSwitchChoices`): the shortcut key lights. Re-inked
+    /// in place — the wall probe moves this, and a rebuilt row would drop a
+    /// press in flight.
+    var shortcutHasChoices = false {
+        didSet {
+            guard shortcutHasChoices != oldValue else { return }
+            shortcutKeyControl?.isLit = shortcutHasChoices
         }
     }
 
@@ -1214,8 +1246,11 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback, KeyBarDropSurface 
         }
     }
 
+    /// `terminal` is nil for a paned tab that has not attached yet: its
+    /// emulators come with the layout, and `retarget` hands the rail the
+    /// one the keyboard is on.
     init(
-        terminal: TerminalView,
+        terminal: TerminalView?,
         controller: TerminalSessionController?,
         performShortcut: @escaping (ShortcutPanelItem) -> Void,
         finishTmuxCopyMode: @escaping () -> Void,
@@ -1229,7 +1264,7 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback, KeyBarDropSurface 
         self.shortcutBackend = shortcutBackend
         self.orderStore = orderStore
         showsReturnKey = UIDevice.current.userInterfaceIdiom == .pad
-        ctrlLatched = terminal.controlModifier
+        ctrlLatched = terminal?.controlModifier ?? false
         super.init(frame: .zero)
 
         backgroundColor = UIKitChassis.bezel
@@ -1240,12 +1275,7 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback, KeyBarDropSurface 
         dropCoordinator.installDropTarget(on: self)
         HardwareKeyboardMonitor.shared.startIfNeeded()
 
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(controlModifierDidReset),
-            name: .terminalViewControlModifierReset,
-            object: terminal
-        )
+        observeControlModifierReset(of: terminal)
         observationGeneration &+= 1
         observeAndRender(generation: observationGeneration)
         #if DEBUG
@@ -1280,7 +1310,8 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback, KeyBarDropSurface 
                 width: bounds.width,
                 contentSafeArea: contentSafeArea,
                 showsTmux: shortcutBackend != nil,
-                includesReturn: includesReturn
+                includesReturn: includesReturn,
+                returnOnlyWhileLocked: !showsReturnKey
             )
             let signature = RenderSignature(tier: specification.tier, state: state)
             let expectedKeys = specification.keyCount(includesReturn: includesReturn)
@@ -1313,6 +1344,13 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback, KeyBarDropSurface 
         }
     }
 
+    /// Full screen hides the rail: the C / B slab it hangs in the window and
+    /// the CTRL latch only its key can show go with it.
+    func stepAside() {
+        if ctrlLatched { terminal?.controlModifier = false }
+        controlModifierDidReset()
+    }
+
     override func didMoveToWindow() {
         super.didMoveToWindow()
         // The bar mounts in the window; a rail that joins one mid-mode
@@ -1337,6 +1375,34 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback, KeyBarDropSurface 
         ctrlLatched = false
         ctrlKeyControl?.isLatched = false
         hideCtrlCombos()
+    }
+
+    private func observeControlModifierReset(of terminal: TerminalView?) {
+        guard let terminal else { return }
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(controlModifierDidReset),
+            name: .terminalViewControlModifierReset,
+            object: terminal
+        )
+    }
+
+    /// Points the rail at another emulator of the same tab: the pane the
+    /// keyboard moved to. A CTRL latch does not travel — it was armed for a
+    /// key about to be typed into the pane being left.
+    func retarget(to terminal: TerminalView?) {
+        guard terminal !== self.terminal else { return }
+        if let previous = self.terminal {
+            if ctrlLatched { previous.controlModifier = false }
+            NotificationCenter.default.removeObserver(
+                self, name: .terminalViewControlModifierReset, object: previous)
+        }
+        self.terminal = terminal
+        observeControlModifierReset(of: terminal)
+        let latched = terminal?.controlModifier ?? false
+        ctrlLatched = latched
+        ctrlKeyControl?.isLatched = latched
+        if !latched { hideCtrlCombos() }
     }
 
     private var currentObservedState: TerminalKeyBarObservedState {
@@ -1490,13 +1556,11 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback, KeyBarDropSurface 
                 key: .showShortcutPanel,
                 slot: .shortcuts,
                 face: .text(
-                    backend == .herdr ? "HRDR" : "TMUX",
+                    backend.shortcutKeyCaption,
                     font: UIKitChassis.monoFont(9, weight: .semibold),
                     kerning: 0.7
                 ),
-                accessibility: backend == .herdr
-                    ? String(localized: "Show herdr shortcuts")
-                    : String(localized: "Show tmux shortcuts"),
+                accessibility: backend.shortcutKeyAccessibilityLabel,
                 identifier: "tmux"
             ))
         }
@@ -1531,7 +1595,9 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback, KeyBarDropSurface 
             switch slot {
             case .control: ctrlKeyControl = control
             case .talkback: talkKeyControl = control
-            case .shortcuts: shortcutKeyControl = control
+            case .shortcuts:
+                shortcutKeyControl = control
+                control.isLit = shortcutHasChoices
             default: break
             }
         }
@@ -1853,7 +1919,7 @@ final class TerminalKeyBar: UIView, UIInputViewAudioFeedback, KeyBarDropSurface 
     }
 
     private func arrow(_ app: [UInt8], _ normal: [UInt8]) -> [UInt8] {
-        terminal?.getTerminal().applicationCursor == true ? app : normal
+        terminal?.applicationCursorKeys == true ? app : normal
     }
 
     private func click() {
@@ -2128,11 +2194,17 @@ enum TmuxShortcutDebugHook {
 
 }
 
-/// The rail beside the focused terminal — every headless hook's target.
+/// The rail beside the focused terminal — every headless hook's target. A
+/// single emulator is the rail's sibling; a pane of a paned tab sits two
+/// levels further in (its cell, the split), so the search climbs.
 @MainActor
 private func focusedBar() -> TerminalKeyBar? {
-    guard let view = TerminalFocusArbiter.current else { return nil }
-    return view.superview?.subviews.compactMap { $0 as? TerminalKeyBar }.first
+    var ancestor = TerminalFocusArbiter.current?.superview
+    while let view = ancestor {
+        if let bar = view.subviews.compactMap({ $0 as? TerminalKeyBar }).first { return bar }
+        ancestor = view.superview
+    }
+    return nil
 }
 
 @MainActor
@@ -2214,6 +2286,8 @@ final class TerminalKeyClusterContext: KeyBarDropSurface {
     var talkbackOpen: Bool { controller?.talkbackOpen == true }
     /// Arrange Keys is on for the active tab.
     var arranging: Bool { controller?.keyBarArranging == true }
+    /// The app-wide keyboard lock: the keyboard key wears the padlock.
+    var keyboardLocked: Bool { KeyboardLock.shared.isLocked }
     var order: KeyBarOrder { orderStore.order }
 
     init(orderStore: KeyBarOrderStore = .shared) {
@@ -2357,6 +2431,7 @@ final class TerminalKeyClusterContext: KeyBarDropSurface {
         withObservationTracking {
             _ = orderStore.order
             _ = controller?.keyBarArranging
+            _ = KeyboardLock.shared.isLocked
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self, generation == self.stateObservationGeneration else { return }
@@ -2437,11 +2512,19 @@ final class TerminalKeyClusterContext: KeyBarDropSurface {
 
     func sendArrow(app: [UInt8], normal: [UInt8]) {
         guard let terminal = observedTerminal else { return }
-        terminal.send(terminal.getTerminal().applicationCursor ? app : normal)
+        terminal.send(terminal.applicationCursorKeys ? app : normal)
     }
 
     func toggleKeyboard() {
         controller?.toggleKeyboard()
+    }
+
+    /// The keyboard key's hold, as on the iPad rail: input stays live, the
+    /// system keyboard stops rising. Its short press is the unlock
+    /// (`TerminalFocusArbiter.toggle`).
+    func lockKeyboard() {
+        guard let terminal = observedTerminal else { return }
+        TerminalFocusArbiter.lock(terminal)
     }
 
     func toggleTalkback() {
@@ -2574,6 +2657,8 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
     private let metric: TerminalKeyClusterMetric
     private let context: TerminalKeyClusterContext
     private var standaloneVariant: StandaloneVariant?
+    /// The lock state the keyboard key's face was built for.
+    private var renderedKeyboardLocked = false
     private weak var ctrlKey: TerminalTallyKeyControl?
     private weak var talkKey: TerminalTallyKeyControl?
     private weak var comboPopoverController: UIViewController?
@@ -2634,6 +2719,12 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
     }
 
     func applyContextState() {
+        // The padlock is a different face, not a latch on the same one.
+        if renderedKeyboardLocked != context.keyboardLocked {
+            rebuildKeys(variant: standaloneVariant)
+            setNeedsLayout()
+            return
+        }
         ctrlKey?.isLatched = context.ctrlLatched
         talkKey?.isLatched = context.talkbackOpen
         talkKey?.accessibilityLabel = talkbackKeyLabel(open: context.talkbackOpen)
@@ -2818,6 +2909,7 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
         ctrlKey = nil
         talkKey = nil
         standaloneVariant = variant
+        renderedKeyboardLocked = context.keyboardLocked
         let activeMetric: TerminalKeyClusterMetric
         let minimal: Bool
         if role == .standalone {
@@ -2925,12 +3017,21 @@ final class TerminalKeyClusterGroupView: UIKitTallyBorderedView {
             talkKey = talk
             return talk
         case .keyboard:
+            // The iPad rail's key: hold locks the keyboard closed, and the
+            // padlock's short press releases it.
+            let locked = context.keyboardLocked
             return TerminalTallyKeyControl(
-                face: .symbol("keyboard", pointSize: 12, weight: .semibold),
+                face: .symbol(locked ? "lock.fill" : "keyboard", pointSize: 12, weight: .semibold),
                 width: metric.keyWidth,
                 height: 26,
-                accessibilityLabel: String(localized: "Show or hide keyboard"),
+                accessibilityLabel: locked
+                    ? String(localized: "Unlock keyboard")
+                    : String(localized: """
+                        Show or hide keyboard. Hold to lock the keyboard closed
+                        """),
                 accessibilityIdentifier: "terminal.keyCluster.keyboard",
+                latched: locked,
+                longPressAction: locked ? nil : { [weak context] in context?.lockKeyboard() },
                 action: { [weak context] in context?.toggleKeyboard() }
             )
         default:

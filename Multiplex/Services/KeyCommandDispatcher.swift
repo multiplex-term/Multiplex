@@ -61,7 +61,7 @@ enum KeyCommandDispatcher {
                 return "NO ENCODING"
             }
             var text = KeyBytesNotation.describe(bytes)
-            if !terminal.getTerminal().keyboardEnhancementFlags.isEmpty {
+            if !terminal.keyboardEnhancementFlags.isEmpty {
                 text += " · KITTY KEYS ON"
             }
             return text

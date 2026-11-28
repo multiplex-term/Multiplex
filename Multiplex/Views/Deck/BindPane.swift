@@ -324,7 +324,9 @@ final class BindPaneViewController: UIViewController {
     static func backendDetail(for backends: Host.BackendSelection) -> String {
         guard !backends.isMixed else { return BindPaneCopy.backendMixedDetail }
         return switch backends.preferred {
-        case .tmux: BindPaneCopy.backendTmuxDetail
+        // Rex is never the default (`Host.BackendSelection`), so `.rex`
+        // never reaches here; folded with tmux to stay total.
+        case .tmux, .rex: BindPaneCopy.backendTmuxDetail
         case .herdr: BindPaneCopy.backendHerdrDetail
         }
     }
@@ -358,7 +360,11 @@ final class BindPaneViewController: UIViewController {
         let checks = AddHostCheckBar<Host.SessionBackend>(
             // The button face uppercases; pass the natural spelling so
             // VoiceOver reads "tmux", not the letters T-M-U-X.
-            choices: Host.SessionBackend.allCases.map { ($0.rawValue, $0) },
+            // Binding sets up the host's DEFAULT backends. Rex, which is
+            // never one, is switched on afterwards — the deck rail
+            // offers it the moment its sessions are seen, and Host Settings
+            // lists it.
+            choices: Host.SessionBackend.defaultCases.map { ($0.rawValue, $0) },
             selection: backends.enabled
         ) { [weak bind] enabled in
             bind?.backends.setEnabled(enabled)
@@ -369,9 +375,7 @@ final class BindPaneViewController: UIViewController {
 
         guard backends.isMixed else { return }
         let bar = AddHostChoiceBar<Host.SessionBackend>(
-            choices: Host.SessionBackend.allCases
-                .filter(backends.enabled.contains)
-                .map { ($0.rawValue, $0) },
+            choices: backends.defaultChoices.map { ($0.rawValue, $0) },
             selection: backends.preferred
         ) { [weak bind] backend in
             bind?.backends.setPreferred(backend)

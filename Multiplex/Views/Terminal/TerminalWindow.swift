@@ -29,6 +29,9 @@ extension Notification.Name {
     static let multiplexDebugFileViewerPlay = Notification.Name(
         "MultiplexDebugFileViewerPlay"
     )
+    static let multiplexDebugFileViewerFind = Notification.Name(
+        "MultiplexDebugFileViewerFind"
+    )
     static let multiplexDebugSidePanelSplit = Notification.Name(
         "MultiplexDebugSidePanelSplit"
     )
@@ -38,6 +41,45 @@ extension Notification.Name {
     static let multiplexDebugSidePanelWidth = Notification.Name(
         "MultiplexDebugSidePanelWidth"
     )
+    static let multiplexDebugFullScreen = Notification.Name("MultiplexDebugFullScreen")
+}
+
+/// `….debug.helpercollapse` folds or unfolds the agent strip app-wide — the
+/// strip's own fold control, which no simulator route can tap.
+@MainActor
+enum HelperCollapseDebugHook {
+    private static var installed = false
+
+    static func install() {
+        guard !installed else { return }
+        installed = true
+        var token: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.helpercollapse", &token, .main
+        ) { _ in
+            let collapse = AgentHelperStripCollapse.shared
+            collapse.setCollapsed(!collapse.isCollapsed)
+        }
+    }
+}
+
+/// `….debug.fullscreen` toggles full screen in the focused terminal's window
+/// — the `⋯` row going in, the EXIT chip coming out (no simulator route can
+/// open the menu or tap the chip).
+@MainActor
+enum FullScreenDebugHook {
+    private static var installed = false
+
+    static func install() {
+        guard !installed else { return }
+        installed = true
+        var token: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.fullscreen", &token, .main
+        ) { _ in
+            NotificationCenter.default.post(name: .multiplexDebugFullScreen, object: nil)
+        }
+    }
 }
 
 /// SIDECAR's headless controls: ↗ TAB, ✕, and a persisted width cycle.
@@ -81,7 +123,9 @@ enum SidePanelDebugHook {
 /// resolve → open path a finger takes, which no sim tap can drive.
 /// `….debug.fvplay` presses PLAY/PAUSE on the active viewer's sound screen
 /// (the panel's own chip action; proof is the PLAYING lamp and a moving
-/// clock in the next screenshot).
+/// clock in the next screenshot). `….debug.fvfind` opens the active
+/// viewer's find bar with `MULTIPLEX_FIND_QUERY` (default `func`) and steps
+/// to the next match on every later post.
 @MainActor
 enum FileViewerDebugHook {
     private static var installed = false
@@ -131,6 +175,14 @@ enum FileViewerDebugHook {
         ) { _ in
             NotificationCenter.default.post(
                 name: .multiplexDebugFileViewerPlay, object: nil
+            )
+        }
+        var findToken: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.fvfind", &findToken, .main
+        ) { _ in
+            NotificationCenter.default.post(
+                name: .multiplexDebugFileViewerFind, object: nil
             )
         }
     }

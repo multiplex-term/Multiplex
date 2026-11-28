@@ -15,7 +15,7 @@ Multiplex 也會認出窗格中執行的 Claude Code、Codex、Pi、Grok Build�
 - 主機設定 → BACKEND 在 TMUX 與 HERDR 之間切換主機。→ MONITORING 也放著「背景保持連線」，預設關閉。
 - + NEW SESSION 建立持久工作階段，或以選填的設定指令碼、模型與第一個提示啟動 Agent。小工具與捷徑的啟動在兩種後端上都可用，也能進入既有的工作階段。
 - TMUX（Vision Pro 的底部列、iPad/iPhone 的按鍵列、窄 iPhone 的右上角）送出日常 tmux 指令。在 herdr 標籤頁上這個鍵顯示為 HRDR，送出 herdr 自己的指令。
-- 在終端機長按、點兩下或按右鍵，可在任一後端使用 SELECT / SELECT ALL / PASTE；選取會留在該窗格內。herdr 標籤頁另有 MENU，在該格開啟 herdr 自己的窗格選單。
+- 在終端機長按、點兩下或按右鍵，可在任一後端使用 SELECT / SELECT ALL / PASTE；選取會留在該窗格內。herdr 標籤頁另有 MENU，在該格開啟 herdr 自己的窗格選單。在 herdr 上長按後繼續拖曳，就由 herdr 自己選取，放開時複製到剪貼簿。
 - FILE 從照片、檔案或相機上傳到目前窗格的工作目錄，並輸入遠端路徑但不按 Return。把檔案拖進來也一樣。
 - + TAB → 檔案檢視器可瀏覽主機檔案與 git 差異；長按終端機輸出裡的路徑，就在工作階段旁開啟該檔案。已算繪 Markdown 中的網頁連結可在停靠的檢視區或系統瀏覽器中開啟。
 - 終端機的 GUIDE 按鈕是該標籤頁手勢的圖解指南。

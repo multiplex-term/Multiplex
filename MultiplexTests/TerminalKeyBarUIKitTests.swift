@@ -142,6 +142,46 @@ final class TerminalKeyBarUIKitTests: XCTestCase {
         XCTAssertTrue(frames.allSatisfy { $0.width >= 24 })
     }
 
+    func testShortcutKeyLightsWhenTheSessionHasChoices() throws {
+        let bar = TerminalKeyBar(
+            terminal: TerminalView(frame: CGRect(x: 0, y: 0, width: 1024, height: 200)),
+            controller: nil,
+            performShortcut: { _ in },
+            finishTmuxCopyMode: {},
+            shortcutBackend: .rex,
+            orderStore: KeyBarOrderStore(defaults: try isolatedDefaults())
+        )
+        bar.frame = CGRect(x: 0, y: 0, width: 1024, height: TerminalKeyBar.barHeight)
+        bar.layoutIfNeeded()
+        func key() throws -> TerminalTallyKeyControl {
+            try XCTUnwrap(bar.renderedKeys.first {
+                $0.accessibilityIdentifier == "terminal.keybar.tmux"
+            })
+        }
+        let built = try key()
+        XCTAssertFalse(built.isLit)
+
+        // Re-inked in place: the same control, so a press in flight survives
+        // the probe tick that found the second terminal.
+        bar.shortcutHasChoices = true
+        XCTAssertTrue(built.isLit)
+        XCTAssertFalse(built.isLatched, "lit is not the latch's fill")
+
+        // A row rebuilt while lit (the keyboard lock adds RET) comes back lit.
+        bar.applyObservedState(TerminalKeyBarObservedState(
+            hardwareKeyboardConnected: false,
+            keyboardLocked: true,
+            isDictating: false,
+            talkbackOpen: false,
+            arranging: false,
+            order: KeyBarOrder.standard
+        ))
+        bar.layoutIfNeeded()
+        let rebuilt = try key()
+        XCTAssertFalse(rebuilt === built)
+        XCTAssertTrue(rebuilt.isLit)
+    }
+
     func testNativeRailBuildsTallyControlsWithoutAHostedView() throws {
         let terminal = TerminalView(
             frame: CGRect(x: 0, y: 0, width: 420, height: 200)
@@ -530,17 +570,78 @@ final class TerminalKeyBarUIKitTests: XCTestCase {
         return defaults
     }
 
+    /// Locking only swaps the keyboard key for the lock and adds RET: a roomy
+    /// row keeps its symbols, its page keys, and TMUX, inside its own bounds.
+    func testLockingTheKeyboardKeepsARoomyRowsKeys() {
+        for width in stride(from: CGFloat(552), through: 1_100, by: 2) {
+            let unlocked = specification(width: width, returns: false)
+            let locked = specification(width: width, returns: true, onlyWhileLocked: true)
+            XCTAssertEqual(locked.symbols, unlocked.symbols, "\(width)")
+            XCTAssertEqual(locked.pageKeys, unlocked.pageKeys, "\(width)")
+            XCTAssertEqual(locked.tmux, unlocked.tmux, "\(width)")
+            let frames = TerminalKeyBarLayout.keyFrames(
+                specification: locked,
+                keyCount: locked.keyCount(includesReturn: true),
+                includesReturn: true,
+                width: width,
+                contentSafeArea: .zero,
+                keyTop: 7,
+                keyHeight: 34
+            )
+            XCTAssertEqual(frames.count, unlocked.keyCount(includesReturn: false) + 1, "\(width)")
+            XCTAssertLessThanOrEqual(frames.last?.maxX ?? 0, width, "\(width)")
+            XCTAssertGreaterThanOrEqual(frames.first?.width ?? 0, 41, "faces stay pressable at \(width)")
+        }
+    }
+
+    /// Below the regular faces the RET ladder still rules, cutoffs included.
+    func testLockingOnANarrowRowStaysOnTheReturnLadder() {
+        for width in [375, 390, 420, 466, 540] as [CGFloat] {
+            XCTAssertEqual(
+                specification(width: width, returns: true, onlyWhileLocked: true),
+                specification(width: width, returns: true),
+                "\(width)"
+            )
+        }
+    }
+
     private func specification(
         width: CGFloat,
         returns: Bool,
-        safeArea: UIEdgeInsets = .zero
+        safeArea: UIEdgeInsets = .zero,
+        onlyWhileLocked: Bool = false
     ) -> TerminalKeyBarLayout.Specification {
         TerminalKeyBarLayout.specification(
             width: width,
             contentSafeArea: safeArea,
             showsTmux: true,
-            includesReturn: returns
+            includesReturn: returns,
+            returnOnlyWhileLocked: onlyWhileLocked
         )
+    }
+
+    func testALockedKeyboardRefusesPencilScribbleOnTheTerminal() throws {
+        let terminal = TerminalView(frame: CGRect(x: 0, y: 0, width: 300, height: 200))
+        TerminalFocusArbiter.installScribbleGate(on: terminal)
+        TerminalFocusArbiter.installScribbleGate(on: terminal)
+        let gates = terminal.interactions.compactMap { $0 as? UIScribbleInteraction }
+        XCTAssertEqual(gates.count, 1, "an adopted tab keeps a single gate")
+        let gate = try XCTUnwrap(gates.first)
+        let delegate = try XCTUnwrap(gate.delegate)
+        func allowsScribble() -> Bool {
+            delegate.scribbleInteraction?(gate, shouldBeginAt: CGPoint(x: 20, y: 20)) ?? true
+        }
+        XCTAssertTrue(allowsScribble(), "unlocked, the Pencil may still write")
+
+        // A different terminal takes the lock: the gate reads the app-wide
+        // state, so a view that never held the input session refuses too.
+        let focused = TerminalView(frame: CGRect(x: 0, y: 0, width: 300, height: 200))
+        TerminalFocusArbiter.lock(focused)
+        defer { TerminalFocusArbiter.unlock(focused, summoning: false) }
+        XCTAssertFalse(allowsScribble(), "locked, a Pencil stroke is a touch, not ink")
+
+        TerminalFocusArbiter.unlock(focused, summoning: false)
+        XCTAssertTrue(allowsScribble())
     }
 
     private func descendants(in root: UIView) -> [UIView] {
@@ -629,6 +730,34 @@ final class TerminalKeyClusterUIKitTests: XCTestCase {
         XCTAssertFalse((leading.subviews + trailing.subviews).contains {
             String(describing: type(of: $0)).contains("Hosting")
         })
+    }
+
+    func testKeyboardKeyWearsThePadlockWhileTheKeyboardIsLocked() throws {
+        let context = TerminalKeyClusterContext(orderStore: try isolatedStore())
+        let trailing = TerminalKeyClusterGroupView(role: .trailing, metric: .regular, context: context)
+        func keyboardKey() throws -> TerminalTallyKeyControl {
+            try XCTUnwrap(trailing.keys.first {
+                $0.accessibilityIdentifier == "terminal.keyCluster.keyboard"
+            })
+        }
+        XCTAssertFalse(try keyboardKey().isLatched)
+        XCTAssertNotNil(try keyboardKey().longPressAction, "the hold is the lock")
+
+        // The lock is app-wide state only the arbiter writes; a scratch
+        // terminal engages it and the defer releases it for the next test.
+        let terminal = TerminalView(frame: CGRect(x: 0, y: 0, width: 300, height: 200))
+        TerminalFocusArbiter.lock(terminal)
+        defer { TerminalFocusArbiter.unlock(terminal, summoning: false) }
+        trailing.applyContextState()
+        XCTAssertTrue(try keyboardKey().isLatched)
+        XCTAssertEqual(try keyboardKey().accessibilityLabel, "Unlock keyboard")
+        XCTAssertNil(try keyboardKey().longPressAction, "the padlock's press is the unlock")
+        XCTAssertEqual(trailing.renderedSlots.count, 7, "the face changes; the row does not")
+
+        TerminalFocusArbiter.unlock(terminal, summoning: false)
+        trailing.applyContextState()
+        XCTAssertFalse(try keyboardKey().isLatched)
+        XCTAssertNotNil(try keyboardKey().longPressAction)
     }
 
     func testClustersFollowTheStoredOrderAcrossSlabsAndArrangeMovesCrossTheUMD() throws {

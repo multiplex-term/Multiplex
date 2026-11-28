@@ -1017,7 +1017,7 @@ enum TmuxProbe {
     /// Lines a tile shows; the parser keeps the trailing non-blank run.
     static let miniatureLines = 4
     /// Scrollback depth requested per session.
-    private static let captureDepth = 30
+    static let captureDepth = 30
     /// Tile width clip — anything longer can't render in a tile anyway.
     private static let miniatureWidth = 56
 

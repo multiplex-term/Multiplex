@@ -11,15 +11,21 @@ struct TerminalPaneConfiguration {
     var theme: TerminalTheme
     var bottomChromeHeight: CGFloat
     var contentSafeArea: UIEdgeInsets
+    var keyRailSafeArea: UIEdgeInsets
     var railOwnsBottomSafeArea: Bool
     /// The key rail drops its bezel slab and top rule (iPhone Duo).
     var bareChrome = false
+    /// Full screen: no key rail (iPad/iPhone).
+    var keyRailHidden = false
     var isActive: Bool
     var focusAllowed: Bool
     /// The tier's Key Commands cap and paywall route for the rail's
     /// hold-CTRL panel (iPad/iPhone; the visionOS cluster gets it from the
     /// window directly).
     var keyCommandPlan: KeyCommandPlan = .unrestricted
+    /// The tab's session has several windows to switch between: the key
+    /// rail's shortcut key lights (`TmuxSession.hasSwitchChoices`).
+    var shortcutHasChoices = false
     var close: () -> Void
 }
 
@@ -37,11 +43,20 @@ struct TerminalPaneObservedState: Equatable {
     #if !os(visionOS)
     var dictation: TerminalSessionController.DictationState?
     var isDictating: Bool
-    var keyboardLocked: Bool
     #endif
+    var keyboardLocked: Bool
+    /// A paned tab's arrangement and the pane its keyboard is on: the
+    /// surface redraws the split, and the overlays that hang on "the
+    /// terminal" move to the emulator that now is it.
+    var paneLayout: PaneLayout?
+    var activePaneID: PaneID?
+    var zoomedPaneID: PaneID?
 
     @MainActor
     init(controller: TerminalSessionController) {
+        paneLayout = controller.paneLayout
+        activePaneID = controller.activePaneID
+        zoomedPaneID = controller.zoomedPaneID
         status = controller.status
         isResuming = controller.isResuming
         tmuxCopyModeUIActive = controller.tmuxCopyModeUIActive
@@ -52,8 +67,8 @@ struct TerminalPaneObservedState: Equatable {
         #if !os(visionOS)
         dictation = controller.dictation
         isDictating = controller.isDictating
-        keyboardLocked = KeyboardLock.shared.isLocked
         #endif
+        keyboardLocked = KeyboardLock.shared.isLocked
     }
 }
 
@@ -73,6 +88,10 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
     private(set) var missingHostView: UIView?
     private var selectionActionsOverlay: TerminalSelectionActionsOverlay?
     private var selectionMenuOverlay: TerminalSelectionMenuOverlay?
+    /// The emulator the two overlays above were installed on. On a paned
+    /// tab the controller's `terminalView` moves with the keyboard, and
+    /// overlays left on the pane it came from would answer its presses.
+    private weak var overlayTerminal: TerminalView?
 
     private let topCenterStack = UIStackView()
     private let topTrailingStack = UIStackView()
@@ -206,6 +225,13 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
         guard canAcceptFileDrop(session),
               let controller = configuration.controller
         else { return }
+        // Among several panes a file lands in the one it was dropped on:
+        // the upload goes to that pane's directory and its path is typed
+        // there, so the tab's focus moves to it first.
+        if let split = terminalSurface?.paneSplitView,
+           let pane = split.pane(at: session.location(in: split)) {
+            controller.focusPane(pane)
+        }
         let providers = session.items.map(\.itemProvider)
         Task { @MainActor [weak controller] in
             controller?.deliverDrop(await TerminalDropLoader.load(providers))
@@ -231,10 +257,13 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
             theme: configuration.theme,
             bottomChromeHeight: configuration.bottomChromeHeight,
             contentSafeArea: configuration.contentSafeArea,
+            keyRailSafeArea: configuration.keyRailSafeArea,
             railOwnsBottomSafeArea: configuration.railOwnsBottomSafeArea,
             bareChrome: configuration.bareChrome,
+            keyRailHidden: configuration.keyRailHidden,
             isActive: configuration.isActive && configuration.focusAllowed,
             shortcutBackend: configuration.controller?.route.sessionBackend,
+            shortcutHasChoices: configuration.shortcutHasChoices,
             keyCommandPlan: configuration.keyCommandPlan
         )
     }
@@ -325,6 +354,13 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
         _ state: TerminalPaneObservedState,
         controller: TerminalSessionController
     ) {
+        if overlayTerminal !== controller.terminalView {
+            selectionActionsOverlay?.detach()
+            selectionActionsOverlay = nil
+            selectionMenuOverlay?.detach()
+            selectionMenuOverlay = nil
+            overlayTerminal = controller.terminalView
+        }
         let wantsOverlay = state.selectTextModeUIActive
             && configuration.isActive
             && state.status == .live
@@ -453,6 +489,15 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
     ) {
         removeArrangedSubviews(from: topCenterStack)
         guard configuration.isActive else { return }
+        if state.zoomedPaneID != nil {
+            // One pane is drawn over the others: say so, and carry the way
+            // back — the panes it covers cannot be seen to be missed.
+            let bar = TerminalContextBarView.zoomed { [weak controller] in
+                controller?.togglePaneZoom()
+            }
+            bar.accessibilityIdentifier = "terminalPane.context.zoomed"
+            topCenterStack.addArrangedSubview(bar)
+        }
         if state.tmuxCopyModeUIActive {
             let bar = TerminalContextBarView.copyMode { [weak controller] in
                 controller?.finishTmuxCopyMode()
@@ -478,17 +523,36 @@ final class TerminalPaneViewController: UIViewController, UIDropInteractionDeleg
             )
             bar.accessibilityIdentifier = "terminalPane.context.dictation"
             topCenterStack.addArrangedSubview(bar)
-        } else if state.keyboardLocked {
-            // Top-center, not top-trailing: the trailing slot carries the
-            // window's own chrome (the backend switch), which the tip covered.
-            let locked = TerminalKeyboardLockedView(
-                isDictating: state.isDictating,
-                toggleDictation: { [weak controller] in controller?.toggleDictation() }
-            )
-            locked.accessibilityIdentifier = "terminalPane.keyboardLocked"
-            topCenterStack.addArrangedSubview(locked)
+            return
         }
         #endif
+        guard state.keyboardLocked else { return }
+        // Top-center, not top-trailing: the trailing slot carries the
+        // window's own chrome (the backend switch), which the tip covered.
+        // Full screen hides the rail and its keyboard key, so the tip
+        // carries the way back to typing itself.
+        #if os(visionOS)
+        // No app-owned dictation here, so the tip's one action is the
+        // unlock — always: the padlock key sits in an ornament below the
+        // window, out of the eye line of whoever just pinched the pane and
+        // got no keyboard.
+        let locked = TerminalKeyboardLockedView(
+            dictation: nil,
+            unlock: { [weak controller] in controller?.toggleKeyboardLock() }
+        )
+        #else
+        let locked = TerminalKeyboardLockedView(
+            dictation: (
+                isActive: state.isDictating,
+                toggle: { [weak controller] in controller?.toggleDictation() }
+            ),
+            unlock: configuration.keyRailHidden
+                ? { [weak controller] in controller?.toggleKeyboardLock() }
+                : nil
+        )
+        #endif
+        locked.accessibilityIdentifier = "terminalPane.keyboardLocked"
+        topCenterStack.addArrangedSubview(locked)
     }
 
     private func renderTopTrailing(
@@ -788,6 +852,20 @@ final class TerminalContextBarView: UIKitTallyBorderedView {
                 prominent: true,
                 accessibilityLabel: String(localized: "Done"),
                 action: done
+            ),
+        ])
+    }
+
+    /// A paned tab drawing one pane over the rest: the lamp, and the chip
+    /// that brings the others back.
+    static func zoomed(showAll: @escaping () -> Void) -> TerminalContextBarView {
+        TerminalContextBarView(items: [
+            UIKitTallyLamp(caption: "ZOOMED", color: TallyPalette.caution),
+            UIKitChassisChip(
+                "ALL PANES",
+                prominent: true,
+                accessibilityLabel: String(localized: "Show all panes"),
+                action: showAll
             ),
         ])
     }
@@ -1212,10 +1290,14 @@ extension TerminalContextBarView {
     }
 }
 
-#if !os(visionOS)
 @MainActor
 final class TerminalKeyboardLockedView: UIKitTallyBorderedView {
-    init(isDictating: Bool, toggleDictation: @escaping () -> Void) {
+    /// `dictation` is the mic action (iPad/iPhone — visionOS has no
+    /// app-owned dictation and passes nil); `unlock` the padlock-open one.
+    init(
+        dictation: (isActive: Bool, toggle: () -> Void)?,
+        unlock: (() -> Void)? = nil
+    ) {
         super.init(frame: .zero)
         backgroundColor = UIKitChassis.bezel
         layer.cornerRadius = 8
@@ -1264,34 +1346,65 @@ final class TerminalKeyboardLockedView: UIKitTallyBorderedView {
         // SwiftUI's original control used `.buttonStyle(.plain)`. A custom
         // button keeps UIKit from printing its native tinted button ground
         // behind the TALLY lock badge.
-        let mic = UIButton(type: .custom)
-        mic.setImage(UIImage(systemName: isDictating ? "mic.fill" : "mic"), for: .normal)
-        // Type-locked chrome glyph: authored point size, riding `typeScale`
-        // like the padlock beside it. Without a configuration UIKit draws it
-        // at the default body symbol size and never scales it on Mac.
-        mic.setPreferredSymbolConfiguration(
-            UIImage.SymbolConfiguration(
-                pointSize: 12 * Theme.typeScale,
-                weight: .semibold
-            ),
-            forImageIn: .normal
-        )
-        mic.tintColor = isDictating ? UIKitChassis.chassis : UIKitChassis.signal2
-        mic.backgroundColor = isDictating ? UIKitChassis.signal2 : .clear
-        mic.accessibilityLabel = isDictating
-            ? String(localized: "Stop dictation")
-            : String(localized: "Dictate")
-        mic.accessibilityHint = String(localized: """
-            Types what you say into the session as you speak, never pressing Return
-            """)
-        mic.addAction(UIAction { _ in toggleDictation() }, for: .touchUpInside)
-        mic.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            mic.widthAnchor.constraint(equalToConstant: 36),
-            mic.heightAnchor.constraint(equalToConstant: 32),
-        ])
+        var micButton: UIButton?
+        if let dictation {
+            let isDictating = dictation.isActive
+            let mic = UIButton(type: .custom)
+            mic.setImage(UIImage(systemName: isDictating ? "mic.fill" : "mic"), for: .normal)
+            // Type-locked chrome glyph: authored point size, riding `typeScale`
+            // like the padlock beside it. Without a configuration UIKit draws it
+            // at the default body symbol size and never scales it on Mac.
+            mic.setPreferredSymbolConfiguration(
+                UIImage.SymbolConfiguration(
+                    pointSize: 12 * Theme.typeScale,
+                    weight: .semibold
+                ),
+                forImageIn: .normal
+            )
+            mic.tintColor = isDictating ? UIKitChassis.chassis : UIKitChassis.signal2
+            mic.backgroundColor = isDictating ? UIKitChassis.signal2 : .clear
+            mic.accessibilityLabel = isDictating
+                ? String(localized: "Stop dictation")
+                : String(localized: "Dictate")
+            mic.accessibilityHint = String(localized: """
+                Types what you say into the session as you speak, never pressing Return
+                """)
+            mic.addAction(UIAction { _ in dictation.toggle() }, for: .touchUpInside)
+            mic.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                mic.widthAnchor.constraint(equalToConstant: 36),
+                mic.heightAnchor.constraint(equalToConstant: 32),
+            ])
+            micButton = mic
+        }
 
-        let row = UIStackView(arrangedSubviews: [labelShell, divider, mic])
+        var unlockButton: UIButton?
+        if let unlock {
+            let button = UIButton(type: .custom)
+            button.setImage(UIImage(systemName: "lock.open"), for: .normal)
+            button.setPreferredSymbolConfiguration(
+                UIImage.SymbolConfiguration(
+                    pointSize: 12 * Theme.typeScale,
+                    weight: .semibold
+                ),
+                forImageIn: .normal
+            )
+            button.tintColor = UIKitChassis.signal2
+            button.accessibilityLabel = String(localized: "Unlock Keyboard")
+            button.accessibilityIdentifier = "terminalPane.keyboardLocked.unlock"
+            button.addAction(UIAction { _ in unlock() }, for: .touchUpInside)
+            button.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                button.widthAnchor.constraint(equalToConstant: 36),
+                button.heightAnchor.constraint(equalToConstant: 32),
+            ])
+            unlockButton = button
+        }
+
+        let actions = [unlockButton, micButton].compactMap { $0 }
+        let row = UIStackView(
+            arrangedSubviews: [labelShell] + (actions.isEmpty ? [] : [divider]) + actions
+        )
         row.axis = .horizontal
         row.alignment = .center
         row.spacing = 0
@@ -1308,7 +1421,6 @@ final class TerminalKeyboardLockedView: UIKitTallyBorderedView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("unused") }
 }
-#endif
 
 @MainActor
 final class TerminalHistoryFindingVeilView: UIView {

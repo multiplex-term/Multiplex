@@ -11,6 +11,9 @@ struct TerminalVisionOrnamentPresentation: Equatable {
         case hidden
         case terminal(showsHelper: Bool)
         case auxiliary
+        /// Full screen: keys and rail give way; only the agent strip stays,
+        /// hung below the glass.
+        case fullScreen
     }
 
     var showsTopSourceLabels: Bool
@@ -22,10 +25,13 @@ struct TerminalVisionOrnamentPresentation: Equatable {
         isAuxiliary: Bool,
         hasUMD: Bool,
         hasHelper: Bool,
-        windowWidth: CGFloat
+        windowWidth: CGFloat,
+        fullScreen: Bool = false
     ) -> Self {
         let bottom: Bottom
-        if !hasUMD {
+        if fullScreen {
+            bottom = hasHelper ? .fullScreen : .hidden
+        } else if !hasUMD {
             bottom = .hidden
         } else if isAuxiliary {
             bottom = .auxiliary
@@ -33,7 +39,7 @@ struct TerminalVisionOrnamentPresentation: Equatable {
             bottom = .terminal(showsHelper: hasHelper)
         }
         return Self(
-            showsTopSourceLabels: tabCount > 1,
+            showsTopSourceLabels: tabCount > 1 && !fullScreen,
             bottom: bottom,
             maximumConsoleWidth: consoleClamp(windowWidth: windowWidth)
         )
@@ -198,15 +204,20 @@ final class TerminalVisionOrnamentState {
         talkbackController: TalkbackComposerViewController? = nil,
         arrangeBarController: UIViewController? = nil,
         sidePanelController: SidePanelViewController? = nil,
+        fullScreen: Bool = false,
         windowWidth: CGFloat,
         windowHeight: CGFloat = 0,
         interfaceStyle: UIUserInterfaceStyle,
         forceRevision: Bool
     ) {
         self.interfaceStyle = interfaceStyle
+        // Full screen keeps only the agent strip; a ▤ / ⌗ tab has none.
+        let activeTerminalController = fullScreen ? nil : activeTerminalController
+        let umdController = fullScreen ? nil : umdController
+        let sidePanelController = fullScreen ? nil : sidePanelController
         let nextHelper = isAuxiliary ? nil : helperController
-        let nextTalkback = isAuxiliary ? nil : talkbackController
-        let nextArrangeBar = isAuxiliary ? nil : arrangeBarController
+        let nextTalkback = isAuxiliary || fullScreen ? nil : talkbackController
+        let nextArrangeBar = isAuxiliary || fullScreen ? nil : arrangeBarController
         // The ornament hosts the whole strip; the card's place inside it is
         // the controller's (and the store's) business, never the ornament's.
         let nextSidePanelSize = sidePanelController == nil
@@ -220,7 +231,8 @@ final class TerminalVisionOrnamentState {
             isAuxiliary: isAuxiliary,
             hasUMD: umdController != nil,
             hasHelper: nextHelper != nil,
-            windowWidth: windowWidth
+            windowWidth: windowWidth,
+            fullScreen: fullScreen
         )
         let nextHelperCollapsed = nextHelper?.isCollapsed == true
         let changed = presentation != nextPresentation
@@ -346,6 +358,7 @@ final class TerminalVisionOrnamentCoordinator {
         talkbackController: TalkbackComposerViewController? = nil,
         arrangeBarController: UIViewController? = nil,
         sidePanelController: SidePanelViewController? = nil,
+        fullScreen: Bool = false,
         windowWidth: CGFloat,
         windowHeight: CGFloat = 0,
         interfaceStyle: UIUserInterfaceStyle,
@@ -360,6 +373,7 @@ final class TerminalVisionOrnamentCoordinator {
             talkbackController: talkbackController,
             arrangeBarController: arrangeBarController,
             sidePanelController: sidePanelController,
+            fullScreen: fullScreen,
             windowWidth: windowWidth,
             windowHeight: windowHeight,
             interfaceStyle: interfaceStyle,
@@ -462,6 +476,16 @@ private struct TerminalVisionBottomOrnament: View {
         case .hidden:
             EmptyView()
 
+        case .fullScreen:
+            if let helper = state.helperController {
+                // The strip takes the console row's seam: it hangs wholly
+                // below the glass, so it covers none of the screen.
+                TerminalVisionConsoleLayout(helperLeading: false, spacing: 10) {
+                    helperSlab(helper, role: .console)
+                }
+                .animation(helperFoldAnimation, value: state.helperCollapsed)
+            }
+
         case .auxiliary:
             if let switchboard = state.umdController as? ViewportSwitchboardViewController {
                 HStack(spacing: 10) {
@@ -522,22 +546,7 @@ private struct TerminalVisionBottomOrnament: View {
                 spacing: 10
             ) {
                 if showsHelper, let helper = state.helperController {
-                    TerminalVisionControllerMount(
-                        controller: helper,
-                        sizing: .helper,
-                        revision: state.revision,
-                        interfaceStyle: state.interfaceStyle
-                    )
-                    .fixedSize()
-                    .modifier(GlassPrototypeSlabGround(
-                        cornerRadius: helperCollapsed
-                            ? AgentHelperStripViewController.collapsedDotDiameter / 2
-                            : 12
-                    ))
-                    .layoutValue(
-                        key: TerminalVisionConsoleRoleKey.self,
-                        value: .helper
-                    )
+                    helperSlab(helper, role: .helper)
                 }
 
                 TerminalVisionOrnamentWidthClamp(
@@ -621,13 +630,32 @@ private struct TerminalVisionBottomOrnament: View {
             // Drive the spatial host's own transaction from the mirrored
             // collapse value. The native strip still cross-dissolves its
             // content while this folds its slab along the same path.
-            .animation(
-                reduceMotion
-                    ? nil
-                    : .spring(response: 0.35, dampingFraction: 0.85),
-                value: helperCollapsed
-            )
+            .animation(helperFoldAnimation, value: helperCollapsed)
         }
+    }
+
+    /// The agent strip's slab: rounded docked, a disc folded to its dot.
+    private func helperSlab(
+        _ helper: AgentHelperStripViewController,
+        role: TerminalVisionConsoleRole
+    ) -> some View {
+        TerminalVisionControllerMount(
+            controller: helper,
+            sizing: .helper,
+            revision: state.revision,
+            interfaceStyle: state.interfaceStyle
+        )
+        .fixedSize()
+        .modifier(GlassPrototypeSlabGround(
+            cornerRadius: state.helperCollapsed
+                ? AgentHelperStripViewController.collapsedDotDiameter / 2
+                : 12
+        ))
+        .layoutValue(key: TerminalVisionConsoleRoleKey.self, value: role)
+    }
+
+    private var helperFoldAnimation: Animation? {
+        reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.85)
     }
 }
 

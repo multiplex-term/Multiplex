@@ -85,6 +85,9 @@ final class FileViewerController: AuxiliaryPaneController {
     /// did — the mosh re-ask (`anchorPaneDirectory`) aims at the pane under
     /// the finger with it; nil keeps the active/focused-pane answer.
     let anchorCell: (col: Int, row: Int)?
+    /// The anchor terminal's grid when `anchorCell` was taken — herdr's
+    /// pane rects only land on screen cells against the client's size.
+    let anchorScreenSize: (cols: Int, rows: Int)?
     /// The pressed path this tab was summoned to show, when it was.
     private let target: TerminalPathTarget?
     /// A file viewer keeps SOURCE | DIFF as a browsing mode: once DIFF is
@@ -109,6 +112,7 @@ final class FileViewerController: AuxiliaryPaneController {
         startDirectory: String?,
         anchorSession: SessionKey? = nil,
         anchorCell: (col: Int, row: Int)? = nil,
+        anchorScreenSize: (cols: Int, rows: Int)? = nil,
         target: TerminalPathTarget?,
         targetPresentation: FilePresentation = .source
     ) {
@@ -117,6 +121,7 @@ final class FileViewerController: AuxiliaryPaneController {
         self.startDirectory = startDirectory
         self.anchorSession = anchorSession
         self.anchorCell = anchorCell
+        self.anchorScreenSize = anchorScreenSize
         self.target = target
         self.targetPresentation = targetPresentation
         self.filePresentation = targetPresentation
@@ -495,34 +500,45 @@ final class FileViewerController: AuxiliaryPaneController {
     /// keeps the active/focused pane.
     private func anchorPaneDirectory() async -> String? {
         guard let anchorSession,
-              let output = try? await withConnection({
-                  try await $0.exec(Self.anchorDirectoryCommand(for: anchorSession))
-              })
+              let command = Self.anchorDirectoryCommand(for: anchorSession),
+              let output = try? await withConnection({ try await $0.exec(command) })
         else { return nil }
         return Self.parseAnchorDirectory(
-            output, backend: anchorSession.backend, atScreenCell: anchorCell
+            output, backend: anchorSession.backend,
+            atScreenCell: anchorCell, screenSize: anchorScreenSize
         )
     }
 
-    static func anchorDirectoryCommand(for session: SessionKey) -> String {
+    /// nil where no exec can answer: a Rex block's directory lives behind
+    /// the server's API, not a command, so this viewer has no anchor to ask
+    /// for and opens at $HOME — the posture of a pane that will not answer,
+    /// without spending a connection on a no-op.
+    static func anchorDirectoryCommand(for session: SessionKey) -> String? {
         switch session.backend {
         case .tmux:
             TmuxProbe.pathAnchorCommand(sessionName: session.name)
         case .herdr:
             HerdrProbe.snapshotCommand(sessionName: session.name)
+        case .rex:
+            nil
         }
     }
 
     static func parseAnchorDirectory(
         _ output: String,
         backend: Host.SessionBackend,
-        atScreenCell cell: (col: Int, row: Int)? = nil
+        atScreenCell cell: (col: Int, row: Int)? = nil,
+        screenSize: (cols: Int, rows: Int)? = nil
     ) -> String? {
         switch backend {
         case .tmux:
             TmuxProbe.parsePathAnchorDirectory(output, atScreenCell: cell)
         case .herdr:
-            HerdrProbe.parsePaneWorkingDirectory(output, atScreenCell: cell)
+            HerdrProbe.parsePaneWorkingDirectory(
+                output, atScreenCell: cell, screenSize: screenSize
+            )
+        case .rex:
+            nil
         }
     }
 

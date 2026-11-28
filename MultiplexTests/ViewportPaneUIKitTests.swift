@@ -347,6 +347,18 @@ final class ViewportPaneUIKitTests: XCTestCase {
             UIEdgeInsets(top: 8, left: 32, bottom: 8, right: 24)
         )
         XCTAssertGreaterThan(controller.fittingContentSize(for: 500).height, 0)
+
+        // iPhone Duo's inner-portrait status band: the row stops before the
+        // clock cluster, like a terminal tab's.
+        configuration.bandRowCenterY = 48
+        configuration.bandTrailingClearance = 128
+        configuration.minimumContentHeight = 82
+        controller.update(configuration: configuration)
+        XCTAssertEqual(
+            controller.rootView.contentInsets,
+            UIEdgeInsets(top: 8, left: 32, bottom: 8, right: 152)
+        )
+        XCTAssertEqual(controller.fittingContentSize(for: 669).height, 82)
     }
 
     func testNativeUMDEquivalentUpdatePreservesControlsAndMenuIdentity() throws {

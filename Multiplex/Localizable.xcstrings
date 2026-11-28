@@ -193,6 +193,28 @@
         }
       }
     },
+    "%@ reported “%@” without the id needed to attach it. Try again after the next refresh." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ reported “%2$@” without the id needed to attach it. Try again after the next refresh."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@が報告した「%2$@」には、アタッチに必要なIDがありません。次の更新後にもう一度お試しください。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 回報的「%2$@」缺少連接所需的 ID。請在下次重新整理後再試一次。"
+          }
+        }
+      }
+    },
     ", %lld times" : {
       "localizations" : {
         "ja" : {
@@ -1728,6 +1750,374 @@
         }
       }
     },
+    "A Rex tile opens the window its session is showing, with its panes. New Rex sessions need Rex already running on the host, so Rex is never the default." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rexタイルは、そのセッションが表示しているウインドウをペインごと開きます。新しいRexセッションを作成するには、ホストでRexがすでに実行されている必要があるため、Rexが新規セッションのデフォルトの実行先になることはありません。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rex 方塊會開啟該工作階段目前顯示的視窗，窗格一併顯示。主機上必須已有 Rex 在執行，才能建立新的 Rex 工作階段，因此 Rex 不會是新工作階段的預設後端。"
+          }
+        }
+      }
+    },
+    "All of them are shown, each tile marked with the backend it came from. Every extra backend adds a probe of its own to each deck refresh." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "すべてが表示され、各タイルにはどのバックエンド由来かが示されます。バックエンドが1つ増えるごとに、Deckの更新のたびにプローブが1回増えます。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全部都會顯示，每個方塊都標示它來自哪個後端。每多一個後端，Deck 每次重新整理就會多一次探測。"
+          }
+        }
+      }
+    },
+    "Couldn't attach the Rex session. %@" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rexセッションにアタッチできませんでした。%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法連接 Rex 工作階段。%@"
+          }
+        }
+      }
+    },
+    "Couldn't Open Session" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "セッションを開けませんでした"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法開啟工作階段"
+          }
+        }
+      }
+    },
+    "Couldn't reach the Rex server. %@" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rexサーバーに接続できませんでした。%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法連上 Rex 伺服器。%@"
+          }
+        }
+      }
+    },
+    "Open Terminal" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ターミナルを開く"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟終端機"
+          }
+        }
+      }
+    },
+    "Package installs, ~/.local/bin, and the Rex app on a Mac are already on the probe's PATH." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "パッケージによるインストール、~/.local/bin、MacのRexアプリはすでにプローブのPATHに含まれています。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "套件安裝、~/.local/bin 與 Mac 上的 Rex App 已在偵測用的 PATH 上。"
+          }
+        }
+      }
+    },
+    "rex answered with exit status %@" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "rexが終了ステータス%@を返しました"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "rex 以結束狀態 %@ 回應"
+          }
+        }
+      }
+    },
+    "Rex closed the terminal stream: %@." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rexがターミナルストリームを閉じました：%@。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rex 關閉了終端機串流：%@。"
+          }
+        }
+      }
+    },
+    "terminal %lld" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ターミナル%lld"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "終端機 %lld"
+          }
+        }
+      }
+    },
+    "The connection to the Rex server ended." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rexサーバーとの接続が終了しました。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "與 Rex 伺服器的連線已結束。"
+          }
+        }
+      }
+    },
+    "The connection to the Rex server was lost." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rexサーバーとの接続が失われました。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "與 Rex 伺服器的連線已中斷。"
+          }
+        }
+      }
+    },
+    "The Rex server answered the stream handshake unreadably." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rexサーバーからのストリームハンドシェイクの応答を読み取れませんでした。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rex 伺服器對串流交握的回應無法讀取。"
+          }
+        }
+      }
+    },
+    "The Rex server closed the connection before answering." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rexサーバーが応答する前に接続を閉じました。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rex 伺服器在回應前就關閉了連線。"
+          }
+        }
+      }
+    },
+    "The Rex server did not answer in time." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rexサーバーが時間内に応答しませんでした。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rex 伺服器未在時限內回應。"
+          }
+        }
+      }
+    },
+    "The Rex server issued no usable stream ticket." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rexサーバーが有効なストリームチケットを発行しませんでした。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rex 伺服器沒有發出可用的串流票證。"
+          }
+        }
+      }
+    },
+    "The Rex server refused the connection (%@)." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rexサーバーが接続を拒否しました（%@）。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rex 伺服器拒絕了連線（%@）。"
+          }
+        }
+      }
+    },
+    "The Rex server refused the terminal stream: %@." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rexサーバーがターミナルストリームを拒否しました：%@。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rex 伺服器拒絕了終端機串流：%@。"
+          }
+        }
+      }
+    },
+    "The Rex server refused: %@" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rexサーバーが拒否しました：%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rex 伺服器拒絕了要求：%@"
+          }
+        }
+      }
+    },
+    "This Rex session has no terminal to open." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このRexセッションには開けるターミナルがありません。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這個 Rex 工作階段沒有可開啟的終端機。"
+          }
+        }
+      }
+    },
+    "This Rex session no longer exists." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このRexセッションはもう存在しません。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這個 Rex 工作階段已不存在。"
+          }
+        }
+      }
+    },
+    "unreadable rex probe response" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "rexの応答を読み取れません"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法讀取的 rex 探測回應"
+          }
+        }
+      }
+    },
+    "window %lld" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ウインドウ%lld"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "視窗 %lld"
+          }
+        }
+      }
+    },
     "✳ AGENT HELPERS · PRO" : {
       "localizations" : {
         "ja" : {
@@ -2818,6 +3208,38 @@
         }
       }
     },
+    "Between left and right panes" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "左右のペインの間"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "左右窗格之間"
+          }
+        }
+      }
+    },
+    "Between top and bottom panes" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上下のペインの間"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上下窗格之間"
+          }
+        }
+      }
+    },
     "Binary files differ." : {
       "localizations" : {
         "ja" : {
@@ -3868,6 +4290,38 @@
         }
       }
     },
+    "Close find" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "検索を閉じる"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "關閉尋找"
+          }
+        }
+      }
+    },
+    "Close Find" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "検索を閉じる"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "關閉尋找"
+          }
+        }
+      }
+    },
     "Close message box" : {
       "localizations" : {
         "ja" : {
@@ -4616,6 +5070,22 @@
         }
       }
     },
+    "Couldn't close the pane. %@" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ペインを閉じられませんでした。%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法關閉窗格。%@"
+          }
+        }
+      }
+    },
     "Couldn't connect to %@: %@" : {
       "localizations" : {
         "en" : {
@@ -4762,6 +5232,38 @@
         }
       }
     },
+    "Couldn't open a new tab. %@" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新規タブを開けませんでした。%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法開啟新的標籤頁。%@"
+          }
+        }
+      }
+    },
+    "Couldn't open this terminal. %@" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このターミナルを開けませんでした。%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法開啟這個終端機。%@"
+          }
+        }
+      }
+    },
     "Couldn't reach %@ (%@)." : {
       "localizations" : {
         "en" : {
@@ -4894,6 +5396,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無法解析 %@。"
+          }
+        }
+      }
+    },
+    "Couldn't split the pane. %@" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ペインを分割できませんでした。%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法分割窗格。%@"
           }
         }
       }
@@ -6188,6 +6706,22 @@
         }
       }
     },
+    "Exit Full Screen" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "フルスクリーンを解除"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "結束全螢幕"
+          }
+        }
+      }
+    },
     "Expand message" : {
       "localizations" : {
         "ja" : {
@@ -6376,6 +6910,86 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在聽寫收音前，先用 RNNoise 濾掉麥克風中持續的背景噪音 — 風扇、車流、耳機的嘶嘶聲；訊息框和按鍵列的聽寫都適用。模型只需從 xiph.org 下載一次（%@），會比對其公布的 SHA-256，且只保存在這部裝置上。"
+          }
+        }
+      }
+    },
+    "Find in file" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ファイル内を検索"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "在檔案中尋找"
+          }
+        }
+      }
+    },
+    "Find in File…" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "ファイル内を検索…"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "在檔案中尋找…"
+          }
+        }
+      }
+    },
+    "Find Next" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "次を検索"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "尋找下一個"
+          }
+        }
+      }
+    },
+    "Find Previous" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "前を検索"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "尋找上一個"
+          }
+        }
+      }
+    },
+    "Find…" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "検索…"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "尋找…"
           }
         }
       }
@@ -6622,6 +7236,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "完整版本說明"
+          }
+        }
+      }
+    },
+    "Full Screen" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "フルスクリーン"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "全螢幕"
           }
         }
       }
@@ -7434,6 +8064,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在背景保持連線"
+          }
+        }
+      }
+    },
+    "Keep screen on" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "画面をオンのままにする"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保持螢幕開啟"
           }
         }
       }
@@ -9322,6 +9968,22 @@
         }
       }
     },
+    "Next match" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "次の一致"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "下一個符合項目"
+          }
+        }
+      }
+    },
     "Next Window" : {
       "localizations" : {
         "ja" : {
@@ -9350,6 +10012,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "主機上沒有 %@"
+          }
+        }
+      }
+    },
+    "No %@ server is running on %@, and Multiplex doesn’t start one. Start %@ there, then try again." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "No %1$@ server is running on %2$@, and Multiplex doesn’t start one. Start %3$@ there, then try again."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%2$@で%1$@サーバーが実行されておらず、Multiplexは起動しません。ホストで%3$@を起動してから、もう一度お試しください。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%2$@ 上沒有執行中的 %1$@ 伺服器，而 Multiplex 不會代為啟動。請先在主機上啟動 %3$@，然後再試一次。"
           }
         }
       }
@@ -10838,6 +11522,22 @@
         }
       }
     },
+    "Pane divider" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ペインの区切り線"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "窗格分隔線"
+          }
+        }
+      }
+    },
     "PANE MENU" : {
       "localizations" : {
         "ja" : {
@@ -11266,6 +11966,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ 終端機主題的預覽"
+          }
+        }
+      }
+    },
+    "Previous match" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "前の一致"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "上一個符合項目"
           }
         }
       }
@@ -12536,6 +13252,22 @@
         }
       }
     },
+    "Screen" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "画面"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "螢幕"
+          }
+        }
+      }
+    },
     "Script" : {
       "localizations" : {
         "ja" : {
@@ -13076,6 +13808,22 @@
         }
       }
     },
+    "Show all panes" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "すべてのペインを表示"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "顯示所有窗格"
+          }
+        }
+      }
+    },
     "Show connection stats" : {
       "localizations" : {
         "ja" : {
@@ -13172,6 +13920,22 @@
         }
       }
     },
+    "Show Rex panes and terminals" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rexのペインとターミナルを表示"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "顯示 Rex 窗格與終端機"
+          }
+        }
+      }
+    },
     "Show only changed files" : {
       "localizations" : {
         "ja" : {
@@ -13189,6 +13953,7 @@
       }
     },
     "Show or hide keyboard" : {
+      "extractionState" : "stale",
       "localizations" : {
         "ja" : {
           "stringUnit" : {
@@ -13758,6 +14523,22 @@
         }
       }
     },
+    "Split Down" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下に分割"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "向下分割"
+          }
+        }
+      }
+    },
     "Split Left / Right" : {
       "localizations" : {
         "ja" : {
@@ -13770,6 +14551,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "左右分割"
+          }
+        }
+      }
+    },
+    "Split Right" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "右に分割"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "向右分割"
           }
         }
       }
@@ -14156,6 +14953,22 @@
         }
       }
     },
+    "Stops the display from dimming and locking while a terminal or the file viewer is on screen. The deck alone still sleeps as usual. Uses more battery." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ターミナルまたはファイルビューアが表示されている間は、画面が暗くなったり自動ロックされたりしません。Deckだけのときは通常どおりスリープします。バッテリー消費が増えます。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "終端機或檔案檢視器顯示在螢幕上時，螢幕不會變暗或自動鎖定。只顯示 Deck 時仍會照常進入睡眠。會較耗電。"
+          }
+        }
+      }
+    },
     "Stored in iCloud Keychain, never in the host record." : {
       "localizations" : {
         "ja" : {
@@ -14216,6 +15029,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "表面"
+          }
+        }
+      }
+    },
+    "Switch Terminal" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ターミナルを切り替え"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切換終端機"
           }
         }
       }
@@ -14334,6 +15163,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "標籤頁"
+          }
+        }
+      }
+    },
+    "terminal" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ターミナル"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "終端機"
           }
         }
       }
@@ -15558,6 +16403,22 @@
         }
       }
     },
+    "The Rex server on this host is older than Multiplex can talk to. Update Rex there." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このホストのRexサーバーは古く、Multiplexから接続できません。ホスト側でRexをアップデートしてください。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這台主機上的 Rex 伺服器版本太舊，Multiplex 無法與它通訊。請在主機上更新 Rex。"
+          }
+        }
+      }
+    },
     "The same block, right where you pressed — and it reaches links and paths at any mouse mode, when a tap belongs to the remote." : {
       "localizations" : {
         "ja" : {
@@ -15602,6 +16463,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此標籤頁無法重新連線，因為它的主機已不在 Deck 中。"
+          }
+        }
+      }
+    },
+    "The terminal closed before it could be opened." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ターミナルは開く前に閉じられました。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "終端機在開啟前就已關閉。"
           }
         }
       }
@@ -15989,6 +16866,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "切換窗格縮放"
+          }
+        }
+      }
+    },
+    "Toggle Sidebar" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サイドバーを切り替え"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切換側邊欄"
           }
         }
       }

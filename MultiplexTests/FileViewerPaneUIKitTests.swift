@@ -423,9 +423,158 @@ final class FileViewerPaneUIKitTests: XCTestCase {
         XCTAssertEqual(view.content?.bodyFont.pointSize, resized.bodyFont.pointSize)
     }
 
+    func testFindRevealCentersAnOffscreenHitAndLeavesAVisibleOneAlone() throws {
+        var source = (0..<2000).map { "    let value\($0) = compute(\($0))" }
+        source[1500] = "    let needle = 1"
+        let lines = CodeHighlighter.highlight(source.joined(separator: "\n"), language: .swift)
+        let view = FileViewerTextView()
+        view.isEditable = false
+        view.installDecor()
+        view.frame = CGRect(x: 0, y: 0, width: 700, height: 500)
+        view.layoutIfNeeded()
+        var landed = 0
+        view.contentDidChange = { landed += 1 }
+        view.setContent(FileViewerTextContent.code(lines, targetLine: nil, scale: 1), targetLine: nil)
+        view.layoutIfNeeded()
+        XCTAssertEqual(landed, 1, "an open find re-searches whenever the text lands")
+
+        let text = try XCTUnwrap(view.content).text.string
+        let result = FileViewerFind.matches(of: "NEEDLE", in: text)
+        XCTAssertEqual(result.ranges.count, 1)
+        view.setFindMatches(result.ranges, current: 0)
+        XCTAssertEqual(view.currentFindMatch, 0)
+        XCTAssertEqual(view.contentOffset.y, 0)
+
+        view.revealFindMatch(0)
+        let revealed = view.contentOffset.y
+        XCTAssertGreaterThan(revealed, 1000, "line 1501 is far below the first screen")
+        XCTAssertLessThanOrEqual(view.firstVisibleOffset(), result.ranges[0].location)
+        view.revealFindMatch(0)
+        XCTAssertEqual(view.contentOffset.y, revealed, "a visible hit never moves the reader")
+
+        view.setFindMatches([], current: 3)
+        XCTAssertNil(view.currentFindMatch, "a stale index never outlives its ranges")
+    }
+
+    func testPreviewFindRunsMatchTheRenderedSurfacesOneForOne() {
+        let blocks: [MarkdownBlock] = [
+            .heading(level: 1, inlines: [.text("Title", [])]),
+            .paragraph(inlines: [
+                .text("See ", []), .code("x()"),
+                .link(text: "docs", destination: "a.md"),
+                .image(alt: "shot", destination: "s.png"),
+            ]),
+            .listItem(marker: "•", level: 0, inlines: []),
+            .quote(blocks: [
+                .paragraph(inlines: [.text("quoted", [.italic])]),
+                .code(language: nil, info: "", lines: ["a", "", "b", ""]),
+            ]),
+            .code(language: .swift, info: "swift", lines: ["let a = 1", "", "}"]),
+            .rule,
+            .table(header: [[.text("H1", [])], [.text("H2", [])]], rows: [[[.text("c", [])]]]),
+        ]
+        let markdown = FileViewerMarkdownContentView()
+        markdown.frame = CGRect(x: 0, y: 0, width: 600, height: 2000)
+        markdown.setImageStates(["s.png": .loading])
+        markdown.apply(blocks: blocks)
+        markdown.layoutIfNeeded()
+        XCTAssertEqual(markdown.blockStack.arrangedSubviews.count, blocks.count)
+        let surfaces = markdown.blockStack.arrangedSubviews
+            .flatMap { FileViewerMarkdownContentView.textSurfaces(in: $0) }
+            .map { $0.attributedText.string }
+        XCTAssertEqual(
+            surfaces,
+            MarkdownFindText.runs(for: blocks, shownImages: ["s.png"]).map(\.text),
+            "a hit's range must be a range in the surface the reader sees"
+        )
+    }
+
+    func testPreviewFindWashesInPlaceAndRevealsAHitNotMountedYet() throws {
+        var blocks = (0..<400).map {
+            MarkdownBlock.paragraph(inlines: [.text("Paragraph \($0) of filler prose.", [])])
+        }
+        blocks[350] = .paragraph(inlines: [.text("The needle is here.", [])])
+        let markdown = FileViewerMarkdownContentView()
+        markdown.frame = CGRect(x: 0, y: 0, width: 600, height: 400)
+        markdown.apply(blocks: blocks)
+        markdown.layoutIfNeeded()
+        var changed = 0
+        markdown.findCorpusDidChange = { changed += 1 }
+
+        let result = try XCTUnwrap(markdown.findCorpus).matches(of: "NEEDLE")
+        XCTAssertEqual(result.ranges.count, 1)
+        XCTAssertLessThan(markdown.blockStack.arrangedSubviews.count, 350, "far below the mount frontier")
+        markdown.setFindMatches(result.ranges, current: 0)
+        XCTAssertEqual(markdown.firstVisibleFindOffset(), 0)
+
+        markdown.revealFindMatch(0)
+        XCTAssertGreaterThan(markdown.blockStack.arrangedSubviews.count, 350)
+        let surface = try XCTUnwrap(
+            FileViewerMarkdownContentView.textSurfaces(in: markdown.blockStack.arrangedSubviews[350]).first
+        )
+        let wash = try XCTUnwrap(FileViewerFindWashView.existing(on: surface))
+        XCTAssertEqual(wash.hits, [NSRange(location: 4, length: 6)])
+        XCTAssertEqual(wash.current, 0)
+        XCTAssertEqual(surface.attributedText.string, "The needle is here.", "a wash is decor, never text")
+        let scroll = markdown.scrollView
+        let visible = CGRect(origin: scroll.contentOffset, size: scroll.bounds.size)
+        XCTAssertTrue(visible.intersects(surface.convert(surface.bounds, to: scroll)))
+        let revealed = scroll.contentOffset.y
+        XCTAssertGreaterThan(revealed, 1000)
+        markdown.revealFindMatch(0)
+        XCTAssertEqual(scroll.contentOffset.y, revealed, "a visible hit never moves the reader")
+        XCTAssertGreaterThan(markdown.firstVisibleFindOffset(), 0)
+
+        markdown.setFindMatches([], current: nil)
+        XCTAssertNil(FileViewerFindWashView.existing(on: surface), "closing find takes the decor away")
+
+        markdown.setImageStates(["x.png": .loading])
+        XCTAssertEqual(changed, 1, "a shown picture re-spells a caption")
+        markdown.apply(blocks: Array(blocks.prefix(10)))
+        XCTAssertEqual(changed, 2, "a new document is a new corpus")
+        XCTAssertEqual(try XCTUnwrap(markdown.findCorpus).runStarts.count, 10)
+    }
+
+    func testFindBarReadoutGatesItsStepChips() {
+        var steps: [Int] = []
+        var closed = 0
+        let bar = FileViewerFindBarView(
+            queryChanged: { _ in },
+            step: { steps.append($0) },
+            close: { closed += 1 }
+        )
+        XCTAssertTrue(bar.countLabel.isHidden, "no query, no readout")
+
+        bar.apply(count: "NO MATCH", hasMatches: false)
+        XCTAssertFalse(bar.countLabel.isHidden)
+        XCTAssertEqual(bar.nextChip.alpha, 0.5)
+        XCTAssertFalse(bar.previousChip.isUserInteractionEnabled)
+
+        bar.apply(count: "3/41", hasMatches: true)
+        XCTAssertEqual(bar.countLabel.accessibilityLabel, "3/41")
+        XCTAssertEqual(bar.nextChip.alpha, 1)
+        XCTAssertTrue(bar.nextChip.accessibilityActivate())
+        XCTAssertTrue(bar.previousChip.accessibilityActivate())
+        XCTAssertFalse(bar.textFieldShouldReturn(bar.textField), "Return keeps the field focused")
+        XCTAssertEqual(steps, [1, -1, 1])
+        XCTAssertTrue(bar.doneChip.accessibilityActivate())
+        XCTAssertEqual(closed, 1)
+    }
+
+    func testFindIsNotOfferedWithoutATextScreen() {
+        let pane = makePane(close: {})
+        pane.loadViewIfNeeded()
+        XCTAssertNil(pane.findChip, "the idle screen has nothing to search")
+        XCTAssertNil(pane.keyCommands)
+        pane.beginFind()
+        XCTAssertFalse(pane.findActive)
+        XCTAssertTrue(pane.findBar.isHidden)
+    }
+
     func testVisionStackedDeckKeepsFileInventoryAboveTheVerbatimWindowRow() {
         var refreshed = 0
         var closed = 0
+        var findToggled = 0
         let fileViewer = FileViewerOrnamentConfiguration(
             key: .init(
                 canGoBack: true,
@@ -437,7 +586,9 @@ final class FileViewerPaneUIKitTests: XCTestCase {
                 hostName: "devbox",
                 treeCaption: "TREE",
                 isBusy: false,
-                isWorking: true
+                isWorking: true,
+                findAvailable: true,
+                findActive: false
             ),
             goBack: {},
             goForward: {},
@@ -445,7 +596,8 @@ final class FileViewerPaneUIKitTests: XCTestCase {
             showDiff: {},
             toggleMarkdownSelection: {},
             toggleTree: {},
-            refresh: { refreshed += 1 }
+            refresh: { refreshed += 1 },
+            toggleFind: { findToggled += 1 }
         )
         let configuration = ViewportUMDConfiguration(
             title: "▤ README.md · devbox",
@@ -487,6 +639,9 @@ final class FileViewerPaneUIKitTests: XCTestCase {
         XCTAssertEqual(controller.fileForwardChip?.alpha, 0.5)
         XCTAssertEqual(controller.fileSelectChip?.accessibilityLabel, "Select source text to copy")
         XCTAssertEqual(controller.fileTreeChip?.accessibilityLabel, "Show the file tree")
+        XCTAssertEqual(controller.fileFindChip?.accessibilityLabel, "Find in file")
+        XCTAssertTrue(controller.fileFindChip?.accessibilityActivate() == true)
+        XCTAssertEqual(findToggled, 1)
         XCTAssertTrue(controller.fileRefreshChip?.accessibilityActivate() == true)
         XCTAssertTrue(controller.closeChip?.accessibilityActivate() == true)
         XCTAssertEqual(refreshed, 1)

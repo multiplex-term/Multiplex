@@ -31,6 +31,9 @@ enum RailFit {
     static let closedPortraitTopInset: CGFloat = 160
     static let closedCameraInset: CGFloat = 80
     static let closedCornerInset: CGFloat = 12
+    /// The system's glyph block is reported 14 pt taller than the room the
+    /// chips keep under it (closed portrait: 174 reported, chips at 160).
+    static let systemBlockSlack: CGFloat = 14
 
     /// The room kept at each end. The chips gather at the camera's end,
     /// which is the end with the larger inset.
@@ -40,14 +43,19 @@ enum RailFit {
         var anchoredToBottom: Bool { bottom > top }
     }
 
-    /// The closed display is the compact-width one.
+    /// The closed display is the compact-width one. `systemBlockBottom` is
+    /// where the system's glyph block ends in the strip (nil when the system
+    /// reports none): a Live Activity pushes the clock and radio glyphs down
+    /// the column, and the chips start below them.
     static func columnPlacement(
         compactWidth: Bool,
         landscape: Bool,
-        trailingEdge: Bool
+        trailingEdge: Bool,
+        systemBlockBottom: CGFloat? = nil
     ) -> ColumnPlacement {
-        guard compactWidth else { return ColumnPlacement(top: innerTopInset, bottom: 0) }
-        guard landscape else { return ColumnPlacement(top: closedPortraitTopInset, bottom: 0) }
+        let pushed = (systemBlockBottom ?? 0) - systemBlockSlack
+        guard compactWidth else { return ColumnPlacement(top: max(innerTopInset, pushed), bottom: 0) }
+        guard landscape else { return ColumnPlacement(top: max(closedPortraitTopInset, pushed), bottom: 0) }
         return trailingEdge
             ? ColumnPlacement(top: closedCornerInset, bottom: closedCameraInset)
             : ColumnPlacement(top: closedCameraInset, bottom: closedCornerInset)

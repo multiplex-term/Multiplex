@@ -13,11 +13,12 @@ options:
     visionOS: "1.0"
 
 packages:
-  # Vendored 1.15.0 (rev dd2fb8a, MIT). Multiplex keeps keyboardType settable
-  # and `.default` for multilingual/IME input, routes pans to remote scrolling
-  # and copy mode, suppresses obscured-tab redraws, keeps UIKit composition
-  # visible, and preserves iOS-app-on-Mac Escape and hardware Ctrl chords.
-  # Primary-button tap reporting is upstream as of this release.
+  # Vendored 1.99.0 (rev 2dad6a1, MIT; the SwiftTerm 2.0 API preview).
+  # Multiplex keeps keyboardType settable and `.default` for multilingual/IME
+  # input, routes pans to remote scrolling and copy mode, suppresses
+  # obscured-tab frames, keeps UIKit composition visible, and preserves
+  # iOS-app-on-Mac Escape and hardware Ctrl chords. Patch inventory:
+  # docs/agents/swiftterm-fork.md.
   SwiftTerm:
     path: Vendor/SwiftTerm
   # Pinned to 0.12.0 on purpose: 0.12.1 moved its swift-nio-ssh dependency to
@@ -206,7 +207,7 @@ targets:
         # Citadel carries the decrypt side; the app only needed the encrypt
         # side, which no Swift dependency offers.
         SWIFT_OBJC_BRIDGING_HEADER: Multiplex/Multiplex-Bridging-Header.h
-        MARKETING_VERSION: "1.5.0"
+        MARKETING_VERSION: "1.5.2"
         CURRENT_PROJECT_VERSION: "202608070"
         # One target produces the universal iOS binary (iPhone + iPad) and the
         # separate visionOS binary. Fastlane archives Release, so family 1 must
@@ -254,7 +255,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.multiplexterm.multiplex.widgets
         PRODUCT_NAME: MultiplexWidgets
-        MARKETING_VERSION: "1.5.0"
+        MARKETING_VERSION: "1.5.2"
         CURRENT_PROJECT_VERSION: "202608070"
         TARGETED_DEVICE_FAMILY: "1,2,7"
         SUPPORTS_MACCATALYST: NO

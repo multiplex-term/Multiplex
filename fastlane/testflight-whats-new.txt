@@ -1,4 +1,25 @@
-NEW SINCE 1.5.0
-• Agent browser (experimental): turn on Host Settings → Agent browser and agents on that host can open, read, and operate web pages beside your terminal with `mpx browser`. Needs mpx 0.2 on the host.
+NEW SINCE 1.5.2
+• iPhone Duo: the side column's buttons now move down when a Live Activity (a delivery, a timer, a call) pushes the clock and Wi-Fi symbols down the column, instead of sitting under them. They move back up when it ends.
+• iPad: with the keyboard locked, Apple Pencil no longer writes on the terminal. A stroke now taps, selects, and scrolls like a finger. Unlocked, the Pencil still handwrites text.
+• Rex: a host that runs Rex (superlogical.com/rex) can show its Rex sessions as tiles, and a tile opens a Rex window as a tab with its panes laid out as in Rex. The REX key splits the focused pane right or down, zooms or closes it, opens a new Rex tab, or switches to another terminal of the session. A host with Rex sessions gets a + REX chip on its rail; press it, or check REX in Host Settings under Backends. New Session and + TAB can create a Rex session while a Rex server runs on the host. Checked against Rex 0.1.0-preview.25.
+• Terminal: the TMUX, HRDR or REX key now lights up when the session has more than one window (for Rex, terminal).
+• Agent browser (experimental): Host Settings → Agent browser lets agents on that host open and operate web pages beside your terminal with `mpx browser` (needs mpx 0.2).
+
+PLEASE TRY
+1. On iPhone Duo, attach a session, then start a Live Activity in another app (a timer works) and come back: DECK and the buttons below it should start under the clock and Wi-Fi symbols, none hidden behind them. End the activity: they should move back up.
+2. On iPad with Apple Pencil, hold the keyboard key to lock it, then drag the Pencil across the terminal: it should scroll or select, with no ink and no text typed. Unlock: the Pencil should type again.
+3. On a host running Rex with a session open, press the + REX chip on the host's rail: the Rex sessions should appear as tinted tiles.
+4. Press the tile of a Rex session with a split: the tab should show every pane where Rex has it, colors and earlier output included. Tap a pane and type: it should run in that pane.
+5. Open vim in a Rex terminal, then attach it: the tab should show it. Quit vim: the earlier output should come back, with one prompt.
+6. Long-press the tile of a Rex session with a second window and choose Open Terminal: that window should open as its own tab.
+7. Exit the shell in one pane: that pane should close and the others stay. Exit the last pane of a Rex tab while the session has another: the tab should show that other Rex tab. Exit the last of the session: the tab should end with RECONNECT, not an error.
+8. Start an agent in a Rex terminal, then let it ask a question: the tile should show RUNNING, then NEEDS YOU.
+9. In a Rex tab, press the REX key and choose Split Right, then Split Down: each should add a pane in the same directory with the keyboard in it. Drag a line between panes: both should resize. Toggle Pane Zoom: that pane should fill the tab until ALL PANES. Close Pane twice: it should go. Rex on the host should show the same panes. New Tab: the tab should show a new Rex tab, and Switch Terminal should lead back.
+10. Press + NEW SESSION and choose REX under Runs on: a new Rex session should open as a tab and appear in Rex. With no Rex server running, it should say so.
+11. Lock the device for a minute with a Rex tab open: on return it should reconnect by itself.
+12. In Host Settings under Backends, uncheck REX: the Rex tiles should go away. Check it again: they should come back.
+13. Run an agent in one pane and a shell in another: the Agent Bar should show its keys only while the agent's pane is the framed one.
+14. Attach a tmux session with one window, then add a second from the TMUX panel: the TMUX key should brighten.
+15. Open the same Rex window on the Mac and in a tab, then work on the Mac without touching the tab: the Mac's panes should keep their sizes and not flicker, and the tab should show them at the Mac's sizes, never garbled. Type in the tab: it should take the sizes back.
 
 Feedback: screenshot in TestFlight

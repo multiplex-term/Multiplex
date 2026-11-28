@@ -1738,10 +1738,19 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
                 alternative for hosts that run it.
                 """)
         }
-        if enabled.count > 1 {
+        if enabled.contains(.rex) {
+            detail += "\n\n" + HostGuide.rexSessionsNote
+        }
+        if enabled.count == 2 {
             detail += "\n\n" + String(localized: """
                 Both are shown, each tile marked with the backend \
                 it came from. That \(HostGuide.secondBackendCost).
+                """)
+        } else if enabled.count > 2 {
+            detail += "\n\n" + String(localized: """
+                All of them are shown, each tile marked with the backend \
+                it came from. Every extra backend adds a probe of its own \
+                to each deck refresh.
                 """)
         }
         return detail
@@ -1770,11 +1779,13 @@ final class AddHostViewController: UIViewController, UITextFieldDelegate,
         // The default is only a question when there is more than one answer.
         // On the single-backend host — the overwhelmingly common case — the
         // section is exactly one labelled control, as it always was.
-        if enabledBackends.count > 1 {
+        //
+        // The answers are the checked backends a NEW session can run on:
+        // Rex is checked without ever being a default.
+        let defaultChoices = form.backendSelection.defaultChoices
+        if defaultChoices.count > 1 {
             let bar = AddHostChoiceBar<Host.SessionBackend>(
-                choices: Host.SessionBackend.allCases
-                    .filter(enabledBackends.contains)
-                    .map { ($0.rawValue, $0) },
+                choices: defaultChoices.map { ($0.rawValue, $0) },
                 selection: form.sessionBackend
             ) { [weak self] backend in
                 guard let self else { return }

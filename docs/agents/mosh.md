@@ -32,6 +32,11 @@ Load-bearing decisions split from AGENTS.md.
   still ride the ordered terminal pump. mosh tabs have no exec surface:
   FILE is hidden and pane drops are refused with a message, never silently
   dropped.
+- **A Rex tab never rides mosh** (`TerminalSessionController.ridesMosh`):
+  mosh-server needs a program to run in its PTY and Rex ships no terminal
+  client. Waiting on upstream's `rex block stream`; the measured traps for
+  whoever builds it are in `backends-and-probe.md` (Rex section, "TODO,
+  waiting on upstream").
 - **A mosh tab has NO local scrollback**
   (`TerminalSessionController.localScrollbackLines` answers nil for mosh —
   a transport capability, owned beside the transport choice — and

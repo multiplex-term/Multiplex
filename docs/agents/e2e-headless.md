@@ -26,7 +26,11 @@ app.multiplexterm.multiplex`):
   `workingDirs` / `sessionScripts` / `newSessionTmuxConf` /
   `agentLaunchModels` feed the picker/script/conf/model paths;
   `secondaryBackends: ["herdr"]` imports a MIXED host (two probes on one
-  connection, both backends' tiles); `passphrase`
+  connection, both backends' tiles; `["rex"]` adds the Rex probe — on a
+  Mac running Rex it reads, and a tab attaches, that Mac's REAL sessions,
+  so use a throwaway server per `backends-and-probe.md` when that
+  matters);
+  `passphrase`
   stores the key passphrase in the Keychain so an encrypted `privateKey`
   proves the sealed-key connect path (probe logs `Accepted publickey`, no
   prompt); `"enabled": false` proves the never-dials promise against a
@@ -63,6 +67,20 @@ app.multiplexterm.multiplex`):
   through the real surrender/adopt path (moved tabs keep connections).
 - `MULTIPLEX_AUTO_DROP=<local path>` — drops that file into the first tab
   (SFTP upload + typed path, the real drag path).
+- `MULTIPLEX_AUTO_REX_SWITCH=<n>` — on a Rex tab, presses row n (1-based)
+  of the REX panel's Switch Terminal list once the tab is live — the
+  headless stand-in for a press nothing else can make. Proof host-side:
+  `terminal.size` names the tab the owner of the NEW block and no longer of
+  the old one.
+- `MULTIPLEX_AUTO_PANE_ACTIONS=splitRight,splitDown,ratio:0.3,focus:1,closePane`
+  — on a paned (Rex) tab, walks the steps four seconds apart from six
+  seconds after it goes live, each through the entry point its control
+  uses: the REX panel's rows (`PaneShortcut` raw values — `splitRight`,
+  `splitDown`, `zoomPane`, `closePane`, `newWindow`), a divider
+  drag on the layout's first split (`ratio:`), a touch on the nth pane in
+  reading order (`focus:`). Fires once per process. Proof host-side: `rex
+  api call -s <session> session.view` (the tree, every block's `owner`)
+  and `com.superlogical.terminal.size` per block.
 - `MULTIPLEX_AUTO_ACTION_URL=multiplex://open?…` — submits the URL through
   the exact `onOpenURL` → router seam once per process; the headless widget
   stand-in (simctl openurl's first-run confirmation can't be clicked
@@ -259,6 +277,10 @@ app.multiplexterm.multiplex.<name>`:
   COMMANDS grid / CUSTOM SETUP list / with a fresh row's composer expanded.
   A panel already up just switches, so one run can capture all three.
 - `debug.guide` — open the focused terminal's GUIDE field manual for layout capture.
+- `debug.fullscreen` — toggle full screen in the focused terminal's window
+  (the `⋯` row in, the EXIT chip out); fire `debug.summon` first so the
+  window owns focus. `debug.helpercollapse` folds/unfolds the agent strip
+  app-wide (its own fold control).
 - `debug.link` — activate the first visible link through the resolve →
   policy → confirmation path (URL → link sheet, path → file-viewer sheet;
   text both resolvers decline must present nothing). `debug.linkopen` runs
@@ -289,6 +311,19 @@ app.multiplexterm.multiplex.<name>`:
   `#{pane_in_mode}` stays 0 under a pan).
 - `debug.herdrmenu` — one right-click report at screen center (the block's
   MENU chip path); proof is herdr's own pane menu rendering in the pane.
+- `debug.herdrselectdrag` — the traveling long press on herdr: finds the
+  first visible row containing `mpx-select`, long-presses its first letter
+  (the block rises), drags to that row's next two lines and lifts, through
+  the real `longPressBegan/Moved/Ended` phases. Print the marker so the
+  command line itself doesn't match (`printf 'mpx-%s\n' select-alpha
+  select-bravo select-charlie`). Proof: `printf x | xcrun simctl pbcopy
+  <udid>` first, then `xcrun simctl pbpaste <udid>` reads herdr's OSC 52
+  copy (`mpx-select-alpha⏎mpx-select-bravo⏎mpx-select`, verified
+  2026-10-17 on visionOS against herdr 0.9.3, over SSH and over mosh 1.4.0
+  with `useMosh: true` added to `seed-herdr.json`), and herdr's own
+  "copied to clipboard" toast shows in the pane. A herdr/mosh seed flips
+  devbox in place: re-seed `useMosh: false` / `sessionBackend: "tmux"`
+  afterwards, or the next `verify` attaches `main` through herdr over mosh.
 - `debug.tmuxclosepane` / `debug.tmuxclosewindow` — the already-confirmed
   destructive close actions (disposable sessions only).
 - `debug.keybar` — iPad key-bar proof: a shell prompt capture shows `~|/-^C`.
@@ -315,6 +350,10 @@ app.multiplexterm.multiplex.<name>`:
   the drop plumbing is covered by the fake-session unit tests.
 - `debug.kbdlock` — toggle the software-keyboard lock headlessly.
 - `debug.fvselect` — the file viewer's markdown SELECT mode.
+- `debug.fvfind` — open the active viewer's find bar with
+  `MULTIPLEX_FIND_QUERY` (default `func`) typed in; each later post steps
+  to the next match (a Return). Proof is the `n/N` readout and the strong
+  wash moving in the next screenshot. ⌘F itself has no headless route.
 - `debug.fvimage` — press the first image placeholder on the rendered
   markdown screen (destination → resolve → open, the finger's own path).
 - `debug.fvplay` — press PLAY/PAUSE on the active viewer's sound screen;

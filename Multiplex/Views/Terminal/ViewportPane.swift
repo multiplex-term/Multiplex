@@ -854,6 +854,11 @@ struct ViewportUMDConfiguration {
     /// tab's rail must be the same band as a terminal tab's, or the pane
     /// jumps when you switch between them.
     var minimumContentHeight: CGFloat = 0
+    /// Matches `UMDBarConfiguration.bandRowCenterY` / `bandTrailingClearance`:
+    /// iPhone Duo's status band, whose clock cluster the shell row stops
+    /// before, like a terminal tab's.
+    var bandRowCenterY: CGFloat?
+    var bandTrailingClearance: CGFloat = 0
     var closeAccessibilityLabel: String
     /// nil (the default) is a rail with no reading size — every ⌗ viewport
     /// tab, and any caller that has no file viewer under it.
@@ -893,6 +898,8 @@ final class ViewportUMDViewController: UIViewController {
         private let shellSafeAreaTop: CGFloat?
         private let shellVerticalPadding: CGFloat?
         private let shellMinimumHeight: CGFloat?
+        private let shellBandRowCenterY: CGFloat?
+        private let shellBandTrailingClearance: CGFloat?
         private let closeAccessibilityLabel: String
         private let textScale: CGFloat?
         private let textScaleEnds: [Bool]
@@ -920,6 +927,8 @@ final class ViewportUMDViewController: UIViewController {
                 shellSafeAreaTop = nil
                 shellVerticalPadding = nil
                 shellMinimumHeight = nil
+                shellBandRowCenterY = nil
+                shellBandTrailingClearance = nil
             case .shell:
                 mergeSources = []
                 deckControlLabel = configuration.deckControlLabel
@@ -928,6 +937,8 @@ final class ViewportUMDViewController: UIViewController {
                 shellSafeAreaTop = configuration.contentSafeArea.top
                 shellVerticalPadding = configuration.contentVerticalPadding
                 shellMinimumHeight = configuration.minimumContentHeight
+                shellBandRowCenterY = configuration.bandRowCenterY
+                shellBandTrailingClearance = configuration.bandTrailingClearance
             }
         }
     }
@@ -947,6 +958,7 @@ final class ViewportUMDViewController: UIViewController {
     private(set) var fileSourceChip: UIKitChassisChip?
     private(set) var fileDiffChip: UIKitChassisChip?
     private(set) var fileSelectChip: UIKitChassisChip?
+    private(set) var fileFindChip: UIKitChassisChip?
     private(set) var fileTreeChip: UIKitChassisChip?
     private(set) var fileRefreshChip: UIKitChassisChip?
     private(set) var filePathLabel: UILabel?
@@ -1059,7 +1071,9 @@ final class ViewportUMDViewController: UIViewController {
             style: configuration.style,
             safeArea: configuration.contentSafeArea,
             verticalPadding: configuration.contentVerticalPadding,
-            minimumHeight: configuration.minimumContentHeight
+            minimumHeight: configuration.minimumContentHeight,
+            bandRowCenterY: configuration.bandRowCenterY,
+            bandTrailingClearance: configuration.bandTrailingClearance
         )
         preferredContentSize = fittingContentSize()
     }
@@ -1070,6 +1084,7 @@ final class ViewportUMDViewController: UIViewController {
         fileSourceChip = nil
         fileDiffChip = nil
         fileSelectChip = nil
+        fileFindChip = nil
         fileTreeChip = nil
         fileRefreshChip = nil
         filePathLabel = nil
@@ -1140,6 +1155,20 @@ final class ViewportUMDViewController: UIViewController {
             select.accessibilityIdentifier = "fileViewer.markdownSelect"
             fileSelectChip = select
             views.append(select)
+        }
+
+        if state.findAvailable {
+            let find = fileChip(
+                "FIND",
+                prominent: state.findActive,
+                accessibility: state.findActive
+                    ? String(localized: "Close find")
+                    : String(localized: "Find in file"),
+                action: fileViewer.toggleFind
+            )
+            find.accessibilityIdentifier = "fileViewer.find"
+            fileFindChip = find
+            views.append(find)
         }
 
         let path = UILabel()
@@ -1635,7 +1664,9 @@ final class ViewportUMDRootView: UIKitTallyBorderedView {
         style: ViewportUMDStyle,
         safeArea: UIEdgeInsets,
         verticalPadding: CGFloat = 8,
-        minimumHeight: CGFloat = 0
+        minimumHeight: CGFloat = 0,
+        bandRowCenterY: CGFloat? = nil,
+        bandTrailingClearance: CGFloat = 0
     ) {
         subviews.forEach { $0.removeFromSuperview() }
         upperBand = nil
@@ -1667,17 +1698,19 @@ final class ViewportUMDRootView: UIKitTallyBorderedView {
             layer.borderWidth = 0
             layer.cornerRadius = 0
             clipsToBounds = false
+            // The row never reaches under the Duo's clock cluster; the slab does.
             contentInsets = UIEdgeInsets(
                 top: verticalPadding + safeArea.top,
                 left: UMDBarRootView.horizontalPadding + safeArea.left,
                 bottom: verticalPadding,
-                right: UMDBarRootView.horizontalPadding + safeArea.right
+                right: UMDBarRootView.horizontalPadding + safeArea.right + bandTrailingClearance
             )
             install(
                 content,
                 in: self,
                 insets: contentInsets,
-                centerYOffset: safeArea.top / 2
+                centerYOffset: safeArea.top / 2,
+                bandRowCenterY: bandRowCenterY
             )
             let divider = UIView()
             divider.backgroundColor = UIKitChassis.bezelHi
@@ -1763,7 +1796,8 @@ final class ViewportUMDRootView: UIKitTallyBorderedView {
         _ content: UIView,
         in host: UIView,
         insets: UIEdgeInsets,
-        centerYOffset: CGFloat
+        centerYOffset: CGFloat,
+        bandRowCenterY: CGFloat? = nil
     ) {
         host.addSubview(content)
         content.translatesAutoresizingMaskIntoConstraints = false
@@ -1778,7 +1812,11 @@ final class ViewportUMDRootView: UIKitTallyBorderedView {
                 lessThanOrEqualTo: host.bottomAnchor,
                 constant: -insets.bottom
             ),
-            content.centerYAnchor.constraint(
+            // iPhone Duo's status band: the row sits on the system's glyph
+            // line, not the slab's centre.
+            bandRowCenterY.map {
+                content.centerYAnchor.constraint(equalTo: host.topAnchor, constant: $0)
+            } ?? content.centerYAnchor.constraint(
                 equalTo: host.centerYAnchor,
                 constant: centerYOffset
             ),

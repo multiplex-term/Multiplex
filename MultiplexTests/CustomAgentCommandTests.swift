@@ -347,11 +347,13 @@ final class CustomAgentCommandTests: XCTestCase {
             hostname: "sync.example.com",
             username: "dev"
         )
-        defer { KeychainStore.deleteHostRecord(for: host.id) }
         let hostsURL = directory.appendingPathComponent("hosts.json")
         try JSONEncoder().encode([host]).write(to: hostsURL)
 
-        let store = HostStore(directory: directory, knownMirroredIDs: [])
+        // A mirror of the test's own: the write must reach the mirror, and
+        // must not reach the simulator's real Keychain.
+        let mirror = HostRecordMirror.inMemory()
+        let store = HostStore(directory: directory, knownMirroredIDs: [], mirror: mirror)
         let custom = CustomAgentCommand(
             content: "review from every device",
             autoSubmit: false
@@ -372,7 +374,7 @@ final class CustomAgentCommandTests: XCTestCase {
             [custom]
         )
 
-        let mirrored = KeychainStore.hostRecords()
+        let mirrored = mirror.records()
             .compactMap { try? JSONDecoder().decode(Host.self, from: $0) }
             .first { $0.id == host.id }
         let mirroredHost = try XCTUnwrap(mirrored)

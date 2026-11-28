@@ -537,9 +537,14 @@ final class ShortcutPanelRootView: UIKitTallyBorderedView {
     /// The content lives in a scroll view: `preferredContentSize` asks for
     /// the full grid, but an iPhone popover clamps tall content to the
     /// screen (the herdr set plus a workspace grid overflows one), and a
-    /// clamped panel must scroll — never clip rows mid-face.
+    /// clamped panel must scroll — never clip rows mid-face. It stands in the
+    /// safe area: a popover sizes its view to include the arrow's strip and
+    /// reports that strip as an inset, and a sideways arrow (the Duo's chip
+    /// column) puts it across a horizontal edge no automatic scroll-view
+    /// adjustment covers.
     func install(contentStack: UIStackView) {
         self.contentStack = contentStack
+        scrollView.contentInsetAdjustmentBehavior = .never
         scrollView.alwaysBounceVertical = false
         scrollView.showsVerticalScrollIndicator = true
         #if !os(visionOS)
@@ -551,10 +556,10 @@ final class ShortcutPanelRootView: UIKitTallyBorderedView {
         contentStack.translatesAutoresizingMaskIntoConstraints = false
         let inset = UIKitChassis.popoverPanelInset
         NSLayoutConstraint.activate([
-            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            scrollView.topAnchor.constraint(equalTo: topAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: safeAreaLayoutGuide.bottomAnchor),
             contentStack.leadingAnchor.constraint(
                 equalTo: scrollView.contentLayoutGuide.leadingAnchor, constant: inset),
             contentStack.trailingAnchor.constraint(
@@ -657,11 +662,15 @@ private final class ShortcutItemButton: ShortcutPressControl {
         commandLabel.setText(
             armed ? String(localized: "press again to close") : item.command
         )
+        let binding = armed ? "AGAIN" : item.bindingLabel
         bindingLabel.configure(
-            armed ? "AGAIN" : item.bindingLabel,
+            binding,
             font: UIKitChassis.monoFont(9, weight: .semibold),
             color: UIKitChassis.signal2
         )
+        // A row with no key behind it (a native-pane tab's rows are not
+        // bindings) shows no empty keycap.
+        bindingBorder.isHidden = binding.isEmpty
         layer.borderWidth = armed ? 1 : 0
         refreshBorder()
         accessibilityLabel = Self.accessibilityLabel(for: item, isArmed: armed)
@@ -690,7 +699,9 @@ private final class ShortcutItemButton: ShortcutPressControl {
         if item.requiresDoubleActivation {
             return String(localized: "\(item.title), \(item.command), press twice to confirm")
         }
-        return "\(item.title), \(item.command), \(item.bindingLabel)"
+        return [item.title, item.command, item.bindingLabel]
+            .filter { !$0.isEmpty }
+            .joined(separator: ", ")
     }
 
     private func refreshBorder() {

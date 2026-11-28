@@ -1,7 +1,5 @@
-Multiplex 1.5 — talk to your agent through the message box, with background noise filtered out and AirPods doing the listening.
+Multiplex 1.5.2 — find text in the file viewer, and lock the keyboard closed.
 
-• A mic in the message box: tap it beside the send button and talk; words land as you speak, and sending mid-sentence waits for the last words.
-• Noise reduction: Settings ▸ Voice input downloads a model that filters background noise out of the microphone before dictation hears it.
-• Dictation listens through AirPods or any Bluetooth headset mic when one is connected.
-• Hermes Agent is recognized again on hosts with its current installer, and Claude Code's folder-trust question now raises an agent alert.
-• A NO TMUX or NO HERDR tile's hint wraps across the tile instead of one character per line.
+• File viewer: press FIND on the bar, or Command-F with a keyboard, and type. Every match is marked, with a count; Return or the arrows step through them. It works on code, diffs, and rendered markdown, and stays open as you pick other files.
+• Lock the keyboard closed: hold the keyboard key under the window, or choose Lock Keyboard Closed in the three-dot menu. Selecting the terminal no longer brings up the keyboard, and the other keys under the window keep working.
+• Tapping a slash command such as /compact in an agent's input bar no longer offers to open it as a file.

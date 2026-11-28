@@ -4,6 +4,62 @@ import Observation
 import notify
 #endif
 
+/// Where a store keeps the cross-device copy of each host record.
+///
+/// The app's store mirrors into the synchronizable Keychain. A store handed
+/// its own directory is a persistence test boundary, and the mirror has to
+/// be inside that boundary too: for as long as it was not, every test that
+/// added a host to a temp-directory store also wrote that host into the
+/// simulator's REAL Keychain, and the app adopted the lot on its next launch
+/// (a hundred `box` / `devbox` hosts on the test simulator, found
+/// 2026-11-16). So an isolated store gets a mirror of its own by default.
+struct HostRecordMirror: Sendable {
+    var set: @Sendable (_ record: Data, _ hostID: UUID) -> Bool
+    var records: @Sendable () -> [Data]
+    var delete: @Sendable (_ hostID: UUID) -> Void
+
+    /// The synchronizable Keychain — what every device of the user's reads.
+    static let keychain = HostRecordMirror(
+        set: { KeychainStore.setHostRecord($0, for: $1) },
+        records: {
+            KeychainStore.migrateDeviceOnlyItems()
+            return KeychainStore.hostRecords()
+        },
+        delete: { KeychainStore.deleteHostRecord(for: $0) }
+    )
+
+    /// A mirror that lives and dies with the value: same contract, nothing
+    /// outside the process. Each call makes a separate one.
+    static func inMemory() -> HostRecordMirror {
+        let storage = Storage()
+        return HostRecordMirror(
+            set: { storage.set($0, for: $1) },
+            records: { storage.all() },
+            delete: { storage.remove($0) }
+        )
+    }
+
+    /// `records` is read off the main actor (`refreshFromCloud`), so the box
+    /// takes a lock rather than trusting its callers' isolation.
+    private final class Storage: @unchecked Sendable {
+        private let lock = NSLock()
+        private var records: [UUID: Data] = [:]
+
+        func set(_ record: Data, for id: UUID) -> Bool {
+            lock.withLock { records[id] = record }
+            return true
+        }
+
+        func all() -> [Data] {
+            lock.withLock { Array(records.values) }
+        }
+
+        func remove(_ id: UUID) {
+            lock.withLock { records[id] = nil }
+        }
+    }
+}
+
 /// Hosts persisted as JSON in Application Support — a local cache of the
 /// cross-device truth. Secrets and a mirrored copy of each host record live
 /// in the Keychain as synchronizable items, so iCloud Keychain moves both to
@@ -17,6 +73,7 @@ final class HostStore {
 
     private let fileURL: URL
     private let persistsDevicePreferences: Bool
+    private let mirror: HostRecordMirror
 
     /// Host IDs this device has confirmed in the Keychain mirror. Lets the
     /// merge tell "new local host, publish it" apart from "a peer deleted
@@ -36,13 +93,18 @@ final class HostStore {
     private static let recentSessionsKey = "MultiplexRecentSessions"
     private var isRefreshingFromCloud = false
 
+    /// `mirror` defaults to the Keychain for the app's own store and to a
+    /// private in-memory mirror for a store with an injected directory —
+    /// see `HostRecordMirror`. Pass one to read back what a store mirrored.
     init(
         directory overrideDirectory: URL? = nil,
-        knownMirroredIDs: Set<UUID>? = nil
+        knownMirroredIDs: Set<UUID>? = nil,
+        mirror: HostRecordMirror? = nil
     ) {
         let dir = overrideDirectory ?? FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Multiplex", isDirectory: true)
+        self.mirror = mirror ?? (overrideDirectory == nil ? .keychain : .inMemory())
         persistsDevicePreferences = overrideDirectory == nil
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         fileURL = dir.appendingPathComponent("hosts.json")
@@ -68,7 +130,7 @@ final class HostStore {
     func add(_ host: Host) {
         var host = host
         host.updatedAt = .now
-        hosts.append(host)
+        hosts.insert(host, at: 0)
         save()
         mirror(host)
     }
@@ -86,7 +148,7 @@ final class HostStore {
         hosts.removeAll { $0.id == host.id }
         KeychainStore.delete(for: host.id)
         SSHKeyPassphraseSession.forget(for: host.id)
-        KeychainStore.deleteHostRecord(for: host.id)
+        mirror.delete(host.id)
         mirroredIDs.remove(host.id)
         persistMirroredIDs()
         sessionOrders.removeValue(forKey: host.id)
@@ -289,9 +351,9 @@ final class HostStore {
         isRefreshingFromCloud = true
         defer { isRefreshingFromCloud = false }
 
+        let mirror = self.mirror
         let records = await Task.detached(priority: .utility) {
-            KeychainStore.migrateDeviceOnlyItems()
-            return KeychainStore.hostRecords()
+            mirror.records()
         }.value
         syncWithCloud(records: records)
     }
@@ -377,7 +439,7 @@ final class HostStore {
 
     private func push(_ host: Host) -> Bool {
         guard let record = try? JSONEncoder().encode(host) else { return false }
-        return KeychainStore.setHostRecord(record, for: host.id)
+        return mirror.set(record, host.id)
     }
 
     private func persistMirroredIDs() {

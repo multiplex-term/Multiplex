@@ -1,7 +1,7 @@
-# Backends & the probe (tmux facts, mixed hosts, herdr, session creation, drops)
+# Backends & the probe (tmux facts, mixed hosts, herdr, Rex, session creation, drops)
 
 Load-bearing decisions split from AGENTS.md — read before touching TmuxProbe,
-HerdrProbe, session creation/targeting, or file attach/drop.
+HerdrProbe, RexProbe, session creation/targeting, or file attach/drop.
 
 - **Every SSH exec rides `RemoteShellEnvelope`: `printf '<escaped>' | <command shell>`.**
   sshd runs exec requests through the account's login shell, and fish (exit
@@ -221,9 +221,10 @@ HerdrProbe, session creation/targeting, or file attach/drop.
   the same choice its blank client-count and age telemetry already make.
   The shortcut panel has a herdr variant (`HerdrShortcut`, pure + tested;
   the rail key face reads HRDR; deliberately curated small — zoom,
-  scrollback, rename-tab, picker, and sidebar rows were trimmed
-  2026-08-02; pane/tab cycling followed 2026-08-14 because the TUI already
-  makes those targets directly tappable): non-destructive rows send herdr's stock
+  scrollback, rename-tab, and picker rows were trimmed 2026-08-02; pane/tab
+  cycling followed 2026-08-14 because the TUI already makes those targets
+  directly tappable; the sidebar toggle is kept because nothing in the TUI
+  taps it open or shut): non-destructive rows send herdr's stock
   ⌃B defaults through SwiftTerm (read from `herdr --default-config`,
   splits exercised against a real 0.7.5 TUI attach 2026-08-02 —
   `split_vertical` ⌃B V is left/right, `split_horizontal` ⌃B − is
@@ -270,6 +271,684 @@ HerdrProbe, session creation/targeting, or file attach/drop.
   so the new tab lands on screen, never where nobody is attached; an
   in-session create that fails alerts ("Couldn't Create Tab"), never a
   fallback mint.
+- **Rex is shown, attached, and minted — never a host's default**
+  (`Host.SessionBackend.rex`;
+  `RexProbe` for the deck and the mint, `RexSession` for a tab; written
+  against Rex 0.1.0-preview.25 / API revision 24, measured 2026-11-27
+  against a throwaway server),
+  adapted as session→tile, window (a tab)→window, terminal block→pane.
+  - **Opt-in per host, like herdr as a second backend — and nothing else
+    gates it.** A host shows Rex once `secondaryBackends` lists it: the
+    rail's `+ REX` offer, or the box in Host Settings ▸ Backends. (A
+    per-device Settings ▸ Experimental switch hid it for a few days in
+    2026-11; a record that listed `rex` while it was off is monitored.)
+  - **The hello states a RANGE of API revisions and the server picks**
+    (`RexWire.apiRevision` 24, `minimumAPIRevision` 14; the welcome's
+    `api_revision` is the newest both sides speak, and a server translates
+    to and from it). A preview server gains a revision every few days — 14
+    on 2026-11-16, 18 a week later, 24 by 2026-11-27 — so what matters is
+    which shapes this client READS, and those have not moved: every call
+    and event a tab makes or handles was sent at 14 and at 24 to one
+    preview.25 server, and at 19 to a preview.23 one, and the answers
+    differ only in ids (`session.attach`'s view and its layout tree,
+    `own_block`, `data.connect`, the stream's handshake and its `resize`,
+    `modes`, `format`, `blob_read`, `process`, `new_split`, `resize_pane`,
+    `block.close`, `new_window`, `disown_block`, and the three events).
+    The probe and mint scripts, `ls -q`, `kill`, exit status 4 and
+    `__internal dial-stdio` were run unchanged with the preview.25 CLI,
+    which also probes a preview.23 server. Fixtures from both ends are in
+    the tests (`rex-probe-preview19` / `-preview25`, and the two stream
+    recordings).
+    - **To move the range up**: fetch the new server's `/llms.txt`, diff it
+      against the last one read, and send the tab's calls at the old and
+      the new revision to one server (a script that prints each answer with
+      ids replaced, run twice, then `diff`). Raise `apiRevision` only after
+      that; raise `minimumAPIRevision` only when a shape this client reads
+      differs below it.
+    - A server with no revision in common closes with status 1008 and a
+      reason that names the side to update (`no common API revision:
+      server speaks 0 to 13, client needs 14 to 24; update the server`,
+      measured by asking for 25–30); it becomes the tab's ended line as it
+      is. A welcome that names a revision below the minimum — a server
+      from before revisions were negotiated names none, which reads as 0 —
+      fails the attach here with "older than Multiplex can talk to". NOT
+      measured: a real server older than preview.23; none is installed any
+      more.
+    - **What revisions 20–24 added, and what this client does with it**:
+      - `block.close` / `session.close_window` / `session.destroy` take
+        `undoable`, and `client.undo_close` reopens the caller's newest
+        close for about a minute. Not sent: a close that can be undone
+        only by the client that made it needs an undo row to be worth its
+        minute, and the reopened block "becomes its window's focused
+        block, its window becomes the active window" — the Rex app on the
+        host would flip to it, which every other call here avoids
+        (`focus: false`). What it changes for a tab without sending it:
+        ANOTHER client's undoable close takes the block out of every
+        window at once and sends `block_closed` only when it is freed, and
+        an undo brings it back with the same ids. The tab already reads
+        both from the view — the pane goes, and comes back as a new pane
+        would, at its owner's size until someone types here (measured on
+        the iPad simulator: a stand-in client closed one of three panes
+        with `undoable`, the tab drew two; six seconds later it called
+        `client.undo_close` and the pane was back with its screen).
+      - `session.transfer_window` moves a window to another session. To
+        the session it leaves that is a window closing (`window_closed`, a
+        `block_closed` each, the streams end), so a tab drawing it goes
+        where a closed window's tab goes (measured with no other window
+        left in the session: ENDED, with RECONNECT, and the client gone
+        from the server at once).
+      - A window has TWO zooms now (`tiled_zoomed_block_id` beside
+        `zoomed_block_id`) and a split no longer ends one (measured: a
+        block zoomed by `window_id`, then `new_split` with `focus: false`,
+        and the view still named it zoomed). So a pane this tab splits off
+        while the Rex app has its neighbour zoomed is hidden behind that
+        zoom ON THE HOST until the zoom ends. Both fields stay ignored
+        here (the zoom bullet below).
+      - `com.superlogical.fs` blocks (`rex cp`) and
+        `com.superlogical.terminal.program_resume_records` are not used.
+        Only `com.superlogical.terminal` blocks are drawn or listed, so a
+        block of another creator in a view is cut out as before.
+  - **Rex has no terminal client, so Multiplex is one.** No `rex attach`
+    exists and `rex block stream` answers `not implemented`: Rex sessions
+    are drawn by a native app over the server's WebSocket API
+    (`/api/control` `rex.control.v1` JSON; `/api/data`
+    `rex.data.terminal.v1` binary). A Rex tab therefore has no remote
+    command at all — it is the third `TerminalTransport`, beside the SSH
+    PTY and mosh. ⚠ The wire spec is NOT in the website docs — the server
+    serves its own (`GET /llms.txt` and `/api/help` on its socket; `rex api
+    list --json`).
+  - **`canBeDefault` is the one switch, and the record enforces it.**
+    ⚠ **Multiplex never starts a Rex server**, so a Rex session can be
+    created only while one is running. The default backend answers every
+    request that names no backend (New Session, the Signal check, external
+    actions) and must answer on an idle host — tmux and herdr bring their
+    server up with the first session — so Rex is never the primary:
+    `Host.sessionBackend`'s `didSet`, `init(from:)`, and `BackendSelection`
+    all demote it to a secondary, and the surfaces that choose a host's
+    DEFAULT leave it out (Host Settings' "New sessions run on", Add Host ▸
+    BIND, the FAQ install bar — `defaultCases` / `defaultChoices`).
+    Everything else treats it as a backend like the others: the New Session
+    "Runs on" bar and the widget/Shortcut backend pick list offer it
+    (`monitoredBackends`), a Rex tab's `+ TAB` mints a Rex sibling, and
+    `multiplex://…&action=agent&backend=rex` mints on it. One gap: an
+    external `in=tab` launch aimed at a Rex session resolves to nothing and
+    mints fresh instead (`launchInSession` opens no window inside a Rex
+    session). What would change the rule is a decision to autostart, which
+    needs the unmeasured fact below.
+    ⚠ In that `didSet`, restore the primary BEFORE inserting the secondary:
+    `secondaryBackends`' own observer strips whatever the primary is at
+    that moment, and stripped the newcomer straight back out (caught by
+    `testRexIsNeverTheHostsPrimary`).
+  - **The mint is one exec** (`RexProbe.mintCommand` → `HostConnectionModel
+    .createRexSession`): `rex do -e <lua> --args <json> --json` creates a
+    session holding one shell terminal (`session.create` with
+    `initial_windows`) and prints its id and stored label; the route is
+    `.rexAttach(name, id)`.
+    - **No autostart, by choice, not by measurement.** `rex new` would
+      start a server; the mint refuses and says so ("No Rex server is
+      running on …, and Multiplex doesn't start one" —
+      `SessionCreateFailure.serverNotRunning`). A server started from an
+      SSH login would be the one the host's Rex app then adopts, and how it
+      differs from one the app starts in the desktop session (keychain,
+      pasteboard, lifetime under systemd) was NOT measured. Do not flip
+      this without measuring it on a Mac and on Linux.
+    - ⚠ **What the user typed travels as `--args` JSON, never as script
+      text or `KEY=VALUE`.** Pairs are typed by spelling — `label=1e3`
+      arrived as the number 1000 — and anything spliced into the Lua would
+      be code. The script is a constant.
+    - **The script settles the label against the live list** (`api` taken →
+      `api-2`, compared without case, tmux's scheme): Rex itself creates a
+      second `api` without complaint, and both would then be shown with an
+      id tail (`sessionNames`) — the fresh tab's name would not match its
+      own tile. The label is cleaned the way a probed one is read
+      (`sessionLabel`), never empty (an empty one makes the server invent
+      `quiet-meadow`), and the stored label is read back after the create.
+    - **Setup script and launch line ride `initial_input`**, each followed
+      by a carriage return (Enter): the server types them into the fresh
+      shell before any client attaches — tmux's ordering, with nothing to
+      poll for. (This is what the earlier "Rex's model does not take a
+      setup script in one step" note got wrong.)
+    - ⚠ **`cwd` is taken literally.** `~` is not expanded and a directory
+      that does not exist silently starts in $HOME. So the exec's SHELL
+      resolves the Working Directory (`cd` + `pwd`, absolute or empty) and
+      hands it over in `MULTIPLEX_REX_CWD` — the Lua runs in the CLI
+      process, so `os.getenv` reads the exec's environment. A `+ TAB`
+      sibling starts where the source session's fronted terminal is
+      (`foreground.cwd`), which wins over an explicit directory; every miss
+      is $HOME. The tmux conf rider does not apply.
+  - **A backend set encodes sorted** (`KeyedEncodingContainer` overload in
+    `Host.swift`). With three backends `secondaryBackends` can hold two,
+    and `Set` iteration order is seeded per process — unsorted, every
+    launch rewrote `hosts.json` and the mirrored Keychain record.
+  - **The probe is one exec, one connection: `rex do -e <lua> --json`.** A
+    script is the only way to make many API calls on a single control
+    connection and get one document back — sessions, layouts, titles,
+    foreground processes, reported statuses, the fronted screen. Measured
+    30 ms and 3 KB for three sessions (10 KB when a fronted block has deep
+    scrollback), which is tmux's weight, so `HostGuide.secondBackendCost`
+    holds.
+    - `session.view` and every block method answer `conflict` until the
+      connection is attached. **The probe uses `session.attach_all`, never
+      `session.attach`**: it does not join a session, so the probe is not
+      listed among its clients and no `client_connected` event fires every
+      five seconds. (A tab DOES join — `data.connect` and `own_block`
+      require it.)
+    - ⚠ **Every invocation carries `REX_AUTOSTART=0`** (`RexProbe
+      .rexCommand`; the bridge exports it). The CLI starts a personal
+      server when none is running; a probe, rider, or attach that did so
+      would leave a server on every host that merely has the binary. With
+      it off, no server exits 4 (the CLI's documented "unreachable") →
+      `.noServer`; any other nonzero exit is a failure that names the
+      status. The env switch, not `--autostart=false`, so a build predating
+      the flag still answers.
+    - `--json` is pretty-printed even when piped, and an empty Lua table
+      encodes as `{}` not `[]` (`LuaArray`). The exit line is the last the
+      command prints; JSON above it is indented and quoted, so a screen
+      cannot start a line with the marker.
+    - **The tail is read from the END, uncapped.** `format` returns screen
+      AND scrollback oldest-first, and its `max_bytes` counts JSON-encoded
+      bytes: a capped read of "the last 6144 bytes" stopped three lines
+      short on multibyte output. So `format(max_bytes: 1)` for the id and
+      total, then `blob_read(offset: total - 6144)` with no cap; a read
+      that started mid-screen drops its partial first line.
+  - **A label is not an identity.** Two sessions may share one and an
+    unnamed session gets a generated one (`floral-river`). The id
+    (`session:<uuid>`) rides `TmuxSession.tmuxID` and is the only attach
+    and kill target — `rex kill work` with two `work`s refuses both
+    (exit 3), and `Mode.attach` is nil for a Rex record with no usable id.
+    Displayed names are made unique by `RexProbe.sessionNames`: a shared or
+    empty label is spelled with the id's tail (`work …8d7863`, the CLI's
+    own short form), for EVERY holder of the label — keeping the bare name
+    on the oldest would hand that name and its attention baseline to a
+    different session the day the oldest closes, and announce a turn that
+    never ended. An unnamed window's generated `Window <id tail>` label
+    gives way to its focused block's label (`shell`, `agent`) — Rex's
+    nearest analog of tmux naming a window after what runs in it — and to
+    `window N` only when that is empty too: the spine already leads with
+    N, and the first headless run read `1 WINDOW 1`. Only the exact
+    generated shape is replaced. A session whose programs all exited stays
+    listed with no windows (`0 WIN`, no spine) until someone closes it.
+  - **`rex` is not on an SSH exec's PATH on a Mac.** Rex adds it only for
+    terminals it opens itself. `RemoteCommandEnvironment.rexPathPrefix`
+    names the server copy the app installs (`~/Library/Application
+    Support/com.superlogical.rex/RexServer/Versions/Current/…`, which
+    leads because it does not depend on the bundle's name or location) and
+    the helper inside the app bundle; Linux/FreeBSD packages land in
+    `/usr/bin` and the unprivileged install in `~/.local/bin`.
+    - ⚠ The CLI found there and the server it reaches can be two releases.
+      Seen 2026-11-27: the app had updated to preview.25 (its helper, and a
+      new `Versions/2147/` named for the build) while `Versions/Current/`
+      and the server still running out of it were preview.23. Either pair
+      works — the preview.23 CLI ran the probe against a preview.25 server
+      and the preview.25 CLI against a preview.23 one — because the CLI
+      negotiates its revision like any client and `dial-stdio` only moves
+      bytes. What becomes of `Current` when the server restarts was not
+      seen.
+  - **Attention: reported status first, the tmux heuristics otherwise.**
+    Programs report idle / working / done / blocked / error through OSC
+    7501, kept per block (`program_status`). Where any block reports, the
+    fold across EVERY block is the authority (blocked → NEEDS YOU with the
+    reported kind, `auth` read as a question; working → busy; `done` and
+    `error` → idle, the busy → idle edge that announces a turn once). Where
+    nothing reports, the fronted block is classified from its title and
+    screen exactly as a tmux tile is — and the tile's own background-pane
+    title pass applies too. Alert metadata borrows the fronted block's
+    agent and screen only when that block's records produced the verdict.
+  - The LIVE lamp is attached APP clients (`client.list` scoped to the
+    session, `kinds: ["app"]` — a Rex window showing it) OR this app's own
+    open tab. ⚠ **Multiplex says hello as kind `other`, never `app`**
+    (`RexWire.hello`): Rex's CLI and agent skill aim client actions (`rex
+    do pane.split`) at "the app client when exactly one is connected", and
+    a second self-declared app made every one of them ambiguous for as
+    long as a tab was attached.
+  - Discovery rides every primary probe (`rex ls -q`, one id per line) and
+    offers `+ REX · N` on the rail like herdr. The tile takes a cool-blue
+    wash at `bezel`'s lightness (`TallyPalette.rexBezel` — Rex publishes no
+    palette, so the hue is chosen to differ from herdr's mauve). Its menu
+    has no Copy Command for Handoff (no command opens a Rex session in a
+    host shell) and, on a session with more than one terminal, an **Open
+    Terminal** submenu.
+  - **A tab draws ONE layer of one Rex window, natively** — every terminal
+    block of it as a pane of its own, in the server's split tree
+    (`RexWire.Layer` → the app's `PaneLayout`; the machinery above the
+    transport is in `panes.md`). A tile press attaches the window of the
+    block the session is fronting (active window, focused block —
+    `RexWire.attachTarget`, decided at attach time) with the keyboard on
+    that block; Open Terminal names one (`.rexAttach(…, block:)`, label
+    `session · window`), and a named block that has since closed falls back
+    to the fronted one. Tab identity stays `(rex, session name)`, so the
+    deck finds either kind.
+    - The layout is the SERVER's. `session.view` carries it as a tree
+      (`split_id`, `direction`, `ratio`, `before`, `after`, leaves by
+      `block_id`); `session_view_changed` carries only a revision, so every
+      change is one `session.view` read (`refreshView`, one reader at a
+      time). ⚠ A change of OWNER is a view change too — most reads find the
+      layout unchanged, and those say nothing to the tab.
+    - `horizontal` is side by side, `vertical` stacked. A block that is not
+      a terminal has no stream this client can draw: its leaf is cut out
+      and its sibling takes the room. A FLOATING layer is a layer of its
+      own — a tab pointed at a terminal in one draws that layer alone,
+      filling the tab (`bounds` is where it sits over a Rex window).
+      `zoomed_block_id` is ignored: the tab draws the layout it was given,
+      and its own zoom is its own (below).
+    - **The tab changes the layout by asking** (`RexSession.perform`):
+      `session.new_split` (anchor = the focused pane, `side: after`, one
+      `com.superlogical.terminal.shell` block whose `cwd` is the source
+      pane's `foreground.cwd`), `block.close`, `session.resize_pane` (the
+      split is named by a block on each side of it — the first pane of
+      each — and a direction; any such pair names exactly that split).
+      The result is never applied locally: it comes back in the view like
+      another client's change. All measured.
+    - ⚠ **`new_split` is sent `focus: false`, and the tab's own focus is
+      never `session.focus_block`.** Focusing also makes the block's window
+      the session's ACTIVE one — the tab the Rex app on the host is
+      showing — so a tap on a pane here would flip a Mac's window. Which
+      pane has the keyboard is this tab's own (`focusedBlockID`), told to
+      the transport only so it can keep drawing the right layer and name
+      the neighbour when that pane closes. Measured: after two splits and a
+      focus change here, the window's `focused_block_id` was still the
+      block it started on.
+    - **A drag asks for only the newest ratio.** One `resize_pane` is in
+      flight at a time, and until the last ask is answered the tab's ratio
+      stands in for the view's (`pendingRatios`): `resize_pane` "always
+      raises revision and sends `session_view_changed`", so the answer to
+      an EARLIER ask arrives mid-drag and pulled the divider back under the
+      finger. `floorRevision` drops a view read before this tab's own last
+      change was answered, for the same reason.
+    - **A window that closes under a tab moves the tab to the window Rex
+      shows next** (`RexWire.layer(replacing:among:inView:)`, asked in
+      `refreshView`) — its last terminal exited, its last pane was closed
+      from the panel, another client closed or transferred it. Rex's own
+      rule for a closed active window is "the window after it becomes
+      active, or the one before it if it was last"; the tab walks the same
+      way from the closed window's place in the tab order it last read,
+      passing windows with no terminal, so a tab and a Rex app that were
+      both on the window land on the same one (measured: `exit` in the
+      first of three windows put the tab AND `active_window_id` on the
+      second; New Tab then Close Pane came back to the window the tab
+      had left). The first shape ended the tab there, with DETACHED and
+      RECONNECT, which read as the session being gone while its other
+      tabs were one press away.
+      - It is not an attach and not a choice: the arrangement names no
+        focus, so the window's own focused pane takes the keyboard, and
+        only terminals nobody owns are claimed. One another client holds
+        is drawn at that client's size until someone types here, like a
+        pane another client adds.
+      - A window that is still there and only lost the layer the tab drew
+        (a floating layer closed) keeps the tab, on the layer its focused
+        block is in.
+      - The tab ends cleanly only when no window of the session has a
+        terminal left (the ended panel and RECONNECT, which then has
+        nothing to attach either). One pane closing is not the tab ending.
+  - **The REX key's panel acts on the focused pane, then lists the
+    session's terminals** (`ShortcutPanelContent.rex`). Rex has no prefix
+    keys to list — Multiplex is the client — so its rows are
+    `PaneShortcut`s: Split Right, Split Down, Toggle Pane Zoom, Close
+    Pane (asked twice, like every backend's close), and — under Tabs — New
+    Tab. Below them
+    `RexWire.terminalChoices`, `window — terminal` in window order, the one
+    the keyboard is on marked ACTIVE, and rows that would read the same
+    counted (`shell`, `shell 2` — a window split three ways is three shells
+    with one label, in the order the panes are on screen): a terminal among
+    the panes on show
+    takes the keyboard; one in another Rex window brings THAT window's
+    panes into the tab, in place (`RexSession.showTerminal` — the control
+    connection and the tab stay; the streams of the window being left are
+    closed with status 1000 and its blocks `disown_block`ed, which hands
+    their sizes back to the Rex app instead of leaving them at this tab's).
+    A pane has its own serial (`Terminal.serial`), so a stream that ended
+    with the window it belonged to is never read as the tab ending. The
+    choice survives a reconnect (`rexBlockID`). The rail key's face comes
+    from `SessionBackend.shortcutKeyCaption` — the three `herdr ? "HRDR" :
+    "TMUX"` sites it replaced drew a TMUX key on a Rex tab.
+  - **New Tab is `session.new_window`, sent `focus: false`, and the tab
+    moves to it** (`PaneCommand.newWindow` → `RexWire.newWindowPayload`):
+    one shell starting where the focused pane's program is. Rex's own app
+    calls a window a tab, so the row does; the server, the switch list and
+    the rest of this app say window. The new block's id comes back in the
+    answer and becomes the tab's target exactly as a Switch Terminal choice
+    does — the window being left is closed and disowned the same way.
+    - ⚠ `focus` defaults to TRUE, which makes the new window the session's
+      active one: the Rex app on the host would flip to a tab made from a
+      tablet. Measured with false: `active_window_id` stays where it was,
+      the window appears in the view (`window_created`, then
+      `session_view_changed`), and its block is its maker's.
+  - **Zoom is the tab's own, not `session.zoom_block`**
+    (`TerminalSessionController.togglePaneZoom`, `panes.md`). The server's
+    zoom cannot be aimed at the pane the tab's keyboard is on without
+    moving the session: with `block_id` it "first focuses the block and
+    makes its window active", and with `window_id` it zooms whatever block
+    the SERVER has focused in that window — the Rex app's choice, not this
+    tab's (measured: `zoom_block {window_id}` set `zoomed_block_id` and
+    left the active window alone). So the tab hides its other panes
+    itself, asks the server nothing, and what the Rex app has zoomed is
+    not followed either: each client's zoom is its own picture of one
+    layout.
+  - **A Rex tab has a working directory, the focused pane's**:
+    `com.superlogical.terminal.process` → `foreground.cwd`, else the
+    shell's (`RexWire.workingDirectory`, asked over the tab's own control
+    connection). FILE drops land there and the file viewer opens there, as
+    on tmux; a path pressed in a pane resolves against THAT pane, because
+    the press moves the keyboard there first. (Unit tested; not yet driven
+    end to end.)
+  - **The link is byte pipes on the tab's own SSH connection — one for
+    control and one per pane** (`SSHConnection.openPipe`), each running
+    `rex __internal dial-stdio` —
+    the stdin/stdout ↔ socket bridge Rex's own `ssh://` transport runs
+    remotely, which is why it finds the server unaided. ⚠ It is hidden
+    and unversioned; a rename surfaces as the CLI's "unknown command" on
+    the tab's ended line. (OpenSSH socket forwarding would be the
+    documented road; the vendored swift-nio-ssh has only `directTCPIP`.)
+    - ⚠ **Every pane is a channel, and sshd allows ten a connection**
+      (`MaxSessions`): the control pipe and nine panes, fewer while a drop
+      or the file viewer has a channel open. A pane past that is not
+      opened — it says why in its own emulator and the rest of the tab is
+      unaffected (`testAConnectionWithNoRoomForOnePanesPipe…`). A second
+      connection for the overflow was not built: a window of ten panes on
+      a tablet has not been seen.
+    - **A pipe is a SHELL channel with no PTY, not an exec.** Citadel
+      0.12.0's exec returns output only and keeps the channel, so nothing
+      can write stdin; its `withTTY` opens a login shell on plain pipes
+      (no line discipline — binary-safe), handed over with the PTY
+      handoff's own cross-shell `exec sh -c '…'` line.
+    - ⚠ **Nothing is written until the per-pipe marker comes back.** The
+      command echoes one first: it drops whatever a login script printed,
+      and it proves the `exec` happened — a shell reading its script from
+      a pipe may read ahead, and bytes sent early would be eaten as shell
+      input. A channel that ends before or after it throws the head of
+      the command's stderr, which is how "no Rex server is running" and
+      "rex: command not found" reach the tab. Verified against zsh and
+      sh; fish as a login shell is unverified.
+  - **`WebSocketCodec` + `RexWire` are the whole protocol, pure.** No
+    extension is offered (a data connection is never compressed, and the
+    control connection works without), the hello states the revision range
+    above, pings are answered in `RexSocket`, and requests are matched by
+    id with a 10 s timeout.
+  - **Attach order is load-bearing** (`RexSession.attach`, `show`): hello
+    → `session.attach` → **the tab lays the panes out and answers with
+    each one's grid** (`PaneEvents.arrange`) → ONE `own_block(take)` for
+    every pane, then a `resize` each, **first** → and then per pane, all at
+    once: `data.connect` → data HELLO/WELCOME → wait for the first server
+    message → `modes` + `format(vt)` (two reads, asked together) → RIS +
+    rendering → flush the held stream. A pane added later goes through the
+    same steps on its own.
+    - ⚠ **The stream opens with a Ghostty binary snapshot
+      (`GHOSTSNP…`) SwiftTerm cannot read.** `RexTerminalStream` DROPS
+      it: its length is stated nowhere, but a `resize` message "comes
+      right after the snapshot", so everything before the first `ESC _
+      rex1;<nonce>;` is snapshot (the nonce is 64 random bits per stream,
+      which is what makes scanning binary for it sound; the same nonce is
+      why a program printing a look-alike is drawn as output). The screen
+      comes from `format`'s `vt` rendering instead — colors, cursor,
+      modes, scrollback, verified on a shell and on vim.
+    - Claim-and-size precedes both so the rendering and the stream
+      describe the terminal at its PANE's size — which is why the layout
+      is asked for before anything is opened, not after.
+    - **The two are not atomic and the gap errs toward repeating.** The
+      stream is opened first and held while `format` is fetched; output in
+      between is drawn twice rather than lost (lost bytes can leave a mode
+      wrong for the session; a repeated line is one line). An idle prompt
+      — the common attach — has nothing in the window.
+    - `extra_palette` is NOT requested (it repaints the tab in Rex's
+      theme); cursor, modes, scrolling region, style, charsets, keyboard,
+      kitty keyboard, and tab stops are.
+    - A rendering over 3 MB (a terminal keeps up to 64 MiB) is not
+      fetched: the attach draws a plain-text tail instead.
+  - ⚠ **Attached during a full-screen program, the tab redraws when it
+    exits.** While one is up `format` renders ONLY its screen — the shell
+    history underneath cannot be asked for — so the emulator's primary
+    screen starts empty, and quitting vim showed a bare prompt.
+    `AlternateScreenExitWatch` notices `CSI ? 1049/1047/47 l` and the
+    screen is fetched again. It waits for the terminal to go quiet first
+    (120 ms, capped at 800 ms): a shell prints its prompt within
+    milliseconds of the exit, and a rendering fetched during that burst
+    drew it twice (`$ $`).
+  - **Typing is `com.superlogical.terminal.write`, one call in flight.**
+    The server runs block methods concurrently, so two calls could land
+    out of order; whatever is typed meanwhile rides the next call as one
+    string. Its argument is JSON text, so `RexInputEncoder` holds a
+    split multi-byte character and replaces bytes that are not UTF-8.
+    ⚠ `RexSession.write` QUEUES AND RETURNS; a drain task makes the calls.
+    The tab's input pump awaits each `transport.write`, so a write that
+    waited for the server's answer (the first shape) made every keystroke
+    its own round trip, queued behind the last, and the "rides the next
+    call" batching never happened — an SSH PTY write only enqueues bytes,
+    which is why the pump never had to care.
+  - **The last client to type owns the sizes** (tmux's latest-client
+    rule): the Rex app can claim a block back (`block_owner_changed`); the
+    next keystroke here claims EVERY terminal the tab draws that it does
+    not own — the one typed into first, one `own_block` for all — and
+    re-sizes each to its pane. All of them, because the tab draws them as
+    one window: half of it at another client's size is a layout nobody
+    chose. Until then a terminal has the other client's size, and its pane
+    draws it AT that size (next bullet).
+    - **What is claimed without a keystroke**: the panes of an attach, the
+      panes of a window Switch Terminal brings in, a terminal this tab
+      just made (the server hands a block to its maker; the view's `owner`
+      says so, which does not depend on which of the split's answer and
+      its event arrives first), and one that is nobody's. A pane ANOTHER
+      client just made beside the ones on show is not: it is opened
+      unclaimed and drawn at its owner's size
+      (`testAPaneAnotherClientAdds…`).
+    - ⚠ One id that is no longer a block fails the whole `own_block` with
+      `bad_request` and claims nothing — a pane closing as another is
+      typed into. The claim is then made one block at a time. The same
+      rule is why a block that CLOSED is never named in `disown_block`.
+  - ⚠ **An emulator's grid follows its terminal's, not its pane's** — per
+    pane: one of a tab's panes can be held to another client's grid while
+    its siblings keep their own. A
+    terminal has one size, its owner's; the stream says what it is
+    (`resize`, with the owner). Ignored — the first shape, "Multiplex does
+    not letterbox" — the tab parsed output laid out for 170 columns at 132
+    and filled with stray characters the moment the Rex app held the
+    terminal at another size (reproduced with a stand-in client; and since
+    the tab stopped answering queries, above, nothing claims the size back
+    until someone types). Now a size that is another client's
+    (`RexSession.noteTerminalSize`: not this client's, not this tab's own
+    dimensions) is followed:
+    - `RexSession` holds the stream from that `resize` on, waits for the
+      repaint a SIGWINCH sets off to go quiet (the alternate-screen wait:
+      120 ms, capped at 800), has the emulator take the grid (`onGrid`,
+      awaited), then draws the screen again from `format`. Held bytes
+      that arrived before the rendering was asked for are in it and are
+      NOT drawn again (`Replay.sinceRequest`; `RexWire.resumeOffset`
+      keeps the cut off the middle of an escape sequence or a character)
+      — replaying them, the attach's rule, drew the program's repaint
+      twice. The attach keeps its own rule: it has no quiet wait to lean
+      on.
+    - Redraws run one at a time (`drawScreen` chains them). Two sharing
+      one hold let the first release the stream under the second.
+    - The pane gives SwiftTerm the grid by giving it the FRAME
+      (`TerminalSurfaceView.Coordinator.applyGridPin` — one coordinator per
+      pane, on its `PaneCellView`'s two edges — `TerminalGridFit`,
+      pure + tested): text shrinks in half points, never below 5 pt and
+      never above the tab's own, until the grid fits; what is left over
+      comes off the trailing and bottom edges. The fork is untouched and
+      its frame-is-the-grid arithmetic stays true. A fork-side "pinned
+      grid" was rejected: the view's scroll geometry, hit testing and
+      caret all divide the frame by the cell.
+    - The grids SwiftTerm reports on the way (`sizeChanged` for each font
+      and frame step) are not this tab's ask and are never sent
+      (`TerminalScreen.gridPin`, `isSettlingGridPin`); the
+      pane's own last grid is kept (`ownSize`) for the next attach.
+    - It ends when this client owns the block again — typing claims it,
+      or the other client leaves and the server hands it back — because
+      the stream then reports a size whose owner is this client.
+    - Only FOLLOWING: the tab never takes the size back by itself. That
+      was the flicker.
+    - To re-measure: a second control connection that `own_block(take)`s
+      and resizes to something larger than the pane, then type in the
+      terminal from that side (`rex send`). The tab must match `rex
+      capture` cell for cell. Not exercised: the real Rex app as the
+      other client, and a tab whose pane is off screen when the size
+      changes hands (its emulator is laid out when it next appears, after
+      the rendering was drawn).
+  - ⚠ **Every redraw is RIS + a rendering, and RIS has to empty BOTH
+    screens.** Upstream SwiftTerm's did not empty the alternate one, so
+    the REX key's switch from one full-screen program to another (two
+    agents — the common case) drew the second over the first; fixed in
+    the fork (`swiftterm-fork.md`, `TerminalFullResetTests`). A shell on
+    either side hid it, which is why the first switch tests passed.
+  - ⚠ **Nothing the emulator says by itself reaches a Rex terminal**
+    (`TerminalSessionController.sendTerminalReport`). The server keeps the
+    terminal and answers its queries there — measured with no client
+    attached: `CSI c` and `CSI 6n` both came back to the program. SwiftTerm
+    reads the same output and answers too, and that answer used to go out
+    as a `write`: the program read every reply twice, and because a write
+    is what claims, a tab nobody was touching took the terminal's size
+    back whenever the program asked something. A program that asks on
+    every resize closed the loop — reported as the same terminal in the
+    Rex app flickering, and reproduced with a stand-in client that
+    reclaims when it loses the block: 82 owner changes in 0.6 s before,
+    1 (the stand-in's own) after. So on a Rex tab the emulator's answers
+    AND its reports (focus, in-band size, color scheme) are dropped;
+    mouse events and prompt clicks are a person's and still go.
+    - Focus reports go with the rest on purpose. Only this client knows
+      its own focus, but so does every other client of the terminal, and
+      a tab that reported "unfocused" as the user looked away would say
+      it for a terminal still in use in Rex. Whether the Rex app reports
+      focus itself is unmeasured.
+    - The split is a fork seam (`Terminal.isSendingUserInput`,
+      `TerminalViewDelegate.sendTerminalReport`, see
+      `swiftterm-fork.md`): both kinds used to leave SwiftTerm through
+      the one `send`.
+    - To re-measure: a script in the terminal that prints `CSI 6n` from a
+      `WINCH` trap and logs its stdin, then a second control connection
+      that `own_block(take)`s and resizes. The server's log lists every
+      `terminal.write` — with the tab idle there must be none.
+    - Still claimed without a keystroke: the attach itself, so an
+      automatic reconnect takes the size once.
+  - ⚠ **Say goodbye before cancelling the readers** (`teardown`).
+    Cancelling a reader tears its pipe down, and a connection that just
+    drops is kept by the server for 60 s — its client listed "connection
+    lost", its stream parked for a resume. Every data connection closes
+    first with status 1000 (ends its stream), then the control connection
+    (ends the client at once). A data close of 4000 (`block closed`) or
+    1000 is that PANE's clean end, like a shell exiting — the view is read
+    again and the pane goes with its block; any other code after a stream
+    was up ends the tab with the reason, and RECONNECT is the way back.
+    Resume is a fresh attach, never the protocol's RESUME.
+  - **A link that breaks ends the tab like any transport's**, and
+    `SessionResumePolicy` treats it the same: suspension damage re-attaches
+    by itself when the app returns (verified on the iPad simulator —
+    backgrounded, both SSH connections killed, returned: a new client,
+    LIVE, output flowing); a drop in the foreground parks on RECONNECT. The
+    ended line says "The connection to the Rex server was lost." — a
+    broken pipe's own error under a LIVE tab is the transport's shorthand
+    (`Already closed` on the first headless run), which read as a second,
+    unrelated failure. During the attach the detail IS the reason and is
+    kept. The server lists the dropped client as "connection lost" for its
+    60 s resume window; the fresh attach is a new client beside it.
+  - What a Rex tab does not have: a prefix-key list (the REX panel's rows
+    are commands, not bindings), Copy Mode, HISTORY, the one-second helper-chip
+    probe (`SessionBackend.hasFocusedPaneProbe` is false: the wall probe's
+    record is the only authority, and it reaches the strip through the
+    window's own observation, so nothing polls), and mosh (no PTY for
+    mosh-server to run — a Rex tab rides SSH whatever the host prefers).
+    - **TODO, waiting on upstream: mosh for a Rex tab needs a Rex
+      terminal client to run in mosh-server's PTY, and Rex ships none.**
+      Re-measured 2026-11-23 (0.1.0-preview.21 / API revision 18, mosh
+      1.4.0): `rex block stream BLOCK [DATA_REF]` exists and still answers
+      `not implemented`; there is no `rex attach`; a `rex do` Lua script
+      cannot stand in (the terminal creator lists no events, and the output
+      is a second WebSocket the script cannot open). mosh itself syncs a
+      screen, not bytes, so `RexSession`'s two WebSockets cannot ride it.
+      Revisit when `rex block stream <block>` stops answering `not
+      implemented` — and check first whether it is a terminal client at
+      all or a one-way dump of the data stream (the `DATA_REF` argument
+      suggests the latter, which changes nothing here).
+      A throwaway PTY client (a Python port of the attach, run by a real
+      mosh-server, read through a real mosh-client) drew, typed and resized
+      correctly and met four things any such client has to handle:
+      1. **Queries are answered twice.** mosh-server's emulator answers
+         DA/DSR in the output too, on the client's stdin, which a naive
+         client writes into the terminal (`62;22c;1R62c;1R` at the prompt,
+         and a size claim nobody made). Dropping queries from the output
+         before the PTY left one answer — the Rex server's.
+      2. **No alternate screen.** After `:q` the vim frame stays; the
+         client must redraw (RIS + `format`) on every `?1049l`, as
+         `AlternateScreenExitWatch` does for one case today.
+      3. **Another client's size has no way back to the app.** The client
+         sees the stream's `resize`, but a mosh tab's grid is the app's; the
+         grid pin above needs a side channel (unmeasured).
+      4. **No scrollback, and nothing replaces it**: a mosh tab has none
+         (`mosh.md`), and a Rex tab has no Copy Mode or HISTORY.
+      Also unbuilt: the REX key's switch, which rides the control
+      connection a mosh tab would not have. Not a prerequisite, and cheaper
+      for the same complaint (a slow re-attach on a bad link): the
+      protocol's RESUME, which continues a dropped stream within 60 s
+      without a redraw — today a resume is always a fresh attach.
+    ⚠ `TerminalSessionController.ridesMosh` is the one statement of that
+    last rule: scrollback, FILE and the bar's MOSH badge read it, where
+    reading `host.useMosh` raw gave a Rex tab on a mosh host no
+    scrollback, no FILE and a MOSH badge.
+  - ⚠ **A Rex tab's agent bar is the pane's the keyboard is on, not the
+    session's fronted one** (`TmuxSession.agent(inPane:)`, fed by
+    `TerminalSessionController.rexBlockID`; the session is found by id,
+    since a label is respelled when another session takes it). tmux and
+    herdr tabs show the whole session, so following the record's active
+    pane follows what the tab shows; a Rex tab's focus is its own, and the
+    session's is whatever the Rex app last fronted. Read off the
+    active pane, the bar vanished from a tab still on Claude Code as soon
+    as Rex fronted another window, and never appeared on a tab opened or
+    switched to a terminal that was not in front (user-reported
+    2026-11-16, reproduced with a real `claude` on a throwaway server).
+    `rexBlockID` is learned when the attach settles on a terminal and
+    moved by a touch on another pane, a split, and Switch Terminal; the
+    next transport run prefers it too, so a reconnect returns to the
+    terminal the tab was on.
+    - Measured with Claude Code 2.1.325 (macOS native install) at its
+      folder-trust prompt: `process.foreground` is `name: "2.1.325"`,
+      `argv0: "claude"`; the title is the shell's (`claude`); `program
+      _status` has NO records. So it is the bare-semver rule in
+      `AgentSignature.classify` that names it there, not OSC 7501.
+  - Deliberately NOT built, with the reason each would need new facts to
+    reopen:
+    - **Floating layers over the layout, moving and swapping panes,
+      closing or renaming a window.** A tab draws one layer as the server
+      arranged it. Each of those is a state the Rex app owns
+      (`session.float_block`, `move_block`, `swap_blocks`,
+      `close_window`, `set_window_label` exist and were not called); a tab
+      that changed them would be rearranging the Mac's window from a
+      tablet. (A window still closes when its last pane does.)
+    - **A second SSH connection past `MaxSessions`** (above).
+    - **The stream's RESUME.** A fresh attach restores screen, scrollback
+      and modes from `format`; RESUME would save one rendering fetch and
+      add a replay-window state machine.
+    - **Starting a Rex server**, and with it Rex as a default backend (see
+      the mint above).
+    - **An EXTERNAL launch into an existing Rex session**
+      (`launchInSession`): a widget / Shortcut / URL `in=tab` launch mints
+      a fresh session instead. (A tab already attached makes a new Rex tab
+      itself — the REX panel's New Tab, above.)
+    - Polling `format` as a fake terminal was rejected outright.
+  - Headless: seed key `secondaryBackends: ["rex"]`, then
+    `MULTIPLEX_AUTO_ACTION_URL='multiplex://open?host=devbox&action=shell&session=<name>&backend=rex'`
+    attaches (the `AUTO_ATTACH` env resolves names on the primary only).
+    Proof host-side: two `shell` sessions on one connection in the sshd
+    log, `rex client ls --all` listing `Multiplex … other`, `terminal
+    .size` naming it the owner; `debug.talkbacktype` + `debug
+    .talkbacksend` prove input, `rex send` proves output.
+    `MULTIPLEX_AUTO_REX_SWITCH=<n>` presses row n of the REX panel's Switch
+    Terminal list once the tab is live, and `MULTIPLEX_AUTO_PANE_ACTIONS=
+    splitRight,splitDown,ratio:0.3,focus:1,zoomPane,closePane,newWindow`
+    walks the panel's rows, a divider drag and a touch on a pane (proof host-side: `rex api call -s
+    <name> session.view` shows the tree and every block's `owner`, and
+    `com.superlogical.terminal.size` each pane's own columns × rows);
+    `debug.tmuxshortcuts` opens the panel itself. `debug
+    .newtab` from a Rex tab mints a sibling (`rex ls` gains `<name>-2`,
+    its `process` cwd is the source's). A link drop: kill the tab's
+    `sshd-session` (the newer of the app's two connections in `lsof -iTCP:
+    <port>`). "No server": point the wrapper below at a socket path nothing
+    listens on and open `…&action=agent&backend=rex` — the mint fails
+    before anything is typed. To run without
+    touching real sessions: a throwaway server (`rex server run --listen
+    unix://<abs path> --state-dir <dir> --restore=false --config <empty
+    file>`, the path under macOS's 104-byte socket limit) and a second
+    user-mode sshd whose `SetEnv PATH=` leads with a `rex` wrapper that
+    adds `-S unix://<that path>`. ⚠ `REX_SERVER` does not isolate: a
+    socket path that does not exist is skipped and the CLI falls through
+    to the local default server.
 - **tmux attach needs a PTY**: the shell opens with ECHO off and `exec
   tmux attach-session …` is injected as the first stdin line; detach =
   close the channel. oh-my-zsh's update check steals queued stdin, so

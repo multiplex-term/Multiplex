@@ -27,28 +27,65 @@ extension ShellModeDecision.Idiom {
     }
 }
 
+extension ShellRailEdge {
+    /// The edge the system's vertical bar stands on (the iOS 27.1 trait),
+    /// nil where the system reports none.
+    static func systemVerticalBar(in traits: UITraitCollection) -> ShellRailEdge? {
+        #if os(iOS)
+        if #available(iOS 27.1, *) {
+            switch traits.verticalBarEdge {
+            case .leading: return .leading
+            case .trailing: return .trailing
+            default: return nil
+            }
+        }
+        #endif
+        return nil
+    }
+}
+
+extension BottomCornerClearance {
+    /// `insets`, widened at either end to clear a display corner.
+    func applied(to insets: UIEdgeInsets) -> UIEdgeInsets {
+        var result = insets
+        result.left = max(result.left, left)
+        result.right = max(result.right, right)
+        return result
+    }
+}
+
 extension ShellSideColumn {
+    /// The pane's insets as the key rail reads them: the rail runs through the
+    /// column's strip, and either end keeps clear of a display corner it runs
+    /// into.
+    func keyRailSafeArea(
+        paneSafeArea: UIEdgeInsets,
+        cornerClearance: BottomCornerClearance
+    ) -> UIEdgeInsets {
+        var insets = paneSafeArea
+        switch edge {
+        case .top: break
+        case .leading: insets.left = 0
+        case .trailing: insets.right = 0
+        }
+        return cornerClearance.applied(to: insets)
+    }
+
     /// The side column from live traits, resolved once by the shell for
     /// both panes: the iOS 27.1 vertical-bar trait when the system reports
-    /// one, else `ShellRailPlacement`'s rule; placement from the display.
+    /// one, else `ShellRailPlacement`'s rule; placement from the display and
+    /// the system's glyph block in the resolved edge's strip.
     static func resolve(
         traits: UITraitCollection,
         isLandscape: Bool,
         foldable: Bool,
         leadingSafeArea: CGFloat,
-        trailingSafeArea: CGFloat
+        trailingSafeArea: CGFloat,
+        systemBlockBottom: (ShellRailEdge) -> CGFloat? = { _ in nil }
     ) -> ShellSideColumn {
         #if os(iOS)
-        var systemEdge: ShellRailEdge?
-        if #available(iOS 27.1, *) {
-            switch traits.verticalBarEdge {
-            case .leading: systemEdge = .leading
-            case .trailing: systemEdge = .trailing
-            default: systemEdge = nil
-            }
-        }
         let edge = ShellRailPlacement.edge(
-            systemVerticalBarEdge: systemEdge,
+            systemVerticalBarEdge: ShellRailEdge.systemVerticalBar(in: traits),
             idiom: .device,
             horizontalSizeClass: ShellSizeClass(traits.horizontalSizeClass),
             verticalSizeClass: ShellSizeClass(traits.verticalSizeClass),
@@ -63,7 +100,8 @@ extension ShellSideColumn {
             placement: RailFit.columnPlacement(
                 compactWidth: traits.horizontalSizeClass == .compact,
                 landscape: isLandscape,
-                trailingEdge: edge == .trailing
+                trailingEdge: edge == .trailing,
+                systemBlockBottom: systemBlockBottom(edge)
             )
         )
         #else
@@ -86,6 +124,14 @@ extension UIViewController {
         child.willMove(toParent: nil)
         child.view.removeFromSuperview()
         child.removeFromParent()
+    }
+
+    /// Re-asks the status bar and home indicator preferences (iOS).
+    func refreshSystemOverlays() {
+        #if os(iOS)
+        setNeedsStatusBarAppearanceUpdate()
+        setNeedsUpdateOfHomeIndicatorAutoHidden()
+        #endif
     }
 }
 

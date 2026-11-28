@@ -15,7 +15,7 @@ behavior, or App Review flow changes.
 | SKU | `multiplex` |
 | Bundle ID | `app.multiplexterm.multiplex` |
 | Platforms | iOS (iPhone + iPad) and visionOS in one app record — the iPhone joined the universal iOS binary 2026-07-18 (single-window shell) and ships with the next binary |
-| Current version | 1.5.0 in `project.yml` (1.0 was the first submitted version; 1.1.0 remained unpublished during App Review, so its release-note content was carried forward into 1.2.0) |
+| Current version | 1.5.2 in `project.yml` (1.0 was the first submitted version; 1.1.0 remained unpublished during App Review, so its release-note content was carried forward into 1.2.0) |
 | Minimum OS | iOS 17.0; visionOS 1.0 |
 | Target release model | Free download with one non-consumable Pro unlock; confirm the base-app price manually |
 | Primary category | Developer Tools |
@@ -104,6 +104,21 @@ Free surface added 2026-08-02 (unreleased; ships with the next binary):
 | Requirements | herdr 0.7.5+ / protocol 17 on the SSH host. Homebrew and herdr's installer are offered in-app. Plain SSH shells remain available without either multiplexer |
 | Honest limits | No herdr API reports attached-client count or creation time, so those claims are omitted. The Claude HISTORY panel stays hidden on herdr tabs (herdr exposes no transcript identity), and tmux Copy Mode stays tmux's own — herdr tabs instead carry the shared Select Text mode, their own HRDR shortcut panel, and the same FILE attach/drop. Widget/Shortcut shell attach and Open Agent both work — an agent launch mints a herdr session, or lands inside an existing one as a new tab in the focused workspace / a new workspace |
 | Tier / privacy | Free, like tmux. No new permission or collection: probes and attaches still travel directly over the user's SSH connection. This does not change the Pro allocation, StoreKit catalog, paywall, IAP screenshot, or public screenshot set |
+
+## Rex sessions
+
+Free surface added 2026-11-16 (unreleased; ships with the next binary):
+
+| Item | Facts |
+| --- | --- |
+| What it is | Rex (superlogical.com/rex) sessions on a host appear on the deck as tiles beside its tmux / herdr ones, and a tile attaches a Rex terminal as a tab. Rex ships no terminal client, so Multiplex speaks Rex's own protocol over the user's SSH connection — no PTY, no extra port |
+| Selection | Never assumed. The deck rail offers `+ REX` when the host is holding Rex sessions, and Host Settings ▸ Backends lists it as a checkable backend. It is never a host's DEFAULT backend (the app does not start a Rex server, so it cannot promise a new session on an idle host), and Add Host ▸ BIND does not offer it |
+| Wall model | One tile per Rex **session**, its windows (tabs) on the window spine and its terminal blocks as panes. The miniature is the fronted block's screen. Programs that report status through OSC 7501 drive RUNNING / NEEDS YOU directly; others are read from their title and screen like a tmux tile. Tiles take their own tint on the host, and VoiceOver hears "on rex" |
+| Attach/close | A tile press opens the window the session is showing, with its panes: every terminal of that window as a pane of its own, in Rex's split layout, resized by dragging the line between two. The tile menu's **Open Terminal** opens another window of the session as its own tab. The tab's **REX** key splits the focused pane right or down, zooms it (in this tab only), closes it, opens a new Rex tab (a window of the session), or switches the tab to another terminal. When the Rex tab on show is closed (its last shell exits, or its last pane is closed), the Multiplex tab moves to the Rex tab next to it, and ends only when the session has no terminal left. The screen, colors, cursor and scrollback are restored on attach, and a tab whose link was lost to suspension re-attaches when the app returns. Delete Session closes the session. Widgets, Shortcuts, `multiplex://` links and alert banners can open a Rex session |
+| New sessions | The New Session sheet's "Runs on" bar, a Rex tab's `+ TAB`, and the widget / Shortcut / `multiplex://…&backend=rex` agent launch create a Rex session — one shell terminal, in the chosen working directory (a `+ TAB` sibling starts where the tab's session is), with the setup script and launch line typed as on tmux. Only while a Rex server is running on the host: otherwise the app says so and creates nothing. No launch lands INSIDE an existing Rex session (a named Rex target gets a fresh session instead) |
+| Requirements | Rex with a running server on the SSH host (written against 0.1.0-preview.25, API revision 24, and speaking any revision from 14 up — Rex is a preview, and the attach relies on a Rex CLI command Rex does not document). The app never starts a Rex server |
+| Honest limits | Rex cannot be a host's default backend, and nothing is created while no Rex server is running. The last client to type decides the terminals' sizes, so a Rex window showing the same panes resizes with the tab; until someone types in the tab, it shows a pane another client holds at that client's size. In a window of more than nine panes, nine open and each further one says why it could not (one SSH connection carries ten channels). A Rex tab has no prefix-key list, Copy Mode or HISTORY; mosh hosts attach Rex tabs over SSH. Very large scrollback (over about 3 MB rendered) attaches with a plain-text tail instead of the full history |
+| Tier / privacy | Free, like the other backends; attention alerts stay Pro. No new permission or collection: the probe and the attach travel over the user's SSH connection. This does not change the Pro allocation, StoreKit catalog, paywall, IAP screenshot, or public screenshot set. The store listing copy does not mention Rex yet |
 
 ## Widgets, Shortcuts, and the URL scheme
 
@@ -234,7 +249,7 @@ Current product split:
   (plus camera
   on iPad) and drag-and-drop through the same SSH upload path, a read-only
   File Viewer (code, rendered Markdown, images, PDFs, sound files, and git
-  diffs) summoned from
+  diffs; FIND / Command-F marks and steps through matches) summoned from
   + TAB or a confirmed path in terminal output (a percent-decoded,
   local-authority `file:` URI naming that SSH host takes the same road); a
   tree-file long press opens that file in another viewer tab, per-file
@@ -261,7 +276,9 @@ Current product split:
   touch double-tap (a SELECT / SELECT ALL / PASTE block on any live pane; the
   selection clamps to that pane with a floating COPY / SELECT ALL / DONE
   block beside it, a pointer's secondary click raises the same block, and herdr
-  tabs add a MENU chip that opens herdr's own pane menu in place), Home Screen
+  tabs add a MENU chip that opens herdr's own pane menu in place; on herdr a
+  long press that keeps going into a drag hands it to herdr's own selection,
+  which stays in the pane and copies to the device clipboard on lift), Home Screen
   widgets (per-host monitor +
   fleet wall; iPadOS 17+, visionOS 26+) and App Shortcuts ("Open Shell" /
   "Open File" with remote path and optional line or `path:10-15` range /

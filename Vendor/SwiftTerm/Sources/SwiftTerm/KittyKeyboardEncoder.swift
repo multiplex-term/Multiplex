@@ -3,7 +3,9 @@
 //  SwiftTerm
 //
 
+#if !SWIFTTERM_EMBEDDED
 import Foundation
+#endif
 
 enum KittyKey {
     case unicode(UInt32)
@@ -125,6 +127,28 @@ enum KittyFunctionalKey {
     case isoLevel5Shift
 }
 
+extension KittyFunctionalKey {
+    /// A modifier key in the sense of the kitty keyboard protocol. These
+    /// keys are reported only in report-all-keys mode. Caps Lock and Num
+    /// Lock are modifiers; Scroll Lock is a regular functional key. This
+    /// matches the reference table used by kitty and Ghostty.
+    var isKittyModifierKey: Bool {
+        switch self {
+        case .leftShift, .rightShift,
+             .leftControl, .rightControl,
+             .leftAlt, .rightAlt,
+             .leftSuper, .rightSuper,
+             .leftHyper, .rightHyper,
+             .leftMeta, .rightMeta,
+             .isoLevel3Shift, .isoLevel5Shift,
+             .capsLock, .numLock:
+            return true
+        default:
+            return false
+        }
+    }
+}
+
 struct KittyKeyEvent {
     var key: KittyKey
     var modifiers: KittyKeyboardModifiers
@@ -138,6 +162,7 @@ struct KittyKeyEvent {
 struct KittyKeyboardEncoder {
     let flags: KittyKeyboardFlags
     let applicationCursor: Bool
+    let applicationKeypad: Bool
     let backspaceSendsControlH: Bool
 
     func encode(_ event: KittyKeyEvent) -> [UInt8]? {
@@ -178,6 +203,34 @@ struct KittyKeyboardEncoder {
             return nil
         }
 
+        // A key-less event contains committed text, such as text from an IME.
+        // Associated-text reporting uses key zero for this event.
+        // A single character with a text-preventing modifier (for example the
+        // iOS Meta accessory) is a real key press: encode it as that key so
+        // the modifier is not lost.
+        if case .none = event.key {
+            guard event.eventType != .release,
+                  let text = event.text,
+                  !text.isEmpty else {
+                return nil
+            }
+            let scalars = text.unicodeScalars
+            if modifiersPreventText(event.modifiers),
+               let scalar = scalars.first,
+               scalars.index(after: scalars.startIndex) == scalars.endIndex {
+                var keyed = event
+                keyed.key = .unicode(scalar.value)
+                keyed.text = nil
+                return encode(keyed)
+            }
+            if includeAssociatedText {
+                return encodeCsiU(event: event, overrideKeyCode: 0,
+                                  includeText: true, includeAlternates: false,
+                                  includeEventType: wantsEvents, includeLocks: true)
+            }
+            return [UInt8](text.utf8)
+        }
+
         // During IME/dead-key commit flows, Enter may carry committed text while
         // Backspace is used to edit preedit state.
         if let text = event.text, !text.isEmpty,
@@ -208,26 +261,31 @@ struct KittyKeyboardEncoder {
                                            includeEventType: wantsEvents,
                                            includeAlternates: wantsAlternates,
                                            includeLocks: true)
-            case .unicode, .none:
+            case .unicode:
                 return encodeCsiU(event: event,
                                   includeText: includeAssociatedText,
                                   includeAlternates: wantsAlternates,
                                   includeEventType: wantsEvents,
                                   includeLocks: true)
+            case .none:
+                return nil
             }
         }
 
         if let text = event.text, !text.isEmpty {
             switch event.key {
-            case .unicode, .none:
+            case .unicode:
                 let hasAltOrCtrl = event.modifiers.contains(.alt) || event.modifiers.contains(.ctrl)
-                if !wantsDisambiguate || !hasAltOrCtrl {
+                let mustReportModifiedRepeat = wantsEvents &&
+                    event.eventType == .repeatPress && hasAltOrCtrl
+                if (!wantsDisambiguate || !hasAltOrCtrl) &&
+                    !mustReportModifiedRepeat {
                     if event.eventType != .release {
                         return [UInt8](text.utf8)
                     }
                     return nil
                 }
-            case .functional:
+            case .functional, .none:
                 break
             }
         }
@@ -237,7 +295,7 @@ struct KittyKeyboardEncoder {
             disambiguate: wantsDisambiguate,
             includeEventType: wantsEvents,
             includeAlternates: wantsAlternates,
-            includeLocks: true
+            includeLocks: !flags.isEmpty
         )
     }
 
@@ -248,10 +306,13 @@ struct KittyKeyboardEncoder {
                                includeLocks: Bool) -> [UInt8]? {
         switch event.key {
         case .none:
-            return encodeCsiU(event: event, includeText: false, includeAlternates: includeAlternates, includeEventType: includeEventType, includeLocks: includeLocks)
+            // Key-less events are handled in encode().
+            return nil
         case .unicode(let codepoint):
             if !disambiguate {
-                if let legacy = legacyTextKeySequence(event: event) {
+                let mustReportEvent = includeEventType && event.eventType != .press
+                if !mustReportEvent,
+                   let legacy = legacyTextKeySequence(event: event) {
                     return legacy
                 }
                 var updated = event
@@ -285,6 +346,9 @@ struct KittyKeyboardEncoder {
                                      includeEventType: Bool,
                                      includeAlternates: Bool,
                                      includeLocks: Bool) -> [UInt8]? {
+        if flags.isEmpty {
+            return legacyFunctionalKeySequence(for: key, event: event)
+        }
         let modifiers = modifiersValue(for: event.modifiers, includeLocks: includeLocks)
         let includeType = includeEventType && event.eventType != .press
         let wantsModifiersField = modifiers != 0 || includeType
@@ -368,9 +432,9 @@ struct KittyKeyboardEncoder {
         let includeModifiersField = includeType || modifiers != 0
 
         var body = "\(keyCode)"
-        if includeAlternates {
-            let shifted = event.modifiers.contains(.shift) ? event.shiftedKey : nil
-            let base = event.baseLayoutKey
+        if includeAlternates && !isControlCodepoint(keyCode) {
+            let shifted = validShiftedKey(for: event, primaryKeyCode: keyCode)
+            let base = validBaseLayoutKey(for: event, primaryKeyCode: keyCode)
             if shifted != nil || base != nil {
                 if let shifted {
                     body += ":\(shifted.value)"
@@ -402,6 +466,37 @@ struct KittyKeyboardEncoder {
         }
 
         return buildCsi("\(body)u")
+    }
+
+    private func validShiftedKey(for event: KittyKeyEvent,
+                                 primaryKeyCode: Int) -> UnicodeScalar? {
+        guard event.modifiers.contains(.shift),
+              let shifted = event.shiftedKey,
+              shifted.value != primaryKeyCode else {
+            return nil
+        }
+        return shifted
+    }
+
+    private func validBaseLayoutKey(for event: KittyKeyEvent,
+                                    primaryKeyCode: Int) -> UnicodeScalar? {
+        guard let base = event.baseLayoutKey,
+              base.value != primaryKeyCode else {
+            return nil
+        }
+
+        if let text = event.text, let first = text.unicodeScalars.first {
+            let scalars = text.unicodeScalars
+            guard scalars.index(after: scalars.startIndex) == scalars.endIndex,
+                  first != base else {
+                return nil
+            }
+        }
+        return base
+    }
+
+    private func isControlCodepoint(_ codepoint: Int) -> Bool {
+        codepoint < 0x20 || codepoint == 0x7f
     }
 
     private func buildCsi(_ payload: String) -> [UInt8] {
@@ -462,7 +557,7 @@ struct KittyKeyboardEncoder {
     }
 
     private func legacyTextKeySequence(event: KittyKeyEvent) -> [UInt8]? {
-        if event.eventType != .press {
+        if event.eventType == .release {
             return nil
         }
         guard case let .unicode(codepoint) = event.key,
@@ -568,7 +663,7 @@ struct KittyKeyboardEncoder {
     private func legacySpecialKeySequence(for key: KittyFunctionalKey,
                                           modifiers: KittyKeyboardModifiers,
                                           eventType: KittyKeyboardEventType) -> [UInt8]? {
-        if eventType != .press {
+        if eventType == .release {
             return nil
         }
         let sequence: [UInt8]
@@ -606,6 +701,217 @@ struct KittyKeyboardEncoder {
         }
     }
 
+    private func legacyFunctionalKeySequence(for key: KittyFunctionalKey,
+                                             event: KittyKeyEvent) -> [UInt8]? {
+        guard event.eventType != .release else { return nil }
+
+        var modifiers = event.modifiers
+        modifiers.remove([.capsLock, .numLock])
+        let legacyModifiers: KittyKeyboardModifiers = [.shift, .alt, .ctrl]
+        guard modifiers.subtracting(legacyModifiers).isEmpty else { return nil }
+        let modifier = modifiers.rawValue + 1
+
+        if let keypad = legacyKeypadSequence(for: key, text: event.text,
+                                             modifiers: modifiers) {
+            return keypad
+        }
+
+        if let functionNumber = legacyFunctionNumber(for: key) {
+            let capabilityNumber: Int
+            if functionNumber <= 12, modifier != 1 {
+                switch modifier {
+                case 2: capabilityNumber = functionNumber + 12
+                case 5: capabilityNumber = functionNumber + 24
+                case 6: capabilityNumber = functionNumber + 36
+                case 3: capabilityNumber = functionNumber + 48
+                case 4: capabilityNumber = functionNumber + 60
+                default:
+                    return legacyFunctionSequence(baseNumber: functionNumber,
+                                                  modifier: modifier)
+                }
+            } else {
+                capabilityNumber = functionNumber
+            }
+            return legacyFunctionCapability(capabilityNumber)
+        }
+
+        switch key {
+        case .escape, .enter, .tab, .backspace:
+            return legacySpecialKeySequence(for: key, modifiers: modifiers,
+                                            eventType: event.eventType)
+        case .up:
+            return legacyNavigationSequence(letter: "A", modifier: modifier,
+                                            useApplicationSequence: applicationCursor)
+        case .down:
+            return legacyNavigationSequence(letter: "B", modifier: modifier,
+                                            useApplicationSequence: applicationCursor)
+        case .right:
+            return legacyNavigationSequence(letter: "C", modifier: modifier,
+                                            useApplicationSequence: applicationCursor)
+        case .left:
+            return legacyNavigationSequence(letter: "D", modifier: modifier,
+                                            useApplicationSequence: applicationCursor)
+        case .home:
+            return legacyNavigationSequence(letter: "H", modifier: modifier,
+                                            useApplicationSequence: applicationCursor)
+        case .end:
+            return legacyNavigationSequence(letter: "F", modifier: modifier,
+                                            useApplicationSequence: applicationCursor)
+        case .insert:
+            return legacyTildeSequence(number: 2, modifier: modifier)
+        case .delete:
+            return legacyTildeSequence(number: 3, modifier: modifier)
+        case .pageUp:
+            return legacyTildeSequence(number: 5, modifier: modifier)
+        case .pageDown:
+            return legacyTildeSequence(number: 6, modifier: modifier)
+        default:
+            return nil
+        }
+    }
+
+    private func legacyNavigationSequence(letter: Character, modifier: Int,
+                                          useApplicationSequence: Bool) -> [UInt8] {
+        if modifier == 1 {
+            return useApplicationSequence
+                ? [ControlCodes.ESC, UInt8(ascii: "O"), letter.asciiValue!]
+                : buildCsi(String(letter))
+        }
+        return buildCsi("1;\(modifier)\(letter)")
+    }
+
+    private func legacyTildeSequence(number: Int, modifier: Int) -> [UInt8] {
+        if modifier == 1 {
+            return buildCsi("\(number)~")
+        }
+        return buildCsi("\(number);\(modifier)~")
+    }
+
+    private func legacyFunctionNumber(for key: KittyFunctionalKey) -> Int? {
+        switch key {
+        case .f1: return 1
+        case .f2: return 2
+        case .f3: return 3
+        case .f4: return 4
+        case .f5: return 5
+        case .f6: return 6
+        case .f7: return 7
+        case .f8: return 8
+        case .f9: return 9
+        case .f10: return 10
+        case .f11: return 11
+        case .f12: return 12
+        case .f13: return 13
+        case .f14: return 14
+        case .f15: return 15
+        case .f16: return 16
+        case .f17: return 17
+        case .f18: return 18
+        case .f19: return 19
+        case .f20: return 20
+        case .f21: return 21
+        case .f22: return 22
+        case .f23: return 23
+        case .f24: return 24
+        case .f25: return 25
+        case .f26: return 26
+        case .f27: return 27
+        case .f28: return 28
+        case .f29: return 29
+        case .f30: return 30
+        case .f31: return 31
+        case .f32: return 32
+        case .f33: return 33
+        case .f34: return 34
+        case .f35: return 35
+        default: return nil
+        }
+    }
+
+    private func legacyFunctionCapability(_ capabilityNumber: Int) -> [UInt8]? {
+        let group: (base: Int, modifier: Int)
+        switch capabilityNumber {
+        case 1...12: group = (capabilityNumber, 1)
+        case 13...24: group = (capabilityNumber - 12, 2)
+        case 25...36: group = (capabilityNumber - 24, 5)
+        case 37...48: group = (capabilityNumber - 36, 6)
+        case 49...60: group = (capabilityNumber - 48, 3)
+        case 61...72: group = (capabilityNumber - 60, 4)
+        default: return nil
+        }
+        return legacyFunctionSequence(baseNumber: group.base,
+                                      modifier: group.modifier)
+    }
+
+    private func legacyFunctionSequence(baseNumber: Int, modifier: Int) -> [UInt8]? {
+        let letters: [Character] = ["P", "Q", "R", "S"]
+        if baseNumber <= 4 {
+            let letter = letters[baseNumber - 1]
+            if modifier == 1 {
+                return [ControlCodes.ESC, UInt8(ascii: "O"), letter.asciiValue!]
+            }
+            return buildCsi("1;\(modifier)\(letter)")
+        }
+        let tildeNumbers = [15, 17, 18, 19, 20, 21, 23, 24]
+        guard baseNumber <= 12 else { return nil }
+        return legacyTildeSequence(number: tildeNumbers[baseNumber - 5],
+                                   modifier: modifier)
+    }
+
+    private func legacyKeypadSequence(for key: KittyFunctionalKey, text: String?,
+                                      modifiers: KittyKeyboardModifiers) -> [UInt8]? {
+        let applicationFinal: UInt8?
+        switch key {
+        case .keypad0, .keypadInsert: applicationFinal = UInt8(ascii: "p")
+        case .keypad1, .keypadEnd: applicationFinal = UInt8(ascii: "q")
+        case .keypad2, .keypadDown: applicationFinal = UInt8(ascii: "r")
+        case .keypad3, .keypadPageDown: applicationFinal = UInt8(ascii: "s")
+        case .keypad4, .keypadLeft: applicationFinal = UInt8(ascii: "t")
+        case .keypad5, .keypadBegin: applicationFinal = UInt8(ascii: "u")
+        case .keypad6, .keypadRight: applicationFinal = UInt8(ascii: "v")
+        case .keypad7, .keypadHome: applicationFinal = UInt8(ascii: "w")
+        case .keypad8, .keypadUp: applicationFinal = UInt8(ascii: "x")
+        case .keypad9, .keypadPageUp: applicationFinal = UInt8(ascii: "y")
+        case .keypadDecimal, .keypadDelete: applicationFinal = UInt8(ascii: "n")
+        case .keypadDivide: applicationFinal = UInt8(ascii: "o")
+        case .keypadMultiply: applicationFinal = UInt8(ascii: "j")
+        case .keypadSubtract: applicationFinal = UInt8(ascii: "m")
+        case .keypadAdd: applicationFinal = UInt8(ascii: "k")
+        case .keypadEnter: applicationFinal = UInt8(ascii: "M")
+        case .keypadEqual: applicationFinal = UInt8(ascii: "X")
+        case .keypadSeparator: applicationFinal = UInt8(ascii: "l")
+        default: return nil
+        }
+
+        if applicationKeypad && modifiers.isEmpty, let applicationFinal {
+            return [ControlCodes.ESC, UInt8(ascii: "O"), applicationFinal]
+        }
+        if key == .keypadEnter {
+            return legacySpecialKeySequence(for: .enter, modifiers: modifiers,
+                                            eventType: .press)
+        }
+        if let text, !text.isEmpty {
+            var output: [UInt8] = modifiers.contains(.alt) ? [ControlCodes.ESC] : []
+            output.append(contentsOf: text.utf8)
+            return output
+        }
+
+        let modifier = modifiers.rawValue + 1
+        switch key {
+        case .keypadLeft: return legacyNavigationSequence(letter: "D", modifier: modifier, useApplicationSequence: false)
+        case .keypadRight: return legacyNavigationSequence(letter: "C", modifier: modifier, useApplicationSequence: false)
+        case .keypadUp: return legacyNavigationSequence(letter: "A", modifier: modifier, useApplicationSequence: false)
+        case .keypadDown: return legacyNavigationSequence(letter: "B", modifier: modifier, useApplicationSequence: false)
+        case .keypadHome: return legacyNavigationSequence(letter: "H", modifier: modifier, useApplicationSequence: false)
+        case .keypadEnd: return legacyNavigationSequence(letter: "F", modifier: modifier, useApplicationSequence: false)
+        case .keypadInsert: return legacyTildeSequence(number: 2, modifier: modifier)
+        case .keypadDelete: return legacyTildeSequence(number: 3, modifier: modifier)
+        case .keypadPageUp: return legacyTildeSequence(number: 5, modifier: modifier)
+        case .keypadPageDown: return legacyTildeSequence(number: 6, modifier: modifier)
+        default: return nil
+        }
+    }
+
     private func textCodepoints(from text: String?) -> [Int]? {
         guard let text else { return nil }
         var codepoints: [Int] = []
@@ -636,18 +942,7 @@ struct KittyKeyboardEncoder {
     }
 
     private func isModifierFunctionalKey(_ key: KittyFunctionalKey) -> Bool {
-        switch key {
-        case .leftShift, .rightShift,
-             .leftControl, .rightControl,
-             .leftAlt, .rightAlt,
-             .leftSuper, .rightSuper,
-             .leftHyper, .rightHyper,
-             .leftMeta, .rightMeta,
-             .isoLevel3Shift, .isoLevel5Shift:
-            return true
-        default:
-            return false
-        }
+        key.isKittyModifierKey
     }
 
     private enum FunctionalEncoding {

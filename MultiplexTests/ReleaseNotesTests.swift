@@ -4,43 +4,88 @@ import XCTest
 final class ReleaseNotesTests: XCTestCase {
     // MARK: Content
 
-    /// The card speaks for the newest release only — 1.5's features, not a
+    /// The card speaks for the newest release only — 1.5.2's features, not a
     /// merge of every release the log still carries.
     func testTheCardAnnouncesTheNewestRelease() {
-        XCTAssertEqual(ReleaseNotes.version, "1.5")
+        XCTAssertEqual(ReleaseNotes.version, "1.5.2")
         XCTAssertEqual(
             ReleaseNotes.releases.map(\.version),
-            ["1.5", "1.4.2", "1.4.1", "1.4", "1.3.1", "1.3"]
+            ["1.5.2", "1.5.1", "1.5", "1.4.2", "1.4.1", "1.4", "1.3.1", "1.3"]
         )
         XCTAssertEqual(ReleaseNotes.releases.first?.version, ReleaseNotes.version)
         XCTAssertEqual(ReleaseNotes.promise, ReleaseNotes.current.promise)
     }
 
-    /// Each device leads with the change that is about it: iPhone Duo on a
-    /// phone, single-window mode on an iPad. Vision Pro gets neither, so its
-    /// card is the dictation story plus Hermes.
+    /// A patch release shows what each platform has: FIND everywhere, then
+    /// the row about this device — the key row on iPhone, Display Zoom on
+    /// iPad, the keyboard lock on Vision Pro.
     func testTheCardLeadsWithTheRowAboutThisPlatform() {
         XCTAssertEqual(
             ReleaseNotes.highlights(for: .phone).map(\.id),
-            ["duo", "composermic", "noisereduction", "landscape"]
+            ["viewerfind", "duokeyrow", "slashcommand"]
         )
         XCTAssertEqual(
             ReleaseNotes.highlights(for: .pad).map(\.id),
-            ["singlewindow", "composermic", "noisereduction", "airpods"]
+            ["viewerfind", "displayzoom", "slashcommand"]
         )
         XCTAssertEqual(
             ReleaseNotes.highlights(for: .vision).map(\.id),
-            ["composermic", "noisereduction", "airpods", "hermes"]
+            ["viewerfind", "visionkeylock", "slashcommand"]
         )
     }
 
-    func testTheLayoutChangesKeepTheirPlatformScoping() {
+    func testThePlatformScopedFixesKeepTheirScoping() {
         for platform in ReleaseNotePlatform.allCases {
             let ids = ReleaseNotes.entries(for: platform).map(\.id)
+            XCTAssertEqual(ids.contains("visionkeylock"), platform == .vision)
+            XCTAssertEqual(ids.contains("duokeyrow"), platform == .phone)
+            XCTAssertEqual(ids.contains("phonelockkeys"), platform == .phone)
+            XCTAssertEqual(ids.contains("displayzoom"), platform == .pad)
+            XCTAssertTrue(ids.contains("viewerfind"))
+            XCTAssertTrue(ids.contains("slashcommand"))
+        }
+    }
+
+    /// The 1.5.1 record rides along under the 1.5.2 log with its card intact.
+    func testTheBankedOneFiveOneRecordKeepsItsPlatformScoping() throws {
+        let v151 = try XCTUnwrap(ReleaseNotes.releases.first { $0.version == "1.5.1" })
+        for platform in ReleaseNotePlatform.iOS {
+            XCTAssertEqual(
+                v151.highlights(for: platform).map(\.id),
+                ["fullscreen", "herdrselect", "keepscreen", "textsize"]
+            )
+        }
+        XCTAssertEqual(
+            v151.highlights(for: .vision).map(\.id),
+            ["fullscreen", "herdrselect", "deckbuttons", "textsize"]
+        )
+        for platform in ReleaseNotePlatform.allCases {
+            let ids = v151.entries(for: platform).map(\.id)
+            XCTAssertEqual(ids.contains("keepscreen"), platform != .vision)
+            XCTAssertEqual(ids.contains("hiddendeck"), platform == .phone)
+            XCTAssertEqual(ids.contains("duofixes"), platform == .phone)
+        }
+    }
+
+    /// The 1.5 record rides along under the 1.5.2 log with its card intact.
+    func testTheBankedOneFiveRecordKeepsItsPlatformScoping() throws {
+        let v15 = try XCTUnwrap(ReleaseNotes.releases.first { $0.version == "1.5" })
+        XCTAssertEqual(
+            v15.highlights(for: .phone).map(\.id),
+            ["duo", "composermic", "noisereduction", "landscape"]
+        )
+        XCTAssertEqual(
+            v15.highlights(for: .pad).map(\.id),
+            ["singlewindow", "composermic", "noisereduction", "airpods"]
+        )
+        XCTAssertEqual(
+            v15.highlights(for: .vision).map(\.id),
+            ["composermic", "noisereduction", "airpods", "hermes"]
+        )
+        for platform in ReleaseNotePlatform.allCases {
+            let ids = v15.entries(for: platform).map(\.id)
             XCTAssertEqual(ids.contains("duo"), platform == .phone)
-            XCTAssertEqual(ids.contains("landscape"), platform == .phone)
             XCTAssertEqual(ids.contains("singlewindow"), platform == .pad)
-            XCTAssertTrue(ids.contains("composermic"))
         }
     }
 
@@ -280,7 +325,7 @@ final class ReleaseNotesTests: XCTestCase {
     /// 1.3.1's notes to the people who already saw 1.3's.
     func testANewNotesReleaseReopensTheCard() {
         XCTAssertEqual(
-            ReleaseNotesGate.decide(lastSeen: "1.4.2", current: ReleaseNotes.version, installHasPriorUse: true),
+            ReleaseNotesGate.decide(lastSeen: "1.5.1", current: ReleaseNotes.version, installHasPriorUse: true),
             .show
         )
         XCTAssertEqual(
@@ -305,7 +350,7 @@ final class ReleaseNotesTests: XCTestCase {
     /// alone, compares equal, and must not re-present old notes.
     func testABuildWithoutItsOwnNotesDoesNotReopenTheCard() {
         XCTAssertEqual(
-            ReleaseNotesGate.decide(lastSeen: "1.5", current: ReleaseNotes.version, installHasPriorUse: true),
+            ReleaseNotesGate.decide(lastSeen: "1.5.2", current: ReleaseNotes.version, installHasPriorUse: true),
             .nothing
         )
         XCTAssertEqual(

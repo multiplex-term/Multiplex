@@ -254,6 +254,7 @@ final class TerminalPaneUIKitTests: XCTestCase {
             theme: .tally,
             bottomChromeHeight: 0,
             contentSafeArea: .zero,
+            keyRailSafeArea: .zero,
             railOwnsBottomSafeArea: false,
             isActive: true,
             focusAllowed: true,

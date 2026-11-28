@@ -12,8 +12,8 @@
 import Foundation
 
 /// One modifier set plus one key, spelled the way a keycap reads.
-public struct TerminalKeyChord: Equatable {
-    public enum Key: Equatable {
+public struct TerminalKeyChord: Equatable, Sendable {
+    public enum Key: Equatable, Sendable {
         case enter
         case tab
         case escape
@@ -28,7 +28,7 @@ public struct TerminalKeyChord: Equatable {
         case character(Character)
     }
 
-    public struct Modifiers: OptionSet {
+    public struct Modifiers: OptionSet, Sendable {
         public let rawValue: Int
 
         public init(rawValue: Int) {
@@ -61,7 +61,12 @@ extension TerminalView {
     /// are the readline word motions (`ESC b` / `ESC f`), and Ctrl+Shift+char
     /// is Ctrl+char (there is no legacy spelling for the shift).
     public func bytes(for chord: TerminalKeyChord) -> [UInt8]? {
-        let flags = terminal.keyboardEnhancementFlags
+        let terminalState = withTerminal { terminal in
+            (flags: terminal.keyboardEnhancementFlags,
+             applicationCursor: terminal.applicationCursor,
+             applicationKeypad: terminal.applicationKeypad)
+        }
+        let flags = terminalState.flags
         if flags.isEmpty {
             if case .enter = chord.key, chord.modifiers.contains(.shift) {
                 return [10]
@@ -80,7 +85,8 @@ extension TerminalView {
             event.shiftedKey = nil
         }
         let encoder = KittyKeyboardEncoder(flags: flags,
-                                           applicationCursor: terminal.applicationCursor,
+                                           applicationCursor: terminalState.applicationCursor,
+                                           applicationKeypad: terminalState.applicationKeypad,
                                            backspaceSendsControlH: backspaceSendsControlH)
         return encoder.encode(event)
     }

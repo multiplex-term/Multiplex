@@ -1,9 +1,7 @@
-Multiplex 1.5 — the shell follows iPhone Duo's fold, iPad can run in a single window, and you can talk to your agent through the message box with background noise filtered out.
+Multiplex 1.5.2 — find text in the file viewer, and give the iPhone Duo key row the full width of the screen.
 
-• iPhone Duo: on the closed display the chips stack beside the clock, on the camera's side in landscape. Folded as a book, the deck takes the left page and the terminal the right; folded as a laptop, the terminal sits above the fold and the deck below. HIDE hands the whole display to the terminal and stays hidden when you rotate. In Split View a half behaves like an iPhone.
-• iPad single-window mode: Settings ▸ Window mode ▸ Single-window mode runs Multiplex in one window, as on iPhone — the deck beside the terminal, sessions as tabs. Off by default; it takes effect the next time Multiplex launches.
-• A mic in the message box: tap it beside the send button and talk; words land as you speak, and sending mid-sentence waits for the last words.
-• Noise reduction: Settings ▸ Voice input downloads a model that filters background noise out of the microphone before dictation hears it.
-• Dictation listens through AirPods or any Bluetooth headset mic when one is connected.
-• Small iPhones in landscape give the terminal the full width; swipe from the edge to return to the deck.
-• Hermes Agent is recognized again on hosts with its current installer, and Claude Code's folder-trust question now raises an agent alert.
+• File viewer: press FIND on the bar, or Command-F with a keyboard, and type. Every match is marked, with a count; Return or the arrows step through them. It works on code, diffs, and rendered markdown, and stays open as you pick other files.
+• iPhone Duo: the key row runs under the side column on both displays, and the keys at its ends stay clear of the rounded corners. A file viewer or web page tab's bottom bar clears the corners too, and the closed display in landscape loses its grey bands.
+• iPhone: locking the keyboard no longer takes keys off the key row. In landscape, ~ and / stay, with RET alongside them.
+• iPad: with Display Zoom set to More Space, the terminal no longer draws magnified, cutting off its top row and landing taps off the rows you see.
+• Tapping a slash command such as /compact in an agent's input bar no longer offers to open it as a file.

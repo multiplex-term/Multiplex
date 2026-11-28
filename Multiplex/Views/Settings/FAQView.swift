@@ -155,7 +155,8 @@ private final class FAQMultiplexerInstallView: UIView {
         let bar = AddHostChoiceBar<Host.SessionBackend>(
             // The button face uppercases; pass the natural spelling so
             // VoiceOver reads "tmux", not the letters T-M-U-X.
-            choices: Host.SessionBackend.allCases.map { ($0.rawValue, $0) },
+            // Install roads for what a host RUNS sessions on.
+            choices: Host.SessionBackend.defaultCases.map { ($0.rawValue, $0) },
             selection: backend
         ) { [weak self] backend in
             self?.show(backend)

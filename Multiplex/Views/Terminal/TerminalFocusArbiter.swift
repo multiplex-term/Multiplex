@@ -29,6 +29,24 @@ final class KeyboardLock {
 /// UIKit has nothing to present, so taps cannot raise the software keyboard.
 private final class LockedKeyboardInputView: UIView {}
 
+#if !os(visionOS)
+/// Refuses Scribble while the keyboard is locked. The lock's zero-size input
+/// view only stops UIKit *presenting* a keyboard; a `UITextInput` view still
+/// takes Apple Pencil handwriting, so a Pencil stroke on a locked terminal
+/// would draw ink and type instead of tapping, selecting, or scrolling the
+/// way a finger does. Unlocked, Scribble stays available as text input.
+private final class LockedScribbleGate: NSObject, UIScribbleInteractionDelegate {
+    static let shared = LockedScribbleGate()
+
+    func scribbleInteraction(
+        _ interaction: UIScribbleInteraction,
+        shouldBeginAt location: CGPoint
+    ) -> Bool {
+        !KeyboardLock.shared.isLocked
+    }
+}
+#endif
+
 @MainActor
 enum TerminalFocusArbiter {
     private(set) static weak var current: TerminalView?
@@ -150,6 +168,17 @@ enum TerminalFocusArbiter {
         }
         guard summoning else { return }
         summon(view, force: true)
+    }
+
+    /// Every terminal view gets the gate at creation, not at claim: Scribble
+    /// focuses whichever `UITextInput` view the Pencil lands on, so a
+    /// terminal that never held the input session must refuse it too.
+    /// Idempotent — a tab adopted by another window keeps its one gate.
+    static func installScribbleGate(on view: TerminalView) {
+        #if !os(visionOS)
+        guard !view.interactions.contains(where: { $0 is UIScribbleInteraction }) else { return }
+        view.addInteraction(UIScribbleInteraction(delegate: LockedScribbleGate.shared))
+        #endif
     }
 
     private static func applyLockState(to view: TerminalView) {
@@ -401,6 +430,7 @@ enum TerminalFocusArbiter {
         installDebugScrollHooks()
         installDebugKeyboardLockHook()
         installDebugResizeDragHook()
+        installDebugSelectionDragHook()
     }
 
     /// Headless stand-in for the long-press-on-border resize drag (no
@@ -423,17 +453,22 @@ enum TerminalFocusArbiter {
 
     private static func performDebugResizeDrag() {
         guard let view = current, let filter = view.longPressMouseDragFilter else { return }
-        let terminal = view.getTerminal()
+        // One copied snapshot of the visible screen rather than a lock per
+        // cell. Its text skips a wide glyph's trailing cell (width 0), so
+        // walking the cell widths recovers each cell's column.
+        let snapshot = view.terminalStateSnapshot()
+        let terminal = snapshot.dimensions
         // herdr draws several vertical-bar columns (sidebar edge, pane
         // frames); the shared divider of a side-by-side split is the bar
         // column nearest the grid's horizontal center. Drag at that column's
         // median bar row.
         var rowsByColumn: [Int: [Int]] = [:]
-        for row in 0..<terminal.rows {
-            for col in 0..<terminal.cols {
-                let content = terminal.getCharacter(col: col, row: row)
-                if HerdrPaneBorder.isVerticalBar(content), filter((col, row), content) {
-                    rowsByColumn[col, default: []].append(row)
+        for line in snapshot.visibleRows {
+            var characters = line.text.makeIterator()
+            for (col, width) in line.cellWidths.enumerated() where width != 0 {
+                guard let content = characters.next() else { break }
+                if HerdrPaneBorder.isVerticalBar(content), filter((col, line.row), content) {
+                    rowsByColumn[col, default: []].append(line.row)
                 }
             }
         }
@@ -458,6 +493,68 @@ enum TerminalFocusArbiter {
             }
             try? await Task.sleep(nanoseconds: 40_000_000)
             view.endRemoteMouseDrag(at: view.pointForCell(col: cell.col + 6, row: cell.row))
+        }
+    }
+
+    /// Headless stand-in for a long press that travels into the remote's own
+    /// selection (no headless route can synthesize a touch): `… -p
+    /// app.multiplexterm.multiplex.debug.herdrselectdrag` finds the first
+    /// visible row containing `mpx-select`, long-presses its first letter
+    /// (raising the block), then drags across to that row's next two lines
+    /// and lifts — the exact phases the gesture drives. Proof: the block
+    /// gives way to herdr's own highlight, and `xcrun simctl pbpaste` reads
+    /// the OSC 52 copy herdr sends back.
+    private static func installDebugSelectionDragHook() {
+        var token: Int32 = 0
+        notify_register_dispatch(
+            "app.multiplexterm.multiplex.debug.herdrselectdrag", &token, .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                performDebugSelectionDrag()
+            }
+        }
+    }
+
+    private static func performDebugSelectionDrag() {
+        guard let view = current, view.longPressDragSelectsRemotely else { return }
+        let snapshot = view.terminalStateSnapshot()
+        let rows = snapshot.dimensions.rows
+        // The marker's screen column: walk the cell widths, as the resize
+        // hook does — the copied text skips a wide glyph's trailing cell.
+        var start: (col: Int, row: Int)?
+        for line in snapshot.visibleRows {
+            guard let range = line.text.range(of: "mpx-select") else { continue }
+            let offset = line.text.distance(from: line.text.startIndex, to: range.lowerBound)
+            var seen = 0
+            for (col, width) in line.cellWidths.enumerated() where width != 0 {
+                if seen == offset {
+                    start = (col: col, row: line.row)
+                    break
+                }
+                seen += 1
+            }
+            break
+        }
+        guard let start else {
+            keyboardLogger.debug("herdrselectdrag no mpx-select row on screen")
+            return
+        }
+        let end = (col: start.col + 9, row: min(start.row + 2, rows - 1))
+        keyboardLogger.debug(
+            "herdrselectdrag from=\(start.col),\(start.row) to=\(end.col),\(end.row)")
+        let path = [
+            (col: start.col + 4, row: start.row),
+            (col: start.col, row: start.row + 1),
+            end,
+        ]
+        Task { @MainActor in
+            view.longPressBegan(at: view.pointForCell(col: start.col, row: start.row))
+            for cell in path {
+                try? await Task.sleep(nanoseconds: 60_000_000)
+                view.longPressMoved(to: view.pointForCell(col: cell.col, row: cell.row))
+            }
+            try? await Task.sleep(nanoseconds: 60_000_000)
+            view.longPressEnded(at: view.pointForCell(col: end.col, row: end.row))
         }
     }
 

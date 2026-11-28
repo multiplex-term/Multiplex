@@ -8,6 +8,12 @@ import UIKit
 /// PTY, or a mosh session bootstrapped over SSH when the host asks for it
 /// — running tmux attach / new-session / a plain shell, and pumps bytes
 /// between the transport and the SwiftTerm view.
+///
+/// A tab draws one emulator (`TerminalScreen`), except on a backend that
+/// hands its panes out separately (`PanedTerminalTransport` — a Rex tab):
+/// there it draws one per pane, and `terminalView`, input, the key rail and
+/// everything else that means "the terminal" follow the pane the keyboard
+/// is on.
 @MainActor
 @Observable
 final class TerminalSessionController {
@@ -72,12 +78,19 @@ final class TerminalSessionController {
     private var selectTextClampGeneration = 0
     private var selectTextClampTask: Task<Void, Never>?
 
+    /// Whether this tab's bytes ride mosh — THE transport question, asked
+    /// here by everything that depends on the answer (the run, scrollback,
+    /// FILE, the bar's MOSH badge). The host's preference, except on a Rex
+    /// tab: it has no PTY for mosh-server to run, so it rides SSH whatever
+    /// the host prefers.
+    var ridesMosh: Bool { host.useMosh && route.rexTarget == nil }
+
     /// Local scrollback for this tab's terminal view; nil disables it.
     /// A transport capability, so it lives beside the transport choice:
     /// mosh syncs ONE live screen and anything archived above it is junk
     /// (stale frames from scroll-op diffs, resync resets, and resizes) —
     /// full record in docs/agents/mosh.md.
-    var localScrollbackLines: Int? { host.useMosh ? nil : 5000 }
+    var localScrollbackLines: Int? { ridesMosh ? nil : 5000 }
 
     /// The HISTORY surface: user prompts read from the agent's own session
     /// file on the host (see `AgentSessionHistory`). Present while the panel
@@ -124,13 +137,60 @@ final class TerminalSessionController {
         keyboardObstruction = height
     }
 
-    /// Strongly owned (SwiftTerm's delegate back-reference is weak): the view
-    /// carries the terminal buffer and scrollback, and tabs move between
-    /// windows — the adopting window re-parents this same view, so what's on
-    /// screen survives a merge/split. Released with the controller on close.
+    /// The view of the screen the keyboard is on — the tab's only one, or
+    /// the active pane's. The screen owns it (`TerminalScreen`); this is the
+    /// observed mirror everything above the terminal reads, so chrome
+    /// follows the tab's focus from pane to pane without knowing there are
+    /// panes.
     private(set) var terminalView: TerminalView?
-    /// The byte pipe under this tab — SSH PTY or mosh session.
+    /// The emulators this tab draws: one, or — on a paned tab — one per
+    /// pane in layout order, none until the attach has said what they are.
+    @ObservationIgnored private(set) var screens: [TerminalScreen] = []
+    @ObservationIgnored private var activeScreen: TerminalScreen?
+    /// Whether this tab's backend hands its panes out separately, for the
+    /// tab to draw (`PanedTerminalTransport`). Rex is the one that does.
+    var drawsPanes: Bool { route.rexTarget != nil }
+    /// How a paned tab's panes are arranged, as its transport last said (and
+    /// as a divider drag here has since moved it). nil on every other tab,
+    /// and until an attach has answered.
+    private(set) var paneLayout: PaneLayout?
+    /// The pane the tab's keyboard is on.
+    private(set) var activePaneID: PaneID?
+    /// The pane a paned tab draws ALONE, over the room of all the others;
+    /// nil while it draws them all. The tab's own: no backend is asked, and
+    /// the layout — every hidden pane's size included — stays as it is, so
+    /// leaving the zoom is instant. It ends when the keyboard goes to
+    /// another pane, as tmux's and Rex's own zooms do.
+    private(set) var zoomedPaneID: PaneID?
+    /// The surface's side of `paneLayout`: it must have every pane laid out
+    /// — and so measured — by the time it returns. A new pane's terminal is
+    /// opened at the grid this pass gives it.
+    @ObservationIgnored private var onPaneLayoutChanged: (() -> Void)?
+    /// Whose `onPaneLayoutChanged` that is. A tab moved to another window
+    /// has two surfaces for a moment, and only the newer may make emulator
+    /// views: the older one adopting them back would pull them out of the
+    /// window the tab just arrived in.
+    @ObservationIgnored private weak var paneLayoutObserver: AnyObject?
+    /// The byte pipe under this tab — SSH PTY or mosh session. nil on a
+    /// paned tab, whose link is `panedTransport`.
     private var transport: (any TerminalTransport)?
+    /// A paned tab's link: one stream per pane and the layout they sit in.
+    private var panedTransport: (any PanedTerminalTransport)?
+    /// The paned transport as the Rex client it is on a Rex tab.
+    private var rexSession: RexSession? { panedTransport as? RexSession }
+    /// Routes each pane's output to its screen from the transport's own
+    /// isolation; one per paned run.
+    @ObservationIgnored private var paneOutput: PaneOutputRouter?
+    @ObservationIgnored private var paneCommands: AsyncStream<PaneCommand>.Continuation?
+    @ObservationIgnored private var paneCommandTask: Task<Void, Never>?
+    /// The terminal a Rex tab's keyboard is on: learned when the attach
+    /// settles on one, moved by a touch on another pane and by the REX
+    /// panel's Switch Terminal. nil until then, and on every other kind of
+    /// tab. Two readers: the next transport run prefers it over the route's
+    /// own block, so a reconnect comes back to the terminal the user was
+    /// on; and the window reads the tab's agent from it — the session's
+    /// fronted terminal is somebody else's choice.
+    private(set) var rexBlockID: String?
     /// SSH path only: the exec/SFTP surface (pane cwd, file drops). nil on
     /// mosh tabs — their bootstrap SSH connection is transient by design.
     private var connection: SSHConnection?
@@ -140,17 +200,10 @@ final class TerminalSessionController {
     /// threshold. Input still queues and the link self-heals; the chrome
     /// just shows it truthfully. Always false on SSH tabs.
     private(set) var contactLost = false
-    private var pendingOutput: [UInt8] = []
-    /// One short-delay drain per transport run replaces a MainActor Task and a
-    /// Data→Array copy for every network chunk. Parsing remains on the main
-    /// actor because SwiftTerm's view/delegate/display machinery is UIKit.
-    private var outputCoalescer: TerminalOutputCoalescer?
     /// SSH handoff tabs only: watches early PTY output for the oh-my-zsh
     /// update prompt, whose stdin drain swallows the injected attach line.
     /// nil once resolved (prompt handled, attach seen, or window elapsed).
     private var handoffWatch: ShellHandoff.UpdatePromptWatch?
-    private var lastCols = 80
-    private var lastRows = 24
     private var started = false
     private var transportGeneration = 0
     /// Session-volume counters drained by the stats pump. Written on the
@@ -167,14 +220,6 @@ final class TerminalSessionController {
     private var statsLiveRuns = 0
     private var statsTask: Task<Void, Never>?
     private var runTask: Task<Void, Never>?
-    private var inputTask: Task<Void, Never>?
-    private var inputContinuation: AsyncStream<Data>.Continuation?
-    private struct TerminalSize: Sendable {
-        var cols: Int
-        var rows: Int
-    }
-    private var resizeTask: Task<Void, Never>?
-    private var resizeContinuation: AsyncStream<TerminalSize>.Continuation?
     /// Background cadence for a plain PTY. The focused TerminalWindow may
     /// request a faster refresh, coalesced by the same in-flight/staleness
     /// gates; tmux tabs continue to use ConnectionHub's fleet probe.
@@ -221,6 +266,13 @@ final class TerminalSessionController {
     /// active-pane fallback.
     private(set) var pathPressScreenCell: (col: Int, row: Int)?
 
+    /// The grid this tab reports to the remote — the attached client's
+    /// screen as the backend lays it out, which herdr's content-relative
+    /// pane rects need to land on screen cells.
+    var screenSize: (cols: Int, rows: Int) {
+        (cols: activeScreen?.cols ?? 80, rows: activeScreen?.rows ?? 24)
+    }
+
     #if !os(visionOS)
     /// The terminal's app-owned dictation controls, from the pane's side:
     /// LISTENING while the microphone is open, or a short failure the user
@@ -248,6 +300,11 @@ final class TerminalSessionController {
         self.route = route
         self.host = host
         self.attention = attention
+        if route.rexTarget == nil {
+            let screen = TerminalScreen()
+            screens = [screen]
+            activeScreen = screen
+        }
         #if !os(visionOS)
         dictationDriver.onStateChange = { [weak self] in
             guard let self else { return }
@@ -268,9 +325,27 @@ final class TerminalSessionController {
         "\(route.displayName) — \(host.name)"
     }
 
-    func bind(_ view: TerminalView) {
-        terminalView = view
-        applyTouchInteractionModes()
+    /// The one screen of a tab that draws no panes.
+    var soleScreen: TerminalScreen? { drawsPanes ? nil : screens.first }
+
+    /// Replace, never stack: the surface that lays this tab's panes out is
+    /// the last one installed.
+    func observePaneLayout(as observer: AnyObject, _ changed: @escaping () -> Void) {
+        paneLayoutObserver = observer
+        onPaneLayoutChanged = changed
+    }
+
+    func isPaneLayoutObserver(_ candidate: AnyObject) -> Bool {
+        paneLayoutObserver === candidate
+    }
+
+    func screen(for pane: PaneID) -> TerminalScreen? {
+        screens.first { $0.paneID == pane }
+    }
+
+    /// A surface made (or adopted) the view for one of this tab's screens.
+    func bind(_ view: TerminalView, to screen: TerminalScreen) {
+        applyTouchInteractionModes(to: view)
         // Touch never hovers, so SwiftTerm's pointer-gated activation can
         // never fire here; this pane decides instead. The view owns the
         // closure and this controller owns the view — capture weakly.
@@ -281,9 +356,9 @@ final class TerminalSessionController {
             // screen coordinates, and a press up in scrollback names no
             // pane (the composite screen is the only pane-mapped surface).
             var cell: (col: Int, row: Int)?
-            if let terminal = view?.getTerminal() {
-                let screenRow = position.row - terminal.buffer.yDisp
-                if screenRow >= 0 && screenRow < terminal.rows {
+            if let state = view?.terminalStateSnapshot() {
+                let screenRow = position.row - state.viewportRow
+                if screenRow >= 0 && screenRow < state.dimensions.rows {
                     cell = (col: position.col, row: screenRow)
                 }
             }
@@ -298,11 +373,16 @@ final class TerminalSessionController {
             view.longPressMouseDragFilter = { _, content in
                 HerdrPaneBorder.isBorderCell(content)
             }
+            // herdr selects by mouse drag inside the pane and, for a client
+            // under SSH, copies over OSC 52 (`clipboardCopy`) — the selection
+            // iTerm and Ghostty users get. Local selection sees only the
+            // composited screen, so it sweeps whatever a TUI draws beside
+            // the text; a long press that raised the block and then travels
+            // hands the drag to herdr instead.
+            view.longPressDragSelectsRemotely = true
         }
-        if !pendingOutput.isEmpty {
-            view.feed(byteArray: pendingOutput[...])
-            pendingOutput.removeAll()
-        }
+        screen.attach(view)
+        if screen === activeScreen { terminalView = view }
     }
 
     /// Route keyboard input to this window's terminal.
@@ -357,13 +437,13 @@ final class TerminalSessionController {
         TerminalFocusArbiter.toggle(terminalView)
     }
 
-    #if !os(visionOS)
-    /// The keyboard lock as a named menu action. The rail key's hold gesture
-    /// stays the fast path, but nothing on screen announced it — a held key
-    /// is unfindable, so the same lock/unlock lives in the terminal's actions
-    /// menu. Lock hides while a hardware keyboard makes it redundant; an
-    /// already-held lock keeps Unlock available. Unlocking asks for the
-    /// keyboard back, exactly like the padlock's short press.
+    /// The keyboard lock as a named menu action. The rail / cluster key's
+    /// hold gesture stays the fast path, but nothing on screen announced it —
+    /// a held key is unfindable, so the same lock/unlock lives in the
+    /// terminal's actions menu. Lock hides while a hardware keyboard makes it
+    /// redundant (iPad/iPhone; visionOS has no monitor and always offers
+    /// it); an already-held lock keeps Unlock available. Unlocking asks for
+    /// the keyboard back, exactly like the padlock's short press.
     func toggleKeyboardLock() {
         guard let terminalView else { return }
         if KeyboardLock.shared.isLocked {
@@ -372,8 +452,6 @@ final class TerminalSessionController {
             TerminalFocusArbiter.lock(terminalView)
         }
     }
-
-    #endif
 
     /// Arrange Keys — the key rail's / cluster's reorder mode, per tab like
     /// the message box and never persisted (the ORDER is, in
@@ -406,34 +484,47 @@ final class TerminalSessionController {
     private func beginTransportRun() {
         transportGeneration &+= 1
         let generation = transportGeneration
-        let output = TerminalOutputCoalescer { [weak self] bytes in
-            guard let self, self.transportGeneration == generation else { return }
-            self.feed(bytes)
+        for screen in screens {
+            // A new run attaches at this tab's own size.
+            screen.setGridPin(nil)
+            screen.outputCoalescer = makeOutputCoalescer(for: screen, generation: generation)
         }
-        outputCoalescer = output
         runTask?.cancel()
         runTask = Task { [weak self] in
             guard let self else { return }
-            await self.run(generation: generation, output: output)
+            await self.run(generation: generation)
             if self.transportGeneration == generation {
                 self.runTask = nil
             }
         }
     }
 
-    private func run(
-        generation: Int,
-        output: TerminalOutputCoalescer
-    ) async {
-        if host.useMosh {
-            await runMosh(generation: generation, output: output)
-        } else {
-            await runSSH(generation: generation, output: output)
+    private func makeOutputCoalescer(
+        for screen: TerminalScreen, generation: Int
+    ) -> TerminalOutputCoalescer {
+        TerminalOutputCoalescer { [weak self, weak screen] bytes in
+            guard let self, let screen, self.transportGeneration == generation else { return }
+            self.feed(bytes, to: screen)
         }
     }
 
+    private func run(generation: Int) async {
+        if let rex = route.rexTarget {
+            await runRex(rex, generation: generation)
+        } else if let screen = screens.first, let output = screen.outputCoalescer {
+            if ridesMosh {
+                await runMosh(generation: generation, screen: screen, output: output)
+            } else {
+                await runSSH(generation: generation, screen: screen, output: output)
+            }
+        }
+    }
+
+    /// The tab's own SSH connection, carrying a PTY that runs the route's
+    /// remote command. The connection stays this tab's exec surface.
     private func runSSH(
         generation: Int,
+        screen: TerminalScreen,
         output: TerminalOutputCoalescer
     ) async {
         let secrets = await HostSecrets.loadOffMain(for: host)
@@ -444,7 +535,7 @@ final class TerminalSessionController {
             return
         }
         self.connection = connection
-        transport = connection
+        self.transport = connection
         do {
             try await connection.connect()
             try Task.checkCancellation()
@@ -454,30 +545,24 @@ final class TerminalSessionController {
                 await connection.close()
                 return
             }
-            let openedSize = TerminalSize(cols: lastCols, rows: lastRows)
-            // Armed before the PTY opens so the first output chunk is already
-            // scanned; an rc-time oh-my-zsh update prompt swallows the
-            // injected handoff line and needs a re-type (ShellHandoff).
+            let openedSize = screen.openingSize
+            // Armed before the PTY opens so the first output chunk is
+            // already scanned; an rc-time oh-my-zsh update prompt swallows
+            // the injected handoff line and needs a re-type (ShellHandoff).
             handoffWatch = route.remoteCommand == nil
                 ? nil
                 : ShellHandoff.UpdatePromptWatch()
             try await connection.openShell(
                 command: route.remoteCommand,
-                cols: openedSize.cols,
-                rows: openedSize.rows,
+                cols: openedSize.cols, rows: openedSize.rows,
                 onData: { data in
                     output.append(data)
                 },
                 onClose: { [weak self] reason in
                     Task { @MainActor [weak self] in
-                        self?.handleClose(
-                            reason: reason,
-                            generation: generation,
-                            output: output
-                        )
+                        self?.handleClose(reason: reason, generation: generation)
                     }
-                }
-            )
+                })
             try Task.checkCancellation()
             guard transportGeneration == generation,
                   self.connection === connection
@@ -485,7 +570,7 @@ final class TerminalSessionController {
                 await connection.close()
                 return
             }
-            startTransportPumps(for: connection, openedAt: openedSize)
+            startTransportPumps(for: connection, screen: screen, openedAt: openedSize)
             markLive()
             startDirectShellMonitoring()
         } catch {
@@ -498,11 +583,114 @@ final class TerminalSessionController {
                 ?? String(localized: "Couldn't reach \(host.name). \(error.localizedDescription)")
             status = .ended(message)
             self.connection = nil
-            transport = nil
-            outputCoalescer = nil
+            self.transport = nil
+            screen.outputCoalescer = nil
             handoffWatch = nil
             considerAutomaticResume()
         }
+    }
+
+    /// A Rex tab: the tab's own SSH connection carries no PTY at all, only
+    /// byte pipes to the Rex server — one for control and one per pane —
+    /// with `RexSession` speaking its protocol over them. The connection
+    /// stays this tab's exec surface, and closing the session closes it.
+    private func runRex(
+        _ target: (sessionID: String, blockID: String?), generation: Int
+    ) async {
+        let secrets = await HostSecrets.loadOffMain(for: host)
+        guard transportGeneration == generation, !Task.isCancelled else { return }
+        let connection = SSHConnection(host: host, secrets: secrets)
+        guard transportGeneration == generation else {
+            await connection.close()
+            return
+        }
+        let rex = RexSession(
+            connection: connection,
+            sessionID: target.sessionID,
+            blockID: rexBlockID ?? target.blockID,
+            clientVersion: Bundle.main.object(
+                forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+        )
+        self.connection = connection
+        await runPanes(over: rex, generation: generation) { events in
+            try await connection.connect()
+            try Task.checkCancellation()
+            try await rex.open(events: events)
+        }
+    }
+
+    /// One run of a paned transport, whichever backend's: hand it the tab's
+    /// side of `PaneEvents`, let `open` bring it up, and go live. Nothing in
+    /// here is Rex's — a second paned backend makes its transport and calls
+    /// this.
+    private func runPanes(
+        over transport: any PanedTerminalTransport, generation: Int,
+        open: (PaneEvents) async throws -> Void
+    ) async {
+        let router = PaneOutputRouter()
+        panedTransport = transport
+        paneOutput = router
+        startPaneCommandPump(for: transport)
+        do {
+            try await open(PaneEvents(
+                arrange: { [weak self] arrangement in
+                    await MainActor.run { [weak self] in
+                        self?.applyArrangement(arrangement, generation: generation) ?? [:]
+                    }
+                },
+                output: { pane, data in
+                    router.append(data, to: pane)
+                },
+                grid: { [weak self] pane, grid in
+                    await MainActor.run { [weak self] in
+                        guard let self, self.transportGeneration == generation,
+                              let screen = self.screen(for: pane)
+                        else { return }
+                        // What was written for the old grid is parsed at
+                        // the old grid.
+                        screen.outputCoalescer?.flush()
+                        screen.setGridPin(grid)
+                    }
+                },
+                close: { [weak self] reason in
+                    Task { @MainActor [weak self] in
+                        self?.handleClose(reason: reason, generation: generation)
+                    }
+                }))
+            try Task.checkCancellation()
+            guard transportGeneration == generation, panedTransport === transport else {
+                await transport.close()
+                return
+            }
+            markLive()
+            #if DEBUG
+            debugAutoSwitchRexTerminal()
+            debugAutoPaneShortcuts()
+            #endif
+        } catch {
+            await transport.close()
+            guard transportGeneration == generation, panedTransport === transport
+            else { return }
+            captureKeyPassphraseChallenge(from: error)
+            let message = (error as? RexSession.Failure)?.message
+                ?? (error as? SSHConnectionError)?.userMessage(host: host)
+                ?? String(localized: "Couldn't reach \(host.name). \(error.localizedDescription)")
+            status = .ended(message)
+            connection = nil
+            endPanedRun()
+            considerAutomaticResume()
+        }
+    }
+
+    /// Runs this tab over a paned transport a test made, with no SSH
+    /// connection under it: everything from the arrangement down — screens,
+    /// focus, the pumps, the commands — is the real thing.
+    func runPanesForTesting(
+        over transport: any PanedTerminalTransport,
+        open: (PaneEvents) async throws -> Void
+    ) async {
+        transportGeneration &+= 1
+        await runPanes(over: transport, generation: transportGeneration, open: open)
     }
 
     /// mosh: a transient SSH connection launches mosh-server, then the
@@ -511,6 +699,7 @@ final class TerminalSessionController {
     /// exec surface.
     private func runMosh(
         generation: Int,
+        screen: TerminalScreen,
         output: TerminalOutputCoalescer
     ) async {
         contactLost = false
@@ -525,7 +714,7 @@ final class TerminalSessionController {
             )
             try Task.checkCancellation()
             guard transportGeneration == generation else { return }
-            let openedSize = TerminalSize(cols: lastCols, rows: lastRows)
+            let openedSize = TerminalGrid(cols: screen.cols, rows: screen.rows)
             let session = try MoshSession(
                 target: target,
                 cols: openedSize.cols,
@@ -539,11 +728,7 @@ final class TerminalSessionController {
                 },
                 onClose: { [weak self] reason in
                     Task { @MainActor [weak self] in
-                        self?.handleClose(
-                            reason: reason,
-                            generation: generation,
-                            output: output
-                        )
+                        self?.handleClose(reason: reason, generation: generation)
                     }
                 },
                 onContact: { [weak self] lost in
@@ -560,7 +745,7 @@ final class TerminalSessionController {
                 await session.close()
                 return
             }
-            startTransportPumps(for: session, openedAt: openedSize)
+            startTransportPumps(for: session, screen: screen, openedAt: openedSize)
             markLive()
             startDirectShellMonitoring()
         } catch {
@@ -582,25 +767,16 @@ final class TerminalSessionController {
             status = .ended(message)
             moshSession = nil
             transport = nil
-            outputCoalescer = nil
+            screen.outputCoalescer = nil
             considerAutomaticResume()
         }
     }
 
-    /// Pinged after every coalesced output flush reaches the terminal —
-    /// visionOS's gaze link-hover overlay debounces its region rebuild
-    /// behind this, so affordances follow the screen without polling.
-    var onOutputFlushed: (() -> Void)?
-
-    private func feed(_ bytes: [UInt8]) {
+    private func feed(_ bytes: [UInt8], to screen: TerminalScreen) {
         statsBytesIn += bytes.count
-        scanForSwallowedHandoff(bytes)
-        guard let terminalView else {
-            pendingOutput.append(contentsOf: bytes)
-            return
-        }
-        terminalView.feed(byteArray: bytes[...])
-        onOutputFlushed?()
+        // Only a PTY has a handoff line to lose.
+        if screen.paneID == nil { scanForSwallowedHandoff(bytes) }
+        screen.feed(bytes)
     }
 
     /// Modern oh-my-zsh drains all buffered stdin before blocking on its
@@ -624,9 +800,7 @@ final class TerminalSessionController {
             // keystrokes; before the pump exists (output can arrive while
             // runSSH is still between openShell and startTransportPumps),
             // write straight to the transport — the user can't type yet.
-            if let inputContinuation {
-                inputContinuation.yield(payload)
-            } else if let transport {
+            if screens.first?.send(payload) != true, let transport {
                 Task { try? await transport.write(payload) }
             }
         }
@@ -636,7 +810,11 @@ final class TerminalSessionController {
     /// shells. SSH shells use the foreground process probe as authority, but
     /// retaining Claude/Codex's explicit title here prevents a very fast turn
     /// from erasing the identifying idle title before the next poll.
-    func terminalTitleChanged(_ title: String) {
+    func terminalTitleChanged(_ title: String, from screen: TerminalScreen? = nil) {
+        let screen = screen ?? activeScreen
+        screen?.title = title
+        // The tab's title is the pane's the keyboard is on.
+        guard screen === activeScreen else { return }
         remoteTitle = title
         guard route.sessionName == nil else { return }
         guard title != lastTerminalTitleProcessedForAgentHint else { return }
@@ -644,7 +822,7 @@ final class TerminalSessionController {
         if let hint = AgentSignature.classifyTerminal(
             title: title,
             visibleLines: terminalScreenSnapshot().lines,
-            isAlternateScreen: terminalView?.getTerminal().isCurrentBufferAlternate ?? false,
+            isAlternateScreen: terminalView?.isAlternateBufferActive ?? false,
             previous: directShellAgent ?? terminalAgentHint
         ) {
             terminalAgentHint = hint
@@ -653,18 +831,15 @@ final class TerminalSessionController {
         }
     }
 
-    private func handleClose(
-        reason: String?,
-        generation: Int,
-        output: TerminalOutputCoalescer
-    ) {
+    private func handleClose(reason: String?, generation: Int) {
         // Network callbacks enqueue bytes synchronously before their close
         // callback. Flush that final tail before ending the run, then ignore a
-        // late close from any superseded transport generation.
-        output.flush()
+        // late close from any superseded transport generation — or a second
+        // one from a run that has already been ended.
         guard transportGeneration == generation,
-              outputCoalescer === output
+              transport != nil || panedTransport != nil
         else { return }
+        for screen in screens { screen.outputCoalescer?.flush() }
         stopTransportPumps()
         stopDirectShellMonitoring()
         endStatsRun(reason: reason)
@@ -675,11 +850,16 @@ final class TerminalSessionController {
         status = .ended(reason)
         contactLost = false
         let endedTransport = transport
+        let endedPanes = panedTransport
         transport = nil
         connection = nil
         moshSession = nil
-        outputCoalescer = nil
-        Task { await endedTransport?.close() }
+        endPanedRun()
+        for screen in screens { screen.outputCoalescer = nil }
+        Task {
+            await endedTransport?.close()
+            await endedPanes?.close()
+        }
         considerAutomaticResume()
     }
 
@@ -797,16 +977,7 @@ final class TerminalSessionController {
     }
 
     private func terminalScreenSnapshot() -> (lines: [String], isAlternate: Bool) {
-        guard let terminalView else { return ([], false) }
-        let terminal = terminalView.getTerminal()
-        let rows = max(0, terminal.getDims().rows)
-        let lines = (0..<rows).compactMap { row in
-            terminal.getLine(row: row)?.translateToString(
-                trimRight: true,
-                skipNullCellsFollowingWide: true
-            )
-        }
-        return (lines, terminal.isCurrentBufferAlternate)
+        activeScreen?.snapshot() ?? ([], false)
     }
 
     private func stopDirectShellMonitoring() {
@@ -824,74 +995,228 @@ final class TerminalSessionController {
         directShellAttentionTracker.reset()
     }
 
-    // MARK: Input pump
+    // MARK: Pumps
 
-    /// Keystrokes flow through one AsyncStream consumed by a single task —
-    /// yield order is preserved, unlike a Task spawned per keystroke, and
-    /// the terminal thread never waits on the network.
-    private func startInputPump(for transport: any TerminalTransport) {
-        stopInputPump()
-        let (stream, continuation) = AsyncStream.makeStream(of: Data.self)
-        inputContinuation = continuation
-        inputTask = Task {
-            for await chunk in stream {
-                try? await transport.write(chunk)
-            }
-        }
-    }
-
-    private func stopInputPump() {
-        inputContinuation?.finish()
-        inputContinuation = nil
-        inputTask?.cancel()
-        inputTask = nil
-    }
-
-    /// Resize callbacks can arrive for every layout pass while a window is
-    /// dragged. Keep only the newest dimensions and let one ordered task talk
-    /// to the transport, rather than minting an unbounded task per callback.
-    private func startResizePump(for transport: any TerminalTransport) {
-        stopResizePump()
-        let (stream, continuation) = AsyncStream.makeStream(
-            of: TerminalSize.self,
-            bufferingPolicy: .bufferingNewest(1)
-        )
-        resizeContinuation = continuation
-        resizeTask = Task {
-            for await size in stream {
-                try? await transport.resize(cols: size.cols, rows: size.rows)
-            }
-        }
-    }
-
-    private func stopResizePump() {
-        resizeContinuation?.finish()
-        resizeContinuation = nil
-        resizeTask?.cancel()
-        resizeTask = nil
-    }
-
+    /// Each screen pumps its own input and size (`TerminalScreen
+    /// .startPumps`); this ties the one screen of a single-stream tab to
+    /// its transport.
     private func startTransportPumps(
         for transport: any TerminalTransport,
-        openedAt size: TerminalSize
+        screen: TerminalScreen,
+        openedAt size: TerminalGrid
     ) {
-        startInputPump(for: transport)
-        startResizePump(for: transport)
-        // Layout may have changed while the handshake/open call was awaiting;
-        // reconcile once with the newest geometry before normal coalescing.
-        if lastCols != size.cols || lastRows != size.rows {
-            resizeContinuation?.yield(TerminalSize(cols: lastCols, rows: lastRows))
-        }
+        screen.startPumps(
+            write: { try await transport.write($0) },
+            resize: { try await transport.resize(cols: $0.cols, rows: $0.rows) },
+            openedAt: size)
     }
 
     private func stopTransportPumps() {
-        stopInputPump()
-        stopResizePump()
+        for screen in screens { screen.stopPumps() }
+    }
+
+    // MARK: Panes
+
+    /// A paned transport said how the tab's panes are arranged. Screens are
+    /// made for the panes that are new and dropped for the ones that left,
+    /// the surface lays the result out, and the grid each pane measured goes
+    /// back: the transport opens a new pane's terminal at it.
+    private func applyArrangement(
+        _ arrangement: PaneArrangement, generation: Int
+    ) -> [PaneID: TerminalGrid] {
+        guard transportGeneration == generation,
+              let panedTransport, let paneOutput
+        else { return [:] }
+        var arranged: [TerminalScreen] = []
+        for pane in arrangement.layout.panes {
+            let screen = screen(for: pane) ?? TerminalScreen(paneID: pane)
+            if screen.outputCoalescer == nil {
+                screen.outputCoalescer = makeOutputCoalescer(for: screen, generation: generation)
+            }
+            paneOutput.set(screen.outputCoalescer, for: pane)
+            if !screen.hasPumps {
+                // From the arrangement on, not from the attach: a pane's
+                // size has to reach the transport while its terminal is
+                // still being opened.
+                screen.startPumps(
+                    write: { try await panedTransport.write($0, to: pane) },
+                    resize: {
+                        try await panedTransport.resize(pane: pane, cols: $0.cols, rows: $0.rows)
+                    },
+                    openedAt: screen.openingSize)
+            }
+            arranged.append(screen)
+        }
+        let retired = screens.filter { screen in !arranged.contains { $0 === screen } }
+        screens = arranged
+        paneLayout = arrangement.layout
+        let focused = arrangement.focus.flatMap { screen(for: $0) }
+        if let focused {
+            activate(focused)
+        } else if activeScreen.map({ active in !arranged.contains { $0 === active } }) ?? true {
+            activate(arranged.first)
+        }
+        // A zoom needs its pane, and others for it to cover.
+        if let zoomed = zoomedPaneID,
+           arranged.count < 2 || !arranged.contains(where: { $0.paneID == zoomed }) {
+            zoomedPaneID = nil
+        }
+        for screen in retired {
+            screen.stopPumps()
+            screen.outputCoalescer = nil
+            if let pane = screen.paneID { paneOutput.set(nil, for: pane) }
+            if let view = screen.terminalView { Self.closeTerminalUI(view) }
+        }
+        // The surface lays the panes out NOW, so the grids below are the
+        // ones the panes really have.
+        onPaneLayoutChanged?()
+        return Dictionary(uniqueKeysWithValues: arranged.compactMap { screen in
+            screen.paneID.map { ($0, screen.openingSize) }
+        })
+    }
+
+    /// Moves the tab's focus to another of its screens. Everything that
+    /// reads `terminalView` follows; the keyboard itself is the surface's
+    /// to move (it knows whether this tab is the one on screen).
+    private func activate(_ screen: TerminalScreen?) {
+        guard screen !== activeScreen else { return }
+        // A selection in progress belongs to the pane being left — and so
+        // does a zoom: the pane the keyboard goes to has to be on screen.
+        setSelectTextModeUIActive(false)
+        if zoomedPaneID != nil, zoomedPaneID != screen?.paneID { zoomedPaneID = nil }
+        activeScreen = screen
+        terminalView = screen?.terminalView
+        activePaneID = screen?.paneID
+        remoteTitle = screen?.title ?? ""
+        guard let pane = screen?.paneID else { return }
+        if route.rexTarget != nil { rexBlockID = pane.rawValue }
+        paneCommands?.yield(.focus(pane))
+    }
+
+    /// The person put the keyboard on one of the tab's panes.
+    func focusPane(_ pane: PaneID) {
+        guard let screen = screen(for: pane) else { return }
+        let wasZoomed = zoomedPaneID
+        activate(screen)
+        if zoomedPaneID != wasZoomed { onPaneLayoutChanged?() }
+    }
+
+    /// One row of a paned tab's shortcut panel, on the pane the keyboard is
+    /// on.
+    func performPaneShortcut(_ shortcut: PaneShortcut) {
+        guard status == .live, let pane = activePaneID else { return }
+        guard let command = shortcut.command(on: pane) else {
+            togglePaneZoom()
+            return
+        }
+        paneCommands?.yield(command)
+    }
+
+    /// Draws the pane the keyboard is on alone, or all of them again. A
+    /// tab with one pane has nothing to zoom; leaving a zoom always works,
+    /// whatever state the link is in.
+    func togglePaneZoom() {
+        if zoomedPaneID != nil {
+            zoomedPaneID = nil
+        } else {
+            guard let pane = activePaneID, screens.count > 1 else { return }
+            zoomedPaneID = pane
+        }
+        onPaneLayoutChanged?()
+    }
+
+    /// A divider was dragged. The tab's own layout moves at once — the drag
+    /// has to follow the finger — and the transport is asked to make it so;
+    /// what it answers arrives as an arrangement like any other.
+    func setPaneRatio(_ ratio: Double, ofSplit splitID: String) {
+        guard status == .live, let layout = paneLayout,
+              layout.split(withID: splitID) != nil
+        else { return }
+        let moved = layout.settingRatio(ratio, ofSplit: splitID)
+        guard moved != layout else { return }
+        paneLayout = moved
+        onPaneLayoutChanged?()
+        paneCommands?.yield(.setRatio(ratio, splitID: splitID))
+    }
+
+    /// Commands go to the transport in the order they were made — a drag
+    /// makes dozens, and the last one has to be the one that stands.
+    private func startPaneCommandPump(for transport: any PanedTerminalTransport) {
+        stopPaneCommandPump()
+        let (commands, continuation) = AsyncStream.makeStream(of: PaneCommand.self)
+        paneCommands = continuation
+        paneCommandTask = Task { [weak self] in
+            for await command in commands {
+                do {
+                    try await transport.perform(command)
+                } catch {
+                    self?.paneCommandFailed(command, error)
+                }
+            }
+        }
+    }
+
+    private func stopPaneCommandPump() {
+        paneCommands?.finish()
+        paneCommands = nil
+        paneCommandTask?.cancel()
+        paneCommandTask = nil
+    }
+
+    /// A split or a close the backend refused is said on the pane; a focus
+    /// or a ratio it would not take needs no words — the next arrangement
+    /// shows what stands.
+    private func paneCommandFailed(_ command: PaneCommand, _ error: Error) {
+        let reason = (error as? RexSession.Failure)?.message ?? error.localizedDescription
+        switch command {
+        case .split:
+            showHistoryNotice(String(localized: "Couldn't split the pane. \(reason)"))
+        case .close:
+            showHistoryNotice(String(localized: "Couldn't close the pane. \(reason)"))
+        case .newWindow:
+            // "Tab" is the one paned backend's word for it (Rex).
+            showHistoryNotice(String(localized: "Couldn't open a new tab. \(reason)"))
+        case .setRatio, .focus:
+            break
+        }
+    }
+
+    /// What a paned run leaves behind when it ends, however it ends. The
+    /// screens stay: a reconnect draws the same panes again, each over what
+    /// it last showed.
+    private func endPanedRun() {
+        panedTransport = nil
+        paneOutput?.removeAll()
+        paneOutput = nil
+        stopPaneCommandPump()
+        stopTransportPumps()
     }
 
     // MARK: Terminal view events
 
-    func sendInput(_ data: Data) {
+    /// What the emulator said by itself — an answer to a query in the
+    /// output (device attributes, cursor position, a color), or a report of
+    /// its own focus or size — rather than anything a person did.
+    ///
+    /// On a PTY that is input like any other: this emulator is the only
+    /// terminal the program has. A Rex terminal lives on the Rex server,
+    /// which parses the same output and answers it there, so none of it is
+    /// forwarded. Forwarding did two things, both measured: the program
+    /// read every answer twice, and — since a write is what claims a Rex
+    /// terminal's size (`RexSession`) — a tab nobody was touching took the
+    /// terminal back from whoever was using it in Rex, each time the
+    /// program asked something. A program that asks on every resize made
+    /// that a loop: the two clients traded the size for as long as the
+    /// other kept claiming it.
+    func sendTerminalReport(_ data: Data, from screen: TerminalScreen? = nil) {
+        guard route.rexTarget == nil else { return }
+        sendInput(data, from: screen)
+    }
+
+    /// `screen` is the emulator the input came out of; nil is the one the
+    /// keyboard is on, which is what every caller that is not an emulator
+    /// means.
+    func sendInput(_ data: Data, from screen: TerminalScreen? = nil) {
         guard status == .live else { return }
         // While the jump search pages the remote transcript, a keystroke
         // would interleave with the automated PgUp stream — the FINDING veil
@@ -912,7 +1237,7 @@ final class TerminalSessionController {
             if !tmuxCopyModeUIActive { return }
         }
         statsBytesOut += data.count
-        inputContinuation?.yield(data)
+        (screen ?? activeScreen)?.send(data)
         // Both the app-owned DONE action and a hardware/software Escape key
         // travel through this same delegate path. Restore normal tmux mouse
         // reporting only after the cancel byte has joined the ordered pump.
@@ -928,6 +1253,7 @@ final class TerminalSessionController {
         switch item.payload {
         case .tmux(let shortcut): performTmuxShortcut(shortcut)
         case .herdr(let shortcut): performHerdrShortcut(shortcut)
+        case .pane(let shortcut): performPaneShortcut(shortcut)
         }
     }
 
@@ -1002,10 +1328,16 @@ final class TerminalSessionController {
         else { return }
         selectTextClampGeneration &+= 1
         let generation = selectTextClampGeneration
-        let command = switch backend {
+        // nil where there is no pane-rect query to make: each pane of a Rex
+        // tab is its own emulator, so a selection cannot cross into a
+        // sibling and has nothing to be clamped away from. (The `.rex` arms
+        // further down only keep those switches total.)
+        let command: String? = switch backend {
         case .tmux: TmuxProbe.paneRectsCommand(sessionName: sessionName)
         case .herdr: HerdrProbe.snapshotCommand(sessionName: sessionName)
+        case .rex: nil
         }
+        guard let command else { return }
         // Cancellation ends a superseded fetch at its next sleep — resize
         // re-enters here on every keyboard show/hide, and the generation
         // check alone would let each stale task finish its execs first.
@@ -1031,7 +1363,8 @@ final class TerminalSessionController {
                     else { return nil }
                     let round = switch backend {
                     case .tmux: TmuxProbe.parsePaneRects(output)
-                    case .herdr: HerdrProbe.parsePaneScreenRects(output)
+                    case .herdr: HerdrProbe.parsePaneScreenRects(output, screenSize: screenSize)
+                    case .rex: [PaneScreenRectEntry]()
                     }
                     // No answer keeps the current no-clamp behavior;
                     // retrying could not distinguish a host without the
@@ -1063,6 +1396,8 @@ final class TerminalSessionController {
                 await executeControlCommand(HerdrProbe.focusPaneDirectionCommand(
                     sessionName: sessionName, direction: direction
                 ))
+            case .rex:
+                return
             }
         }
     }
@@ -1143,6 +1478,7 @@ final class TerminalSessionController {
         switch route.sessionBackend {
         case .tmux: await loadTmuxWindowList()
         case .herdr: await loadHerdrWorkspaceList()
+        case .rex: await loadRexTerminalList()
         case nil: nil
         }
     }
@@ -1151,8 +1487,94 @@ final class TerminalSessionController {
         switch route.sessionBackend {
         case .tmux: selectTmuxWindow(choice)
         case .herdr: selectHerdrWorkspace(choice)
+        case .rex: selectRexTerminal(choice)
         case nil: break
         }
+    }
+
+    #if DEBUG
+    private static var debugRexSwitchFired = false
+
+    /// `MULTIPLEX_AUTO_REX_SWITCH=<n>` — the headless stand-in for pressing
+    /// the REX panel's nth Switch Terminal row (simctl has no tap). It goes
+    /// through the same two entry points the panel uses, six seconds after
+    /// the first Rex tab goes live, once per process.
+    private func debugAutoSwitchRexTerminal() {
+        guard !Self.debugRexSwitchFired,
+              let raw = ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_REX_SWITCH"],
+              let position = Int(raw), position > 0
+        else { return }
+        Self.debugRexSwitchFired = true
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(6))
+            guard let self, let choices = await self.loadRexTerminalList(),
+                  choices.indices.contains(position - 1)
+            else { return }
+            self.selectRexTerminal(choices[position - 1])
+        }
+    }
+
+    private static var debugPaneActionsFired = false
+
+    /// `MULTIPLEX_AUTO_PANE_ACTIONS=splitRight,splitDown,ratio:0.3,focus:1,closePane`
+    /// — the headless stand-in for the pane rows of the REX panel, a
+    /// divider drag and a touch on a pane (simctl has neither tap nor
+    /// drag). Each step goes through the entry point its control uses, four
+    /// seconds apart, starting six seconds after the first Rex tab goes
+    /// live, once per process. `ratio:` moves the first split of the
+    /// layout; `focus:` puts the keyboard on the nth pane in reading order.
+    private func debugAutoPaneShortcuts() {
+        guard !Self.debugPaneActionsFired,
+              let raw = ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_PANE_ACTIONS"],
+              !raw.isEmpty
+        else { return }
+        Self.debugPaneActionsFired = true
+        let steps = raw.split(separator: ",").map(String.init)
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(6))
+            for step in steps {
+                guard let self, self.status == .live else { return }
+                if let shortcut = PaneShortcut(rawValue: step) {
+                    self.performPaneShortcut(shortcut)
+                } else if step.hasPrefix("ratio:"), let ratio = Double(step.dropFirst(6)),
+                          case .split(let split)? = self.paneLayout {
+                    self.setPaneRatio(ratio, ofSplit: split.id)
+                } else if step.hasPrefix("focus:"), let position = Int(step.dropFirst(6)),
+                          let panes = self.paneLayout?.panes,
+                          panes.indices.contains(position - 1) {
+                    self.focusPane(panes[position - 1])
+                    self.focusTerminal()
+                }
+                try? await Task.sleep(for: .seconds(4))
+            }
+        }
+    }
+    #endif
+
+    /// The REX panel's Switch Terminal rows: every terminal of this tab's
+    /// session, asked of the server over the tab's own control connection.
+    func loadRexTerminalList() async -> [TmuxWindowChoice]? {
+        guard status == .live, let rexSession else { return nil }
+        return await rexSession.terminalChoices()
+    }
+
+    /// Point this tab at another terminal of its session, in place. Unlike
+    /// tmux and herdr, where the remote client redraws itself, the tab's
+    /// own transport does the switching (`RexSession.showTerminal`): a
+    /// terminal among the panes on show takes the keyboard, one in another
+    /// window brings that window's panes in. Where the tab lands comes back
+    /// as an arrangement's focus (`activate`), and is remembered for this
+    /// controller's life so a reconnect comes back to the terminal the user
+    /// was on, not the one the tab opened with.
+    func selectRexTerminal(_ choice: TmuxWindowChoice) {
+        guard status == .live, let rexSession else { return }
+        Task { await rexSession.showTerminal(choice.tmuxID) }
+    }
+
+    /// The directory the pane the keyboard is on is working in.
+    private func rexWorkingDirectory() async -> String? {
+        guard let rexSession, let pane = activePaneID else { return nil }
+        return await rexSession.workingDirectory(of: pane)
     }
 
     /// The shortcut panel's window list, read through the control path so
@@ -1295,11 +1717,16 @@ final class TerminalSessionController {
     /// answers them); select-text has no remote listener, so its pans are
     /// suppressed outright — unless copy mode is active too and wins.
     private func applyTouchInteractionModes() {
-        guard let terminalView else { return }
-        terminalView.allowMouseReporting =
+        for screen in screens {
+            if let view = screen.terminalView { applyTouchInteractionModes(to: view) }
+        }
+    }
+
+    private func applyTouchInteractionModes(to view: TerminalView) {
+        view.allowMouseReporting =
             !(tmuxCopyModeUIActive || selectTextModeUIActive)
-        terminalView.forceRemoteCursorScroll = tmuxCopyModeUIActive
-        terminalView.suppressRemotePanScroll =
+        view.forceRemoteCursorScroll = tmuxCopyModeUIActive
+        view.suppressRemotePanScroll =
             selectTextModeUIActive && !tmuxCopyModeUIActive
     }
 
@@ -1702,12 +2129,11 @@ final class TerminalSessionController {
     }
     #endif
 
-    func terminalResized(cols: Int, rows: Int) {
-        guard cols != lastCols || rows != lastRows else { return }
-        lastCols = cols
-        lastRows = rows
-        guard status == .live else { return }
-        resizeContinuation?.yield(TerminalSize(cols: cols, rows: rows))
+    func terminalResized(cols: Int, rows: Int, of screen: TerminalScreen? = nil) {
+        guard let screen = screen ?? activeScreen,
+              screen.resized(cols: cols, rows: rows),
+              status == .live
+        else { return }
         // A resize relayouts the multiplexer's panes, so a select-text clamp
         // fetched for the old geometry is wrong — refetch (the generation
         // counter drops the stale answer if resizes storm).
@@ -1733,7 +2159,7 @@ final class TerminalSessionController {
     /// foreground cwd could be resolved. The chrome's FILE rule and the
     /// Talkback paperclip both read this.
     var canUploadFiles: Bool {
-        !host.useMosh && route.sessionBackend != nil
+        !ridesMosh && route.sessionBackend != nil
     }
 
     static let uploadUnavailableMessage =
@@ -1905,6 +2331,16 @@ final class TerminalSessionController {
                 TmuxProbe.gitWorktreeCheckCommand(directory: cwd)
             )) ?? ""
             return (cwd, TmuxProbe.parseDropDestination(check).insideGitWorktree)
+        case .rex:
+            // Rex answers over the tab's own control connection rather than
+            // an exec, and — like herdr — hands the path home as data, so
+            // the corral check is its own exec with it respliced.
+            guard let cwd = await rexWorkingDirectory()
+            else { return (nil, false) }
+            let check = (try? await connection.exec(
+                TmuxProbe.gitWorktreeCheckCommand(directory: cwd)
+            )) ?? ""
+            return (cwd, TmuxProbe.parseDropDestination(check).insideGitWorktree)
         case nil:
             return (nil, false)
         }
@@ -2027,7 +2463,7 @@ final class TerminalSessionController {
     @discardableResult
     func sendTalkback(submit: Bool) -> Bool {
         guard talkbackSendState == .ready else { return false }
-        let bracketed = terminalView?.getTerminal().bracketedPasteMode == true
+        let bracketed = terminalView?.terminalStateSnapshot().bracketedPasteMode == true
         let payload = TalkbackMessage.payload(
             body: talkback.text,
             paths: talkback.readyPaths,
@@ -2127,8 +2563,8 @@ final class TerminalSessionController {
     /// whether this pane claims the gesture. URLs confirm through the link
     /// sheet; path-shaped text (implicit detection matches those too) now
     /// confirms through the file-viewer sheet instead of falling to
-    /// selection; only what neither resolver accepts ($VAR/…, colon prose)
-    /// still declines into text selection.
+    /// selection; only what neither resolver accepts ($VAR/…, colon prose,
+    /// an agent's `/compact`) still declines into text selection.
     ///
     /// `rowFragments` is the match split at its hard-wrap seams (empty when
     /// it fit one row, or from callers without seam info — the debug hook,
@@ -2166,7 +2602,7 @@ final class TerminalSessionController {
             pendingActivation = .link(link)
             return true
         }
-        if let path = TerminalPathTarget.resolve(target) {
+        if let path = TerminalPathTarget.resolvePressed(target) {
             pendingActivation = .path(path)
             pathPressScreenCell = cell
             return true
@@ -2229,7 +2665,13 @@ final class TerminalSessionController {
             let output = (try? await connection.exec(
                 HerdrProbe.snapshotCommand(sessionName: sessionName)
             )) ?? ""
-            return HerdrProbe.parsePaneWorkingDirectory(output, atScreenCell: cell)
+            return HerdrProbe.parsePaneWorkingDirectory(
+                output, atScreenCell: cell, screenSize: screenSize
+            )
+        case .rex:
+            // A press lands in one pane's own emulator and moves the
+            // keyboard there first, so the pressed cell is always its.
+            return await rexWorkingDirectory()
         case nil:
             return nil
         }
@@ -2251,11 +2693,11 @@ final class TerminalSessionController {
         dropTask = nil
         dropClearTask?.cancel()
         dropState = nil
-        outputCoalescer?.flush()
+        for screen in screens { screen.outputCoalescer?.flush() }
         transportGeneration &+= 1
         runTask?.cancel()
         runTask = nil
-        outputCoalescer = nil
+        for screen in screens { screen.outputCoalescer = nil }
         stopTransportPumps()
         stopDirectShellMonitoring()
         endStatsRun(reason: nil)
@@ -2266,10 +2708,30 @@ final class TerminalSessionController {
         keyPassphraseChallenge = nil
         contactLost = false
         let transport = self.transport
+        let panes = panedTransport
         self.transport = nil
         self.connection = nil
         self.moshSession = nil
-        Task { await transport?.close() }
+        endPanedRun()
+        Task {
+            await transport?.close()
+            await panes?.close()
+        }
+        // Closing is final — this path never runs on a tab move — so release
+        // each view's frame driver and renderer: SwiftTerm 2 leaves both to
+        // an explicit owner call.
+        for screen in screens {
+            if let view = screen.terminalView { Self.closeTerminalUI(view) }
+        }
+    }
+
+    /// `updateUiClosed()` answers false while a Metal surface still has GPU
+    /// work in flight; it must be retried until the renderer lets go.
+    private static func closeTerminalUI(_ view: TerminalView, attempt: Int = 0) {
+        guard !view.updateUiClosed(), attempt < 20 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(50)) {
+            closeTerminalUI(view, attempt: attempt + 1)
+        }
     }
 
     /// The RECONNECT chip. The user is driving now, so their attempt also
@@ -2483,7 +2945,7 @@ final class TerminalSessionController {
 /// one compact byte array to SwiftTerm per short display interval. A terminal
 /// still parses every byte in order; only cross-thread hops and array copies
 /// are coalesced.
-private final class TerminalOutputCoalescer: @unchecked Sendable {
+final class TerminalOutputCoalescer: @unchecked Sendable {
     private struct State {
         var chunks: [Data] = []
         var byteCount = 0

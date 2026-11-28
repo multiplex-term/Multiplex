@@ -6,10 +6,10 @@ import Foundation
 /// Defaults were read from `herdr --default-config` and the split/detach
 /// bindings exercised against a real 0.7.5 TUI attach (2026-08-02); a
 /// same-burst prefix+key registers once the client is interactive.
-/// Deliberately curated small (user-trimmed 2026-08-02 and 2026-08-14): zoom,
-/// scrollback, rename-tab, pane/tab cycling, the workspace picker, and the
-/// sidebar toggle are herdr UI the TUI already surfaces — the panel carries
-/// only the commands touch actually needs.
+/// Deliberately curated small: zoom, scrollback, rename-tab, pane/tab cycling,
+/// and the workspace picker are herdr UI the TUI already surfaces — the panel
+/// carries only the commands touch actually needs. The sidebar toggle stays:
+/// the TUI has no tap target that collapses or expands it.
 /// Destructive commands are confirmed by our UI, then resolved and executed
 /// over the SSH control connection (`HerdrProbe.closeShortcutCommand`), so
 /// they follow herdr's server truth instead of a rebindable key and never
@@ -46,6 +46,7 @@ enum HerdrShortcut: String, CaseIterable, Identifiable, Sendable {
     case newWorkspace
     case renameWorkspace
     case closeWorkspace
+    case toggleSidebar
 
     var id: Self { self }
 
@@ -55,7 +56,7 @@ enum HerdrShortcut: String, CaseIterable, Identifiable, Sendable {
             .panes
         case .newTab, .closeTab:
             .tabs
-        case .newWorkspace, .renameWorkspace, .closeWorkspace:
+        case .newWorkspace, .renameWorkspace, .closeWorkspace, .toggleSidebar:
             .workspaces
         }
     }
@@ -70,6 +71,7 @@ enum HerdrShortcut: String, CaseIterable, Identifiable, Sendable {
         case .newWorkspace: String(localized: "New Workspace")
         case .renameWorkspace: String(localized: "Rename Workspace")
         case .closeWorkspace: String(localized: "Close Workspace")
+        case .toggleSidebar: String(localized: "Toggle Sidebar")
         }
     }
 
@@ -86,6 +88,7 @@ enum HerdrShortcut: String, CaseIterable, Identifiable, Sendable {
         case .newWorkspace: "new_workspace"
         case .renameWorkspace: "rename_workspace"
         case .closeWorkspace: "close_workspace"
+        case .toggleSidebar: "toggle_sidebar"
         }
     }
 
@@ -99,6 +102,7 @@ enum HerdrShortcut: String, CaseIterable, Identifiable, Sendable {
         case .newTab: "c"
         case .newWorkspace: "N"
         case .renameWorkspace: "W"
+        case .toggleSidebar: "b"
         case .closePane, .closeTab, .closeWorkspace: nil
         }
     }
