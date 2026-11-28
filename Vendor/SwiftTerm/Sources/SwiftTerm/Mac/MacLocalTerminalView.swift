@@ -16,6 +16,12 @@ private struct WeakLocalProcessInputReference {
 
 /// Delegate for the ``LocalProcessTerminalView`` class that is used to
 /// notify the user of process-related changes.
+///
+/// Some methods have a default implementation. If the host is a class
+/// hierarchy, implement each of these methods in the class that declares the
+/// conformance. A subclass can then override the method. If the base class
+/// does not implement the method, Swift calls the default. The method of the
+/// subclass does not run.
 @MainActor
 public protocol LocalProcessTerminalViewDelegate: AnyObject {
     /**
@@ -54,6 +60,40 @@ public protocol LocalProcessTerminalViewDelegate: AnyObject {
 
     /// Receives the current OSC 7501 records on the main actor.
     func programStatusChanged(source: TerminalView, records: [TerminalProgramStatus])
+
+    /// Tells the host that the user completed a selection gesture. See
+    /// ``TerminalViewDelegate/selectionFinished(source:)``.
+    func selectionFinished(source: TerminalView)
+
+    /// Tells the host that the view delivered a bell (BEL). It runs on the
+    /// main actor.
+    ///
+    /// The view calls this method for the `.sound`, `.visual` and
+    /// `.soundAndVisual` bell styles. It does not call it for `.none`.
+    ///
+    /// The host plays the sound. The view does not. The default implementation
+    /// calls ``TerminalView/playDefaultBell()`` if `style.playsSound` is true.
+    /// A host that shows a badge and also wants the sound does the same. A
+    /// host that wants no sound does not call it.
+    ///
+    /// If `style.flashes` is true, the view flashes after this call.
+    ///
+    /// The view drops a bell that comes less than 100 ms after the last
+    /// delivered bell. A burst of BEL characters thus gives one call. Do not
+    /// use the number of calls as a count of BEL characters.
+    ///
+    /// If the host is a class hierarchy, implement this method in the class
+    /// that declares the conformance. The protocol documentation gives the
+    /// reason.
+    ///
+    /// The name is different from ``TerminalViewDelegate/bell(source:)``. Thus
+    /// a type that conforms to the two protocols continues to compile. Its
+    /// `bell(source:)` for a different view does not become the answer here.
+    ///
+    /// - Parameters:
+    ///   - source: The view that rang the bell.
+    ///   - style: The bell style of the view. It is never `.none`.
+    func bellRang(source: LocalProcessTerminalView, style: BellStyle)
 
     // MARK: Kitty clipboard protocol, OSC 5522
     //
@@ -98,7 +138,14 @@ public protocol LocalProcessTerminalViewDelegate: AnyObject {
 
 public extension LocalProcessTerminalViewDelegate {
     func programStatusChanged(source: TerminalView, records: [TerminalProgramStatus]) {}
+    func selectionFinished(source: TerminalView) {}
     func processFailedToStart(source: TerminalView, error: LocalProcessError) {}
+
+    func bellRang(source: LocalProcessTerminalView, style: BellStyle) {
+        if style.playsSound {
+            source.playDefaultBell()
+        }
+    }
 
     func kittyClipboardCapabilities(source: TerminalView) -> KittyClipboardCapabilities {
         []
@@ -230,9 +277,17 @@ private final class LocalProcessTerminalViewProcessAdapter:
  * target in "Signing and Capabilities" the sandbox entirely.
  *
  * Note: instances of `LocalProcessTerminalView` will set the `TerminalView`'s `delegate`
- * property and capture and consume the messages.   The messages that are most likely needed for
- * consumer applications are reposted to the `LocalProcessTerminalViewDelegate` in
- * `processDelegate`.   If you override the `delegate` directly, you might inadvertently break
+ * property and capture and consume the messages.   The view sends the messages that a consumer
+ * application usually needs to the `LocalProcessTerminalViewDelegate` in `processDelegate`.
+ * These messages are:
+ *
+ * - the size, the title and the current directory
+ * - the bell
+ * - the program status and the end of a selection
+ * - a failed start and process termination
+ * - the Kitty clipboard requests
+ *
+ * If you override the `delegate` directly, you might inadvertently break
  * the internal working of `LocalProcessTerminalView`.   If you must change the `delegate`
  * make sure that you proxy the values in your implementation to the values set after initializing this instance.
  *
@@ -270,6 +325,7 @@ open class LocalProcessTerminalView: TerminalView, TerminalViewDelegate {
     func setup ()
     {
         terminalDelegate = self
+        resolvesLinksAgainstShellDirectory = true
         let adapter = LocalProcessTerminalViewProcessAdapter(
             renderOwner: renderOwner,
             frameSignal: frameSignal,
@@ -305,9 +361,8 @@ open class LocalProcessTerminalView: TerminalView, TerminalViewDelegate {
     }
     
     /**
-     * The `processDelegate` is used to deliver messages and information relevant to
-     * the process and the host: window size, title, the current directory, process
-     * termination, and the Kitty clipboard services that the host serves.
+     * The view sends the messages for the process and the host to the `processDelegate`.
+     * The class documentation gives the list of these messages.
      */
     public weak var processDelegate: LocalProcessTerminalViewDelegate? {
         didSet {
@@ -317,13 +372,39 @@ open class LocalProcessTerminalView: TerminalView, TerminalViewDelegate {
         }
     }
 
+    open override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil {
+            syncProcessWindowSizeIfNeeded()
+        }
+    }
+
+    open override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        if window != nil {
+            syncProcessWindowSizeIfNeeded()
+        }
+    }
+
+    /// A backing scale change can alter the pixel size without changing the
+    /// terminal's rows or columns. Keep the PTY size current in that case too.
+    private func syncProcessWindowSizeIfNeeded() {
+        guard let processAdapter, let process else { return }
+        var size = getWindowSize()
+        let previous = processAdapter.getWindowSize()
+        guard size.ws_row != previous.ws_row || size.ws_col != previous.ws_col ||
+              size.ws_xpixel != previous.ws_xpixel || size.ws_ypixel != previous.ws_ypixel else {
+            return
+        }
+        processAdapter.updateWindowSize(size)
+        _ = process.updateWindowSize(&size)
+    }
+
     /**
      * This method is invoked to notify the client of the new columsn and rows that have been set by the UI
      */
     public func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
-        var size = getWindowSize()
-        processAdapter.updateWindowSize(size)
-        _ = process.updateWindowSize(&size)
+        syncProcessWindowSizeIfNeeded()
         
         processDelegate?.sizeChanged (source: self, newCols: newCols, newRows: newRows)
     }
@@ -352,6 +433,24 @@ open class LocalProcessTerminalView: TerminalView, TerminalViewDelegate {
 
     public func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {
         processDelegate?.hostCurrentDirectoryUpdate(source: source, directory: directory)
+    }
+
+    /// Sends each delivered bell to
+    /// ``LocalProcessTerminalViewDelegate/bellRang(source:style:)``.
+    ///
+    /// With no `processDelegate`, the view plays the default bell if
+    /// `style.playsSound` is true.
+    ///
+    /// A subclass can override this method to get each bell. A delegate that
+    /// replaces `terminalDelegate` calls this method to keep the forward.
+    open func bell(source: TerminalView, style: BellStyle) {
+        guard let processDelegate else {
+            if style.playsSound {
+                playDefaultBell()
+            }
+            return
+        }
+        processDelegate.bellRang(source: self, style: style)
     }
 
     // MARK: Kitty clipboard protocol, forwarded to the processDelegate
@@ -394,11 +493,25 @@ open class LocalProcessTerminalView: TerminalView, TerminalViewDelegate {
     }
 
     /**
-     * Invoked when the user activates a link, override to handle the link yourself
+     * Invoked when the user activates a link. Override to handle the link yourself.
+     *
+     * `request.link` is untrusted terminal output. Call `request.openDefault(_:)`
+     * to check it with SwiftTerm's policy and open it. The default implementation
+     * checks the link and calls ``requestOpenLink(source:link:params:)`` with
+     * the approved URL.
      */
+    open func requestOpenLink (source: TerminalView, request: TerminalLinkRequest)
+    {
+        source.requestOpenLinkWithCheckedURL(request, delegate: self)
+    }
+
+    /**
+     * Invoked with a checked link from ``requestOpenLink(source:request:)``.
+     */
+    @available(*, deprecated, message: "Override requestOpenLink(source:request:)")
     open func requestOpenLink (source: TerminalView, link: String, params: [String:String])
     {
-        openLink (link)
+        source.openLinkFromDelegate(link)
     }
 
     /**
@@ -467,10 +580,15 @@ open class LocalProcessTerminalView: TerminalView, TerminalViewDelegate {
     open func programStatusChanged(source: TerminalView, records: [TerminalProgramStatus]) {
         processDelegate?.programStatusChanged(source: source, records: records)
     }
+
+    open func selectionFinished(source: TerminalView) {
+        processDelegate?.selectionFinished(source: source)
+    }
     
-    /**
-     * Implements the LocalProcessDelegate.dataReceived method
-     */
+    /// Left over from SwiftTerm 1.0, when this view was the process delegate.
+    /// Output is now parsed on the I/O thread without calling this method, so
+    /// it is unavailable to make an override a compile error, not a no-op.
+    @available(*, unavailable, message: "LocalProcessTerminalView parses process output on the I/O thread and never calls this method. Use setProcessOutputHandler(_:) to observe output batches, or run your own LocalProcess with a LocalProcessDelegate to handle the bytes.")
     open func dataReceived(slice: ArraySlice<UInt8>) {
         feed (byteArray: slice)
     }

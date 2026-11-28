@@ -81,23 +81,78 @@ public protocol TerminalViewDelegate: AnyObject {
     /**
      * Invoked when the user activates a link (click on macOS, tap on iOS/visionOS).
      *
-     * Explicit OSC 8 links can provide key/value metadata in `params`. Implicit URL
-     * detection uses an empty `params` dictionary.
+     * `request.link` is the text from the terminal output, unchanged, and it is
+     * untrusted. `request.isExplicit` tells an OSC 8 hyperlink from a detected link.
      *
-     * On macOS, a default implementation opens the URL via `NSWorkspace.shared.open`.
-     * On iOS/visionOS, implement this method to decide how to handle navigation.
+     * On macOS, `request.openDefault(_:)` checks the link and opens it through
+     * `NSWorkspace.shared.open`. It blocks unsafe local files and asks for
+     * confirmation before custom URL schemes. OSC 8 targets must have a scheme.
+     * You can call it later, for example after an async step, and with a rewrite
+     * of the link, for example a relative path that you resolved.
+     * A later call uses the shell's current directory at that time. Resolve a
+     * relative path first if it must refer to the file at click time. If your
+     * app opens the link itself, it must check the untrusted target.
+     *
+     * The default implementation calls ``requestOpenLink(source:link:params:)``.
+     * On macOS, it checks the link first and gives that method the approved URL.
+     * On iOS/visionOS, it gives that method the original link.
+     * On iOS/visionOS, implement this method to handle link taps. Without an
+     * implementation, a tap on a link does nothing.
+     * - Parameter source: the terminalview that called this method
+     * - Parameter request: the link, its OSC 8 parameters, and how it was activated
+     */
+    func requestOpenLink (source: TerminalView, request: TerminalLinkRequest)
+
+    /**
+     * Invoked when the user activates a link (click on macOS, tap on iOS/visionOS).
+     *
+     * SwiftTerm calls this method only from the default implementation of
+     * ``requestOpenLink(source:request:)``.
+     *
+     * On macOS, the view checks terminal links before this call. It blocks unsafe
+     * local files and asks for confirmation before custom URL schemes. The link
+     * is an absolute URL; local paths are canonicalized. The default handler opens
+     * the checked URL through `NSWorkspace.shared.open`.
+     * On iOS/visionOS, `link` is the text from the terminal output, unchanged.
      * - Parameter source: the terminalview that called this method
      * - Parameter link: the string that was encoded as a link by the client application, typically a url,
      * but could be anything, and could be used to communicate by the embedded application and the host
      * - Parameter params: the specification allows for key/value pairs to be provided, this contains the
      * key and value pairs that were provided
      */
+    @available(*, deprecated, message: "Implement requestOpenLink(source:request:)")
     func requestOpenLink (source: TerminalView, link: String, params: [String:String])
     
     /**
      * This method will be invoked when the host beeps.
+     *
+     * The default implementation of ``bell(source:style:)`` calls this method
+     * for the `.sound` and `.soundAndVisual` bell styles. The default
+     * implementation of this method calls `TerminalView.playDefaultBell()`.
      */
     func bell (source: TerminalView)
+
+    /// Tells the delegate that the view delivered a bell (BEL). It runs on
+    /// the main actor.
+    ///
+    /// The view calls this method for the `.sound`, `.visual` and
+    /// `.soundAndVisual` bell styles. It does not call it for `.none`.
+    ///
+    /// The delegate plays the sound. The view does not. The default
+    /// implementation calls ``bell(source:)`` if `style.playsSound` is true.
+    /// A delegate that implements this method and wants the default sound
+    /// calls `source.playDefaultBell()`.
+    ///
+    /// If `style.flashes` is true, the view flashes after this call.
+    ///
+    /// The view drops a bell that comes less than 100 ms after the last
+    /// delivered bell. A burst of BEL characters thus gives one call. Do not
+    /// use the number of calls as a count of BEL characters.
+    ///
+    /// - Parameters:
+    ///   - source: The view that rang the bell.
+    ///   - style: The bell style of the view. It is never `.none`.
+    func bell (source: TerminalView, style: BellStyle)
     
     /**
      * This method is invoked when the client application has issued a OSC 52
@@ -193,10 +248,36 @@ public protocol TerminalViewDelegate: AnyObject {
     /// only one the program has. A host whose far side keeps a terminal of
     /// its own and answers there must not forward these as well.
     func sendTerminalReport(source: TerminalView, data: ArraySlice<UInt8>)
+    /// Tells the host that the user completed a selection gesture.
+    ///
+    /// The view calls this once at the end of a gesture that left a selection
+    /// that is not empty: a drag, a word or line selection, a selection
+    /// extension, or the Select All command. The view does not call it during
+    /// the drag, and does not call it for selections that the program, the
+    /// search functions or the host API make.
+    ///
+    /// Each click of a multiple click is a gesture, and the view does not
+    /// wait for a possible subsequent click. Thus a triple-click gives two
+    /// calls: one for the word after the second click, and one for the row
+    /// after the third click.
+    ///
+    /// Use ``TerminalView/getSelection()`` to get the text. The call occurs
+    /// with any value of ``TerminalView/copyOnSelect``, thus a host can keep
+    /// that property at ``CopyOnSelectMode/off`` and apply its own policy here.
+    ///
+    /// The default implementation does nothing.
+    func selectionFinished(source: TerminalView)
 
 }
 
 public extension TerminalViewDelegate {
+    func bell (source: TerminalView, style: BellStyle) {
+        if style.playsSound {
+            bell (source: source)
+        }
+    }
+
+    func selectionFinished(source: TerminalView) {}
     func programStatusChanged(source: TerminalView, records: [TerminalProgramStatus]) {}
 
     func sendTerminalReport(source: TerminalView, data: ArraySlice<UInt8>) {

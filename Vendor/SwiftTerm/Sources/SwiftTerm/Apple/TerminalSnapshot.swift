@@ -23,6 +23,13 @@ final class SnapshotImage: TerminalImage {
         col = source.col
     }
 
+    init (external source: TerminalExternalImage) {
+        image = source.image
+        pixelWidth = source.width
+        pixelHeight = source.height
+        col = source.column
+    }
+
     func hasSameValue (as other: SnapshotImage) -> Bool {
         image === other.image &&
             pixelWidth == other.pixelWidth && pixelHeight == other.pixelHeight &&
@@ -37,10 +44,12 @@ struct SnapshotStyle {
     /// Multiplex patch: the selection clamp's column span (inclusive), so
     /// a pane-clamped selection's highlight covers only that pane.
     var selectionClampColumns: ClosedRange<Int>? = nil
+    var selectionIsBlock: Bool = false
     var linkHighlightRange: [Terminal.LinkMatch.RowRange]?
     var linkHighlightMode: LinkHighlightMode
     var commandActive: Bool
     var textBlinkVisible: Bool
+    var enableOsc8Hyperlinks: Bool = true
 
     static let empty = SnapshotStyle(selectionActive: false,
                                      selectionStart: Position(col: 0, row: 0),
@@ -54,9 +63,11 @@ struct SnapshotStyle {
         selectionActive == other.selectionActive &&
             selectionStart == other.selectionStart && selectionEnd == other.selectionEnd &&
             selectionClampColumns == other.selectionClampColumns &&
+            selectionIsBlock == other.selectionIsBlock &&
             linkHighlightRange == other.linkHighlightRange &&
             linkHighlightMode.tag == other.linkHighlightMode.tag &&
-            commandActive == other.commandActive && textBlinkVisible == other.textBlinkVisible
+            commandActive == other.commandActive && textBlinkVisible == other.textBlinkVisible &&
+            enableOsc8Hyperlinks == other.enableOsc8Hyperlinks
     }
 }
 
@@ -66,17 +77,19 @@ struct SnapshotStyle {
 /// main actor captures view geometry because the parser can adjust it at the
 /// same time. The render owner creates this value inside its terminal-lock
 /// transaction and gives only the value to the snapshot.
-struct SnapshotSelectionState: Sendable {
+struct SnapshotSelectionState: Equatable, Sendable {
     let active: Bool
     let start: Position
     let end: Position
     /// Multiplex patch: see `SnapshotStyle.selectionClampColumns`.
     let clampColumns: ClosedRange<Int>?
+    let isBlock: Bool
 
     static let empty = SnapshotSelectionState(
         active: false,
         start: Position(col: 0, row: 0),
         end: Position(col: 0, row: 0),
+        isBlock: false,
         clampColumns: nil)
 
     init (selection: SelectionService?) {
@@ -85,14 +98,16 @@ struct SnapshotSelectionState: Sendable {
         start = selection?.start ?? Position(col: 0, row: 0)
         end = selection?.end ?? Position(col: 0, row: 0)
         clampColumns = selection?.clampRect?.columns
+        isBlock = selection?.isBlock == true
     }
 
-    private init (active: Bool, start: Position, end: Position,
+    private init (active: Bool, start: Position, end: Position, isBlock: Bool,
                   clampColumns: ClosedRange<Int>?) {
         self.active = active
         self.start = start
         self.end = end
         self.clampColumns = clampColumns
+        self.isBlock = isBlock
     }
 }
 
@@ -252,7 +267,11 @@ final class TerminalSnapshot {
             selectedTextForegroundColor: appearance.selectedTextForegroundColor.nativeColor,
             caretColor: appearance.caretColor.nativeColor,
             caretTextColor: appearance.caretTextColor.nativeColor,
-            ansiColors: ansiColors.map(TTColor.make(color:)))
+            linkColor: appearance.linkColor?.nativeColor,
+            linkUnderlineColor: appearance.linkUnderlineColor?.nativeColor,
+            ansiColors: ansiColors.map(TTColor.make(color:)),
+            searchMatchBackgroundColor: appearance.searchMatchBackgroundColor?.nativeColor,
+            searchMatchForegroundColor: appearance.searchMatchForegroundColor?.nativeColor)
         nativeColorCache = NativeColorCache(
             appearance: appearance, ansiColors: ansiColors, nativeColors: result)
 #if DEBUG
@@ -291,10 +310,124 @@ final class TerminalSnapshot {
         pendingBidi.removeAll(keepingCapacity: true)
     }
 
+    /// Computes the match columns of the visible rows.
+    ///
+    /// The search runs only when its inputs changed: the pattern, the first
+    /// row, the size, or the content of a visible row. Output that changes no
+    /// visible row starts no search. The exception is a logical line that
+    /// continues out of the visible rows (`lineCrossesEdge`): its hidden rows
+    /// can change a visible match, so the search generation is then an input
+    /// too. The rows whose ranges changed go in `searchMatchChangedRows` and
+    /// get a new revision. With `search` nil or no pattern, this is one test.
+    ///
+    /// A search that goes past its time limit shows no highlights, and the
+    /// next search waits for `searchRetryWait`. `searchRetryDelay` makes
+    /// the view ask for a frame at that time, so the highlights come back
+    /// also on a screen with no new output. The wait starts at
+    /// `searchRetryInterval` and doubles after each late search for the same
+    /// pattern, to a maximum of `searchRetryMaximum`: a pattern that is
+    /// always slow then wakes an idle terminal much less often. A search
+    /// that is in time, or a different pattern, sets the wait back; a
+    /// different pattern is also searched at once.
+    private func refreshSearchMatches (search: SearchService?, visibleCount: Int,
+                                       contentChanged: Bool, lineCrossesEdge: Bool) {
+        searchMatchChangedRows = nil
+        guard let search, let pattern = search.activePattern else {
+            resetSearchRetry()
+            guard searchMatchKey != nil else { return }
+            searchMatchKey = nil
+            applySearchMatchRows([])
+            return
+        }
+        if let late = lateSearchPattern, late.term != pattern.term || late.options != pattern.options {
+            resetSearchRetry()
+        }
+        let key = SearchMatchKey(firstRow: firstRow, cols: cols, rowCount: visibleCount,
+                                 term: pattern.term, options: pattern.options,
+                                 hiddenRowsGeneration: lineCrossesEdge ? search.generation : nil)
+        guard key != searchMatchKey || contentChanged else { return }
+        searchMatchKey = key
+        let now = DispatchTime.now().uptimeNanoseconds
+        if now < searchRetryTime {
+            // The last search was too slow. Until the time to try again,
+            // show no highlights; the nil key starts a search at that time.
+            searchMatchKey = nil
+            applySearchMatchRows([])
+            return
+        }
+        if let found = search.visibleMatches(term: pattern.term, options: pattern.options,
+                                             firstRow: firstRow, rowCount: visibleCount) {
+            resetSearchRetry()
+            applySearchMatchRows(found)
+        } else {
+            searchMatchKey = nil
+            lateSearchPattern = pattern
+            searchRetryTime = now &+ searchRetryWait
+            searchRetryDelay = searchRetryWait
+            searchRetryWait = min(searchRetryWait &* 2, Self.searchRetryMaximum)
+            applySearchMatchRows([])
+        }
+    }
+
+    /// Sets the retry wait back to its first value and permits a search now.
+    private func resetSearchRetry () {
+        lateSearchPattern = nil
+        searchRetryTime = 0
+        searchRetryWait = Self.searchRetryInterval
+    }
+
+    private func applySearchMatchRows (_ newRows: [[Range<Int>]]) {
+        let oldRows = searchMatchRows
+        searchMatchRows = newRows
+        for index in rows.indices {
+            let old = index < oldRows.count ? oldRows[index] : []
+            let new = index < newRows.count ? newRows[index] : []
+            if old != new {
+                rows[index].revision &+= 1
+                searchMatchChangedRows = (searchMatchChangedRows?.lowerBound ?? index)...index
+            }
+        }
+    }
+
     private var previousStyle: SnapshotStyle?
     private var previousAnsiColors: [Color] = []
     private var previousBidiHostPolicy: BidiHostPolicy?
     private var previousBidiFont: ObjectIdentifier?
+
+    /// What the stored search match rows were computed from.
+    private struct SearchMatchKey: Equatable {
+        let firstRow: Int
+        let cols: Int
+        let rowCount: Int
+        let term: String
+        let options: SearchOptions
+        /// `SearchService.generation`, or nil when the matches depend only
+        /// on the visible rows.
+        let hiddenRowsGeneration: Int?
+    }
+    private var searchMatchKey: SearchMatchKey?
+    /// After a search that used too much time, no search starts before this
+    /// time (uptime nanoseconds). This keeps a slow pattern from using the
+    /// full time limit, with the terminal lock held, on each frame.
+    /// Not private: a test sets it to 0 to go past the wait.
+    var searchRetryTime: UInt64 = 0
+    /// The wait after the first late search, and the maximum wait.
+    static let searchRetryInterval: UInt64 = 500_000_000
+    static let searchRetryMaximum: UInt64 = 3_000_000_000
+    /// The wait that the next late search gives.
+    private var searchRetryWait: UInt64 = TerminalSnapshot.searchRetryInterval
+    /// The pattern of the last late search, nil after a search in time.
+    private var lateSearchPattern: (term: String, options: SearchOptions)?
+    /// Not nil when a search was too slow: the view must ask for a frame
+    /// after this time (nanoseconds). Without that frame, an idle screen
+    /// keeps its highlights off. The value stays until a frame takes it,
+    /// because not all callers of `refresh` can send it to the view.
+    private var searchRetryDelay: UInt64?
+
+    func takeSearchRetryDelay () -> UInt64? {
+        defer { searchRetryDelay = nil }
+        return searchRetryDelay
+    }
 
     var firstRow = 0
     var yDisp = 0
@@ -317,6 +450,13 @@ final class TerminalSnapshot {
     var ansiColors: [Color] = []
     var cgRegion: CGRect?
     var rangeChanged: (start: Int, end: Int)?
+    /// The columns of the search matches, by screen row from `firstRow`, for
+    /// "highlight all matches". Empty when the option is off or there is no
+    /// pattern. This is the one copy; the render context reads it from here.
+    private(set) var searchMatchRows: [[Range<Int>]] = []
+    /// The screen rows whose search match columns changed in the last
+    /// refresh, or nil. Core Graphics draws these rows again.
+    private(set) var searchMatchChangedRows: ClosedRange<Int>?
     /// True when view-dependent appearance changed without a cell-content
     /// change. Core Graphics uses this to invalidate the visible surface.
     private(set) var appearanceChanged = false
@@ -340,8 +480,11 @@ final class TerminalSnapshot {
     ///   bidi paragraph layout is left for `completePendingBidi()`. Only pass
     ///   true from a caller that releases the terminal lock and calls it before
     ///   the frame is drawn; everyone else gets the fully resolved snapshot.
+    /// - Parameter search: the source of the "highlight all matches" ranges.
+    ///   It is read only when `viewState.highlightsAllSearchMatches` is true.
     func refresh (terminal: Terminal, viewState: FrameViewState,
                   selection: SnapshotSelectionState,
+                  search: SearchService? = nil,
                   deferBidiTypesetting: Bool = false) -> RefreshResult {
         terminal.terminalLock.preconditionLocked()
         guard !terminal.synchronizedOutputActive else {
@@ -370,15 +513,33 @@ final class TerminalSnapshot {
             cellArenaSnapshot = sourceArena.snapshotCopy()
         }
         let snapshotArena = cellArenaSnapshot!
+        let linkHighlightRange: [Terminal.LinkMatch.RowRange]?
+        if terminal.enableOsc8Hyperlinks {
+            linkHighlightRange = viewState.linkHighlightRange
+        } else if let first = viewState.linkHighlightRange?.first,
+                  !first.range.isEmpty,
+                  first.row >= 0, first.row < buffer.lines.count,
+                  first.range.lowerBound >= 0,
+                  first.range.lowerBound < min(terminal.cols, buffer.lines[first.row].count) {
+            // A host can change the terminal option without the view setter.
+            // Check the old range again to keep only an implicit link.
+            linkHighlightRange = terminal.linkMatch(
+                at: .buffer(Position(col: first.range.lowerBound, row: first.row)),
+                mode: .explicitAndImplicit)?.rowRanges
+        } else {
+            linkHighlightRange = nil
+        }
         let newStyle = SnapshotStyle(
             selectionActive: selection.active,
             selectionStart: selection.start,
             selectionEnd: selection.end,
             selectionClampColumns: selection.clampColumns,
-            linkHighlightRange: viewState.linkHighlightRange,
+            selectionIsBlock: selection.isBlock,
+            linkHighlightRange: linkHighlightRange,
             linkHighlightMode: viewState.linkHighlightMode,
             commandActive: viewState.commandActive,
-            textBlinkVisible: viewState.textBlinkVisible)
+            textBlinkVisible: viewState.textBlinkVisible,
+            enableOsc8Hyperlinks: terminal.enableOsc8Hyperlinks)
         let styleChanged = previousStyle?.hasSameValue(as: newStyle) != true ||
             previousAnsiColors != terminal.ansiColors
         appearanceChanged = styleChanged
@@ -403,6 +564,7 @@ final class TerminalSnapshot {
         maximumBidiParagraphRows = terminal.options.maximumBidiParagraphRows
         style = newStyle
         ansiColors = terminal.ansiColors
+        var anyContentChanged = false
 
         let visibleCount = max(0, min(buffer.rows, buffer.lines.count - firstRow))
         while rows.count > visibleCount {
@@ -428,6 +590,7 @@ final class TerminalSnapshot {
                 destination.bidiParagraphRevision != bidiRevision
 
             if contentChanged {
+                anyContentChanged = true
                 destination.line.copyForSnapshot(from: source, arena: snapshotArena)
                 destination.recordSource(source)
                 destination.resolvedCharacters.removeAll(keepingCapacity: true)
@@ -495,6 +658,16 @@ final class TerminalSnapshot {
             }
         }
 
+        // A logical line that continues above or below the visible rows
+        // makes the matches depend on rows that this snapshot does not copy.
+        let lineCrossesEdge = visibleCount > 0 &&
+            (buffer.lines[firstRow].isWrapped ||
+             (firstRow + visibleCount < buffer.lines.count &&
+              buffer.lines[firstRow + visibleCount].isWrapped))
+        refreshSearchMatches(search: viewState.highlightsAllSearchMatches ? search : nil,
+                             visibleCount: visibleCount, contentChanged: anyContentChanged,
+                             lineCrossesEdge: lineCrossesEdge)
+
         kitty = SnapshotKitty(renderSnapshot: terminal.kittyGraphicsRenderSnapshot())
 
         // Built here rather than by the caller: the caret's attributes need it,
@@ -559,6 +732,245 @@ final class TerminalSnapshot {
 
         previousStyle = newStyle
         previousAnsiColors = terminal.ansiColors
+        previousBidiHostPolicy = viewState.bidiHostPolicy
+        previousBidiFont = bidiFont
+        return .refreshed
+    }
+}
+
+// MARK: - External sources
+
+extension TerminalSnapshot {
+    /// Refreshes the snapshot from a frame that does not come from a local
+    /// `Terminal` (see `TerminalRenderView`).
+    ///
+    /// The rows are copied exactly as `refresh(terminal:)` copies them, and
+    /// bidi layout uses the same paragraph code, so the renderers draw them
+    /// the same way. Bidi typesetting runs here, synchronously: an external
+    /// frame has no terminal lock to release first.
+    ///
+    /// - Parameters:
+    ///   - line: returns the line for a line number, or nil to draw a blank row.
+    ///   - blank: an empty line from `store`, used for missing rows.
+    ///
+    /// `line` may build lines on demand (and so intern new styles): every line
+    /// is looked up before the snapshot copies the store's tables. That
+    /// includes the lines of each visible row's soft-wrapped paragraph that
+    /// lie outside the visible rows.
+    @discardableResult
+    func refresh (external frame: TerminalExternalFrame, store: TerminalRowStore,
+                  line lookup: (Int) -> BufferLine?, blank: BufferLine,
+                  viewState: FrameViewState) -> RefreshResult {
+        pendingBidi.removeAll(keepingCapacity: true)
+        let sourceArena = store.arena
+        let columns = max(1, frame.columns)
+        let rowTotal = max(0, frame.rows)
+        let maximumParagraphRows = max(1, frame.maximumBidiParagraphRows)
+        let respectBidi = viewState.bidiHostPolicy == .respectTerminal
+
+        // Look up every line before the arena copy is synchronized: a source
+        // may build lines lazily, and building interns new styles.
+        var known: [Int: BufferLine] = [:]
+        func lookUp (_ lineNumber: Int) -> BufferLine? {
+            if let line = known[lineNumber] { return line }
+            guard let line = lookup(lineNumber), line.cellArena === sourceArena else { return nil }
+            known[lineNumber] = line
+            return line
+        }
+        let sources = (0..<rowTotal).map { lookUp(frame.topLine + $0) ?? blank }
+        if respectBidi && rowTotal > 0 {
+            // The paragraph above the first row, while rows continue it.
+            var lineNumber = frame.topLine
+            var steps = 0
+            while steps < maximumParagraphRows, let line = known[lineNumber], line.isWrapped,
+                  lookUp(lineNumber - 1) != nil {
+                lineNumber -= 1
+                steps += 1
+            }
+            // The rows below the last row that continue its paragraph.
+            lineNumber = frame.topLine + rowTotal - 1
+            steps = 0
+            while steps < maximumParagraphRows, let next = lookUp(lineNumber + 1), next.isWrapped {
+                lineNumber += 1
+                steps += 1
+            }
+        }
+        let paragraphLines = LookupBidiLines(identity: ObjectIdentifier(sourceArena), lines: known)
+        let screenRow = frame.cursorLine - frame.topLine
+        let cursorSource = screenRow >= 0 && screenRow < rowTotal ? sources[screenRow] : nil
+
+        if cellArenaSnapshot?.synchronizeSnapshotPrefix(from: sourceArena) != true {
+            cellArenaSnapshot = sourceArena.snapshotCopy()
+        }
+        let snapshotArena = cellArenaSnapshot!
+        let origin = Position(col: 0, row: 0)
+        let newStyle = SnapshotStyle(
+            selectionActive: frame.selection != nil,
+            selectionStart: frame.selection?.start ?? origin,
+            selectionEnd: frame.selection?.end ?? origin,
+            linkHighlightRange: viewState.linkHighlightRange,
+            linkHighlightMode: viewState.linkHighlightMode,
+            commandActive: viewState.commandActive,
+            textBlinkVisible: viewState.textBlinkVisible)
+        let styleChanged = previousStyle?.hasSameValue(as: newStyle) != true ||
+            previousAnsiColors != frame.palette
+        appearanceChanged = styleChanged
+        let bidiFont = ObjectIdentifier(viewState.fonts.normal)
+        let bidiInputsChanged = previousBidiHostPolicy != viewState.bidiHostPolicy ||
+            previousBidiFont != bidiFont || maximumBidiParagraphRows != maximumParagraphRows
+
+        firstRow = frame.topLine
+        yDisp = frame.topLine
+        yBase = frame.topLine
+        x = frame.cursorColumn
+        y = frame.cursorLine - frame.topLine
+        cols = columns
+        rowCount = rowTotal
+        linesCount = frame.topLine + rowTotal
+        linesTop = 0
+        totalLinesTrimmed = 0
+        hasAnyImages = !frame.images.isEmpty || frame.kitty?.placements.isEmpty == false
+        isAltBuffer = frame.isAlternateBuffer
+        cursorHidden = !frame.cursorVisible
+        cursorStyle = frame.cursorStyle
+        maximumBidiParagraphRows = maximumParagraphRows
+        style = newStyle
+        ansiColors = frame.palette
+
+        while rows.count > rowTotal {
+            rowPool.append(rows.removeLast())
+        }
+        while rows.count < rowTotal {
+            rows.append(rowPool.popLast() ?? Row(source: blank, snapshotArena: snapshotArena))
+        }
+
+        for index in 0..<rowTotal {
+            let lineNumber = frame.topLine + index
+            let source = sources[index]
+            let destination = rows[index]
+            let contentChanged = destination.sourceIdentity !=
+                ObjectIdentifier(source.renderIdentity) ||
+                destination.sourceGeneration != source.generation
+            if contentChanged {
+                destination.line.copyForSnapshot(from: source, arena: snapshotArena)
+                destination.recordSource(source)
+                destination.resolvedCharacters.removeAll(keepingCapacity: true)
+                destination.resolvedText.removeAll(keepingCapacity: true)
+                var col = 0
+                let limit = min(columns, source.count)
+                while col < limit {
+                    let cell = source.packedView(at: col)
+                    if !cell.isSimpleRune {
+                        let text = cell.getText()
+                        destination.resolvedCharacters[col] = text.first
+                        destination.resolvedText[col] = text
+                    }
+                    col += max(1, Int(cell.width))
+                }
+            }
+
+            // Bidi, as in `refresh(terminal:)`. A missing row has no layout.
+            let bidiRevision = respectBidi && known[lineNumber] != nil
+                ? TerminalBidi.layoutRevision(row: lineNumber, lines: paragraphLines,
+                                              maximumRows: maximumParagraphRows)
+                : Int.min
+            let bidiChanged = contentChanged || bidiInputsChanged ||
+                destination.bidiParagraphRevision != bidiRevision
+            if bidiChanged {
+                destination.bidiParagraphRevision = bidiRevision
+                destination.bidiLayout = nil
+                if respectBidi && known[lineNumber] != nil {
+                    let shared = pendingBidi.first {
+                        $0.deferred.firstRow <= lineNumber && lineNumber <= $0.deferred.lastRow
+                    }?.deferred
+                    if let shared {
+                        pendingBidi.append((rowIndex: index, absoluteRow: lineNumber, deferred: shared))
+                    } else {
+                        switch TerminalBidi.collectLayout(
+                            row: lineNumber, lines: paragraphLines, cols: columns,
+                            maximumRows: maximumParagraphRows, font: viewState.fonts.normal,
+                            hostPolicy: viewState.bidiHostPolicy) {
+                        case .resolved(let layout):
+                            destination.bidiLayout = layout
+                        case .pending(let deferred):
+                            pendingBidi.append((rowIndex: index, absoluteRow: lineNumber,
+                                                deferred: deferred))
+                        }
+                    }
+                }
+            }
+
+            let newImages = (frame.images[lineNumber] ?? []).map(SnapshotImage.init(external:))
+            let imagesChanged = newImages.count != destination.images.count ||
+                zip(newImages, destination.images).contains { !$0.hasSameValue(as: $1) }
+            if imagesChanged {
+                // Keep the old objects otherwise: renderers cache by identity.
+                destination.images = newImages
+            }
+            if contentChanged || styleChanged || bidiChanged || imagesChanged {
+                destination.revision &+= 1
+            }
+        }
+        // There is no lock to release: finish the paragraphs now.
+        if !pendingBidi.isEmpty {
+            TerminalBidi.finish(pendingBidi.map { $0.deferred })
+            for entry in pendingBidi where entry.rowIndex < rows.count {
+                rows[entry.rowIndex].bidiLayout = TerminalBidi.rowLayout(entry.deferred,
+                                                                         row: entry.absoluteRow)
+            }
+            pendingBidi.removeAll(keepingCapacity: true)
+        }
+
+        kitty = frame.kitty.map { SnapshotKitty(renderSnapshot: $0) } ?? SnapshotKitty()
+        let context = SnapshotRenderContext(viewState: viewState, snapshot: self)
+        renderContext = context
+
+        if let cursorLine = cursorSource {
+            let cursorCol = max(0, min(frame.cursorColumn, cursorLine.count - 1))
+            let cell = cursorLine.packedView(at: cursorCol)
+            let character = cell.code == 0 ? " " : cell.getCharacter()
+            let cursorColor = context.caretColor
+            let textColor = context.caretTextColor
+            var attributes = attributedValue(for: cell.attribute,
+                                             usingFg: cursorColor,
+                                             andBg: textColor,
+                                             context: context)
+            let caretStyleFont = (attributes[.font] as? TTFont) ?? context.fonts.normal
+            if let fallback = GlyphFallbackResolver.selection(for: character,
+                                                              styleFont: caretStyleFont,
+                                                              context: context) {
+                attributes[.font] = fallback.font
+                attributes[SwiftTermGlyphPolicyKey] = fallback.policy
+            }
+            var visualCol = cursorCol
+            if let layout = row(atAbsolute: frame.cursorLine)?.bidiLayout,
+               cursorCol < layout.logicalToVisualCol.count {
+                visualCol = layout.logicalToVisualCol[cursorCol]
+            }
+            cursor = SnapshotCursor(
+                absoluteRow: frame.cursorLine,
+                screenRow: screenRow,
+                logicalCol: cursorCol,
+                visualCol: visualCol,
+                columnWidth: max(1, Int(cell.width)),
+                renderMode: cursorLine.renderMode,
+                hidden: !frame.cursorVisible,
+                renderData: CaretRenderData(code: cell.code,
+                                            width: cell.width,
+                                            cellAttribute: cell.attribute,
+                                            character: character,
+                                            attributes: attributes,
+                                            cursorColor: cursorColor,
+                                            textColor: textColor,
+                                            textBlinkVisible: newStyle.textBlinkVisible,
+                                            customBlockGlyphs: viewState.customBlockGlyphs,
+                                            normalFont: viewState.fonts.normal))
+        } else {
+            cursor = nil
+        }
+
+        previousStyle = newStyle
+        previousAnsiColors = frame.palette
         previousBidiHostPolicy = viewState.bidiHostPolicy
         previousBidiFont = bidiFont
         return .refreshed

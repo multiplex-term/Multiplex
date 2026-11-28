@@ -194,7 +194,13 @@ public final class TerminalOscObservation: Sendable {
 final class TerminalOscEventDispatcher: @unchecked Sendable {
     private struct Registration: Sendable {
         let id: UInt64
+        /// The OSC codes to observe, or nil for every code.
+        let codes: Set<Int>?
         let handler: @Sendable (TerminalOscEvent) -> Void
+
+        func accepts(_ code: Int) -> Bool {
+            codes?.contains(code) ?? true
+        }
     }
 
     private struct State {
@@ -206,22 +212,27 @@ final class TerminalOscEventDispatcher: @unchecked Sendable {
     private var state = State()
 #else
     private let state = Locked(State())
+    /// The number of registrations, so that `publish` can skip the lock
+    /// when there are no observers. Change it only while `state` is locked.
+    private let registrationCount = LockedCount()
     private let deliveryQueue = TerminalCallbackQueue(label: "org.tirania.SwiftTerm.osc-events")
 #endif
 
     func observe(
+        codes: Set<Int>? = nil,
         _ handler: @escaping @Sendable (TerminalOscEvent) -> Void
     ) -> TerminalOscObservation {
 #if SWIFTTERM_EMBEDDED
         let id = state.nextID
         state.nextID &+= 1
-        state.registrations.append(Registration(id: id, handler: handler))
+        state.registrations.append(Registration(id: id, codes: codes, handler: handler))
         return TerminalOscObservation { [self] in cancel(id: id) }
 #else
         let id = state.withLock { state in
             let id = state.nextID
             state.nextID &+= 1
-            state.registrations.append(Registration(id: id, handler: handler))
+            state.registrations.append(Registration(id: id, codes: codes, handler: handler))
+            registrationCount.store(state.registrations.count)
             return id
         }
 
@@ -232,10 +243,12 @@ final class TerminalOscEventDispatcher: @unchecked Sendable {
     }
 
     func publish(code: Int, payload: ArraySlice<UInt8>, cursor: Position) {
+        // Copy the payload only for the observers of this code.
 #if SWIFTTERM_EMBEDDED
-        let registrations = state.registrations
+        let registrations = state.registrations.filter { $0.accepts(code) }
 #else
-        let registrations = state.withLock { $0.registrations }
+        guard registrationCount.value > 0 else { return }
+        let registrations = state.withLock { $0.registrations.filter { $0.accepts(code) } }
 #endif
         guard !registrations.isEmpty else { return }
         let event = TerminalOscEvent(code: code, payload: Array(payload), cursor: cursor)
@@ -271,6 +284,7 @@ final class TerminalOscEventDispatcher: @unchecked Sendable {
 #else
         state.withLock { state in
             state.registrations.removeAll { $0.id == id }
+            registrationCount.store(state.registrations.count)
         }
 #endif
     }
@@ -604,8 +618,18 @@ final class EscapeSequenceParser {
 
     func dispatchCsi(code: UInt8, pars: CsiParameters, collect: cstring, _ terminal: Terminal) {
         switch code {
-        case 0x40: terminal.cmdInsertChars(pars, collect)       // @
-        case 0x41: terminal.cmdCursorUp(pars, collect)          // A
+        case 0x40:                                              // @
+            if collect.isEmpty {
+                terminal.cmdInsertChars(pars, collect)
+            } else if collect == [32] {
+                terminal.cmdScrollColumns(pars, left: true)     // SL
+            }
+        case 0x41:                                              // A
+            if collect.isEmpty {
+                terminal.cmdCursorUp(pars, collect)
+            } else if collect == [32] {
+                terminal.cmdScrollColumns(pars, left: false)    // SR
+            }
         case 0x42: terminal.cmdCursorDown(pars, collect)        // B
         case 0x43: terminal.cmdCursorForward(pars, collect)     // C
         case 0x44: terminal.cmdCursorBackward(pars, collect)    // D
@@ -648,6 +672,8 @@ final class EscapeSequenceParser {
         case 0x71:                                              // q
             if collect == [UInt8(ascii: ">")] {
                 terminal.cmdXTVERSION(pars, collect)
+            } else if collect.count == 1 && collect[0] == UInt8(ascii: "\"") {
+                terminal.cmdSelectCharacterProtection(pars)
             } else {
                 terminal.cmdSetCursorStyle(pars, collect)
             }
@@ -679,8 +705,17 @@ final class EscapeSequenceParser {
         case 0x79: terminal.cmdDECRQCRA(pars, collect)          // y
         case 0x7a: terminal.csiZ(pars, collect)                 // z (DECERA)
         case 0x7b: terminal.csiOpenBrace(pars, collect)         // {
+        case 0x7c:                                              // |
+            if collect == [UInt8(ascii: "*")] {
+                terminal.cmdSetLinesPerScreen(pars)             // DECSNLS
+            }
         case 0x7d: terminal.csiCloseBrace(pars, collect)        // }
-        case 0x7e: terminal.cmdDeleteColumns(pars, collect)     // ~
+        case 0x7e:                                              // ~
+            // DECDC is CSI Pn ' ~. Other intermediates, such as DECSSDT
+            // (CSI Ps $ ~), must not delete columns.
+            if collect == [UInt8(ascii: "'")] {
+                terminal.cmdDeleteColumns(pars, collect)
+            }
         default:
             let ch = Character(UnicodeScalar(code))
             terminal.log ("SwiftTerm: Unknown CSI Code (collect=\(collect) code=\(ch) pars=\(pars))")
@@ -699,6 +734,9 @@ final class EscapeSequenceParser {
             case 0x45: terminal.cmdNextLine()                   // E
             case 0x48: terminal.cmdTabSet()                     // H
             case 0x4d: terminal.reverseIndex()                  // M
+            case 0x5a: terminal.cmdSendDeviceAttributes(.empty, []) // Z (DECID)
+            case 0x56: terminal.cmdProtectedArea(start: true)   // V (SPA)
+            case 0x57: terminal.cmdProtectedArea(start: false)  // W (EPA)
             case 0x3d: terminal.cmdKeypadApplicationMode()      // =
             case 0x3e: terminal.cmdKeypadNumericMode()          // >
             case 0x63: terminal.cmdReset()                      // c
@@ -778,7 +816,9 @@ final class EscapeSequenceParser {
         case 12:   terminal.oscSetColors(data, startAt: 2)
         case 52:   terminal.oscClipboard(data)
         case 104:  terminal.oscResetColor(data)
-        case 112:  terminal.tdel?.setCursorColor(source: terminal, color: nil)
+        case 110:  terminal.oscResetDynamicColor(foreground: true)
+        case 111:  terminal.oscResetDynamicColor(foreground: false)
+        case 112:  terminal.cursorColor = nil
         case 133:  terminal.oscSemanticPrompt(data)
         case 777:  terminal.oscNotification(data)
         case 1337: terminal.osciTerm2(data)
@@ -885,12 +925,82 @@ final class EscapeSequenceParser {
         terminal.printStateReset()
     }
 
-    /// True when the tail of the accumulated OSC payload is an incomplete
+    /// The length of the CSI sequence at `start` (ESC included) when it is one
+    /// the parse loop may take in a single pass, else 0: ESC [, an optional
+    /// private prefix (< = > ?), digits with ; or : separators (no : first,
+    /// fewer separators than the parameter limit), intermediates (0x20-0x2f),
+    /// and a final byte (0x40-0x7e), all within `data`.
+    @inline(__always)
+    static func simpleCsiLength(_ data: Span<UInt8>, at start: Int) -> Int {
+        var j = start + 1
+        guard j < data.count, data[j] == 0x5b else { return 0 }
+        j += 1
+        guard j < data.count else { return 0 }
+        if data[j] >= 0x3c && data[j] <= 0x3f {
+            j += 1
+        } else if data[j] == 0x3a {
+            return 0
+        }
+        var separators = 0
+        while j < data.count {
+            let byte = data[j]
+            if byte >= 0x30 && byte <= 0x3b {
+                if byte >= 0x3a {
+                    separators += 1
+                    if separators >= maximumParameterCount { return 0 }
+                }
+                j += 1
+            } else {
+                break
+            }
+        }
+        while j < data.count && data[j] >= 0x20 && data[j] <= 0x2f {
+            j += 1
+        }
+        guard j < data.count, data[j] >= 0x40 && data[j] <= 0x7e else { return 0 }
+        return j - start + 1
+    }
+
+    /// Collects and dispatches the CSI sequence at `start`, `length` bytes that
+    /// ``simpleCsiLength(_:at:)`` measured, into the buffers the table's clear
+    /// has just emptied, as the table's collect and parameter actions would.
+    /// Out of line, so the parse loop compiles as it did before for every byte
+    /// that doesn't get here.
+    @inline(never)
+    func dispatchWholeCsi(_ data: Span<UInt8>, at start: Int, length: Int,
+                          pars: inout CsiParameterStorage, parsColonMask: inout UInt64,
+                          collect: inout cstring, _ terminal: Terminal)
+    {
+        let final = start + length - 1
+        var j = start + 2
+        while j < final {
+            let byte = data[j]
+            if byte >= 0x30 && byte <= 0x39 {
+                pars.accumulateDigit(byte)
+            } else if byte == 0x3b || byte == 0x3a {
+                if byte == 0x3a {
+                    parsColonMask |= UInt64(1) << UInt64(pars.count - 1)
+                }
+                pars.append(0)
+            } else {
+                collect.append(byte)
+            }
+            j += 1
+        }
+        let code = data[final]
+        // cmdCharAttributes is the only reader of separator type.
+        if code == 0x6d { _parsColonMask = parsColonMask }
+        pars.withView { view in
+            dispatchCsi(code: code, pars: view, collect: collect, terminal)
+        }
+    }
+
+    /// True when the tail of an accumulated OSC or APC payload is an incomplete
     /// UTF-8 scalar, so the next byte is a continuation byte rather than a
     /// C1 string terminator.
-    static func oscExpectsUTF8Continuation(_ osc: [UInt8]) -> Bool {
+    static func stringExpectsUTF8Continuation(_ payload: [UInt8]) -> Bool {
         var continuationCount = 0
-        for byte in osc.reversed() {
+        for byte in payload.reversed() {
             if byte >= 0x80 && byte <= 0xbf {
                 continuationCount += 1
                 if continuationCount == 3 { return false }
@@ -1038,7 +1148,7 @@ final class EscapeSequenceParser {
                 appendOscBytes(appendedThrough..<j, data: data, to: &osc, &limitExceeded, terminal)
                 appendedThrough = j
                 guard (limitExceeded && !EscapeSequenceParser.isProgramStatusOsc(osc))
-                        || EscapeSequenceParser.oscExpectsUTF8Continuation(osc)
+                        || EscapeSequenceParser.stringExpectsUTF8Continuation(osc)
                 else {
                     c1Terminated = true
                     break
@@ -1098,6 +1208,8 @@ final class EscapeSequenceParser {
             }
         }
 #endif
+        // One reference for the parse call. Print and line feed borrow it.
+        var activeBuffer = terminal._buffer
         var code : UInt8 = 0
         var transition : UInt8 = 0
         var error = false
@@ -1162,9 +1274,23 @@ final class EscapeSequenceParser {
         // process input string
         var i = 0
         let end = data.count
-        var input = data
-        while !input.isEmpty {
-            code = input[0]
+        // A read from the host can end in the middle of a UTF-8 scalar in an OSC or APC payload, so this chunk starts with its continuation bytes.
+        // The table would take 0x80-0x9f for C1 controls, abort the sequence and print the rest of its payload on screen.
+        // Within a chunk the `oscPut` run already keeps them as payload, and 0x9c is routed there by the table, so the remaining continuation bytes are kept here.
+        // These run once per chunk rather than in the loop: a per-byte check slows ordinary ESC and CSI input.
+        if currentState == ParserState.oscString.rawValue {
+            while i < end, data[i] >= 0x80, data[i] < 0xa0, data[i] != 0x9c, oscLimitExceeded || EscapeSequenceParser.stringExpectsUTF8Continuation(osc) {
+                appendOscBytes(i..<(i + 1), data: data, to: &osc, &oscLimitExceeded, terminal)
+                i += 1
+            }
+        } else if currentState == ParserState.apcString.rawValue {
+            while i < end, data[i] >= 0x80, data[i] < 0xa0, data[i] != 0x9c, apcLimitExceeded || EscapeSequenceParser.stringExpectsUTF8Continuation(apc) {
+                appendApcBytes(i..<(i + 1), to: &apc, &apcLimitExceeded)
+                i += 1
+            }
+        }
+        while i < end {
+            code = data[i]
 
             // 1f..80 are printable ascii characters
             // c2..f3 are valid utf8 beginning of sequence elements, and most importantly,
@@ -1174,9 +1300,7 @@ final class EscapeSequenceParser {
             // we are in the middle of things (force a small reading buffer to see more easily)
             if currentState == ParserState.ground.rawValue && code > 0x1f  { // }(code > 0x1f && code < 0x80 || (code > 0xc2 && code < 0xf3)) {
                 print = (~print != 0) ? print : i
-                let next = ByteRunScanner.firstC0Byte(in: data, from: i)
-                input = input.extracting(droppingFirst: next - i)
-                i = next
+                i = ByteRunScanner.firstC0Byte(in: data, from: i + 1)
                 continue;
             }
             
@@ -1185,7 +1309,6 @@ final class EscapeSequenceParser {
                 if !parameterLimitExceeded {
                     pars.accumulateDigit(code)
                 }
-                input = input.extracting(droppingFirst: 1)
                 i += 1
                 continue
             }
@@ -1199,10 +1322,15 @@ final class EscapeSequenceParser {
                 print = (~print != 0) ? print : i
             case .execute:
                 if ~print != 0 {
-                    terminal.handlePrintBorrowed(data.extracting(print..<i))
+                    terminal.handlePrintBorrowed(data.extracting(print..<i), activeBuffer: &activeBuffer)
                     print = -1
                 }
-                dispatchExecute(code: code, terminal)
+                if code >= 10 && code <= 12 {
+                    // LF, VT, and FF are all a basic line feed.
+                    terminal.cmdLineFeedBasic(activeBuffer: &activeBuffer)
+                } else {
+                    dispatchExecute(code: code, terminal)
+                }
             case .ignore:
                 if currentState == ParserState.oscString.rawValue {
                     // Keep these bytes and count them towards the status
@@ -1214,7 +1342,7 @@ final class EscapeSequenceParser {
                 }
                 // handle leftover print or dcs chars
                 if ~print != 0 {
-                    terminal.handlePrintBorrowed(data.extracting(print..<i))
+                    terminal.handlePrintBorrowed(data.extracting(print..<i), activeBuffer: &activeBuffer)
                     print = -1
                 } else if ~dcs != 0 {
                     dcsHandler?.put(data: ownedSlice(dcs..<i))
@@ -1295,7 +1423,7 @@ final class EscapeSequenceParser {
                 collect.append (code)
             case .clear:
                 if ~print != 0 {
-                    terminal.handlePrintBorrowed(data.extracting(print..<i))
+                    terminal.handlePrintBorrowed(data.extracting(print..<i), activeBuffer: &activeBuffer)
                     print = -1
                 }
                 EscapeSequenceParser.resetOsc (&osc, &oscLimitExceeded)
@@ -1307,6 +1435,24 @@ final class EscapeSequenceParser {
                 parameterLimitExceeded = false
                 dcs = -1
                 terminal.printStateReset()
+                // An ESC that starts a whole CSI sequence, as most SGR, cursor
+                // and erase commands are, gets the rest of the table's actions
+                // in one pass: the clear for the [ is the one just done, then
+                // collect, parameter and dispatch, back to ground. In every
+                // state whose ESC clears, it goes to escape, and escape's [
+                // clears again into CSI entry, so the state before it doesn't
+                // matter. Anything the table treats otherwise (controls inside,
+                // a prefix after parameters, too many parameters, the end of
+                // this chunk) goes on byte by byte from the escape state.
+                if code == 0x1b {
+                    let length = EscapeSequenceParser.simpleCsiLength(data, at: i)
+                    if length > 0 {
+                        dispatchWholeCsi(data, at: i, length: length, pars: &pars,
+                                         parsColonMask: &parsColonMask, collect: &collect, terminal)
+                        transition = (transition & 0xf0) | ParserState.ground.rawValue
+                        consumed = length
+                    }
+                }
             case .dcsHook:
                 // A handler from an earlier, unterminated DCS must not survive
                 // into this one, or it answers a sequence that is not its own.
@@ -1346,7 +1492,7 @@ final class EscapeSequenceParser {
                 terminal.printStateReset()
             case .oscStart:
                 if ~print != 0 {
-                    terminal.handlePrintBorrowed(data.extracting(print..<i))
+                    terminal.handlePrintBorrowed(data.extracting(print..<i), activeBuffer: &activeBuffer)
                     print = -1
                 }
                 let nextState = transition & 15
@@ -1422,12 +1568,11 @@ final class EscapeSequenceParser {
                 break
             }
             currentState = transition & 15
-            input = input.extracting(droppingFirst: consumed)
             i += consumed
         }
         // push leftover pushable buffers to terminal
         if currentState == ParserState.ground.rawValue && (~print != 0) {
-            terminal.handlePrintBorrowed(data.extracting(print..<end))
+            terminal.handlePrintBorrowed(data.extracting(print..<end), activeBuffer: &activeBuffer)
         } else if currentState == ParserState.dcsPassthrough.rawValue && (~dcs != 0) && dcsHandler != nil {
             dcsHandler!.put(data: ownedSlice(dcs..<end))
         }
