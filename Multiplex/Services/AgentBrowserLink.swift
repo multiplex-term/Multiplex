@@ -147,16 +147,10 @@ final class AgentBrowserLink {
         let generation = generation
         state = .connecting
         let host = host
-        #if DEBUG
-        // MULTIPLEX_AGENT_MPX=<path on the host>: run a dev build of mpx.
-        let preferred = ProcessInfo.processInfo.environment["MULTIPLEX_AGENT_MPX"]
-        #else
-        let preferred: String? = nil
-        #endif
         let payload = AgentBrowserLaunch.payload(
             deviceName: deviceName,
             installID: AgentBrowserLaunch.installID(),
-            preferred: preferred
+            preferred: AgentBrowserLaunch.preferredCLI
         )
         // A new bridge process has a new clock.
         bridgeClock.reset()

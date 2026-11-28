@@ -250,6 +250,37 @@ link/path resolution, the ⌗ viewport, or the ▤ file viewer.
     adopted (`epoch`); a stopped proxy binds nothing.
   - The page is untrusted too: forged console events are size-checked,
     levels allowlisted, the buffer has a character budget.
+  - **The skill comes from the host's own `mpx`, never from the app**
+    (Host Settings ▸ Agent browser ▸ INSTALL SKILL; `AgentSkillInstaller`,
+    pure `AgentSkillInstall`). The button runs `mpx skill install --json`
+    on the host, which writes the `SKILL.md` embedded in that binary into
+    `~/.agents/skills` (Codex and the agents that share it) and
+    `~/.claude/skills` (Claude Code reads only its own) — so what an agent
+    reads matches the `mpx browser` it calls, and upgrading `mpx` is the
+    only way the text changes. Rejected: bundling the skill in the app and
+    writing it over SFTP/exec (two copies, and the app's would describe a
+    CLI the host may not have), and a Claude Code plugin marketplace in
+    mpx-cli (a second channel with its own version, for one agent only).
+    Rules:
+    - It rides the bridge's road — a throwaway connection, a PTY-less
+      login shell, the one `mpx` search (`AgentBrowserLaunch.exec`) — not
+      an exec. An exec gets sshd's bare PATH and would say "mpx wasn't
+      found" on a host whose agent browser is working.
+    - A login shell prints what it likes (motd, rc chatter), so the
+      answer is the one JSON line carrying `skill` + `installed`; nothing
+      else on stdout is read. No answer line + a clap usage error on
+      stderr = an `mpx` from before the command (`outdatedCLI`).
+    - It uses the form's credentials like the Signal check, so it works
+      on a host not saved yet; an edit to where the form connects retires
+      the result (`connectionFingerprint` — narrower than the Signal
+      check's, which mosh and the backend also retire). The button exists
+      only while the switch is on; the install itself does not depend on
+      the switch being saved.
+    - `mpx` counts a skill directory that is a symlink to the other one as
+      installed (skill managers link `~/.claude/skills/x` to
+      `~/.agents/skills/x`); a symlink that leads anywhere else is refused
+      and comes back in `failed`, shown as a CHECK row under what did
+      install.
 - **The file viewer is the viewport's sibling for paths — and path presses
   confirm instead of falling to selection** (`TerminalRoute.Mode
   .fileViewer`; pure models in `Models/FileViewer/`; records in

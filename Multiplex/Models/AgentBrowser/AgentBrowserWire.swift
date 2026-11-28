@@ -273,20 +273,35 @@ enum AgentBrowserLaunch {
         "/home/linuxbrew/.linuxbrew/bin/mpx",
     ]
 
-    /// The POSIX script: exec the first `mpx` found as the bridge, or say
-    /// `{"mpx":"missing"}` so the app can tell "not installed" from "failed".
-    /// `installID` separates same-named devices (iOS reports a generic
-    /// "iPad"); `preferred` (a DEBUG hook: a dev build of mpx) is tried
-    /// first.
-    static func script(deviceName: String, installID: String, preferred: String? = nil) -> String {
+    /// The POSIX line that runs `mpx <arguments>` as the first `mpx` found,
+    /// or says `{"mpx":"missing"}` so the app can tell "not installed" from
+    /// "failed". `arguments` is shell text, already quoted. `preferred` (a
+    /// DEBUG hook: a dev build of mpx) is tried first.
+    static func exec(_ arguments: String, preferred: String? = nil) -> String {
         let first = preferred.map { [quoted($0)] } ?? []
         let candidates = (first + ["mpx", "multiplex"] + fallbackPaths.map { "\"\($0)\"" })
             .joined(separator: " ")
         return """
             for c in \(candidates); do \
-            if command -v "$c" >/dev/null 2>&1; then exec "$c" bridge --device \(quoted(deviceName)) --id \(quoted(installID)); fi; \
+            if command -v "$c" >/dev/null 2>&1; then exec "$c" \(arguments); fi; \
             done; printf '%s\\n' '{"mpx":"missing"}'
             """
+    }
+
+    /// The bridge's launch script. `installID` separates same-named devices
+    /// (iOS reports a generic "iPad").
+    static func script(deviceName: String, installID: String, preferred: String? = nil) -> String {
+        exec("bridge --device \(quoted(deviceName)) --id \(quoted(installID))", preferred: preferred)
+    }
+
+    /// DEBUG hook — `MULTIPLEX_AGENT_MPX=<path on the host>`: run a dev
+    /// build of mpx instead of the installed one.
+    static var preferredCLI: String? {
+        #if DEBUG
+        ProcessInfo.processInfo.environment["MULTIPLEX_AGENT_MPX"]
+        #else
+        nil
+        #endif
     }
 
     /// The stdin bytes for the shell channel.

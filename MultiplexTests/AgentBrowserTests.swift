@@ -230,6 +230,107 @@ final class AgentBrowserTests: XCTestCase {
         XCTAssertFalse(AgentBrowserLaunch.isOutdatedCLI(stderr: "Permission denied"))
     }
 
+    // MARK: Skill install
+
+    /// The button must find the `mpx` the bridge runs, so both go through
+    /// one search — and the same login-shell envelope.
+    func testSkillInstallSearchesForMpxTheWayTheBridgeDoes() {
+        let script = AgentSkillInstall.script()
+        XCTAssertTrue(script.contains(#"exec "$c" skill install --json;"#), script)
+        XCTAssertTrue(script.contains(#"'{"mpx":"missing"}'"#), script)
+        let bridge = AgentBrowserLaunch.script(deviceName: "iPad", installID: "3f2a9c1e")
+        XCTAssertEqual(
+            script.components(separatedBy: "; do ").first,
+            bridge.components(separatedBy: "; do ").first,
+            "the candidate list is shared"
+        )
+        let preferred = AgentSkillInstall.script(preferred: "/tmp/dev build/mpx")
+        XCTAssertTrue(preferred.hasPrefix("for c in '/tmp/dev build/mpx' mpx multiplex "), preferred)
+        XCTAssertTrue(AgentSkillInstall.payload().hasPrefix(":\nexec sh -c '"))
+    }
+
+    func testSkillInstallReadsOnlyTheAnswerLine() {
+        // What a login shell prints around the command is not the answer.
+        for noise in ["Welcome to Ubuntu 26.04 LTS", "", "[]", #"{"motd":"hi"}"#, #"{"skill":"multiplex"}"#] {
+            XCTAssertNil(AgentSkillInstall.outcome(fromLine: noise), noise)
+        }
+        XCTAssertEqual(AgentSkillInstall.outcome(fromLine: #"{"mpx":"missing"}"#), .missingCLI)
+        XCTAssertEqual(
+            AgentSkillInstall.outcome(fromLine: """
+                {"failed":[],"installed":["/home/u/.agents/skills/multiplex/SKILL.md",\
+                "/home/u/.claude/skills/multiplex/SKILL.md"],"skill":"multiplex"}
+                """),
+            .installed([
+                "/home/u/.agents/skills/multiplex/SKILL.md",
+                "/home/u/.claude/skills/multiplex/SKILL.md",
+            ])
+        )
+        XCTAssertEqual(
+            AgentSkillInstall.outcome(fromLine: """
+                {"skill":"multiplex","installed":["/home/u/.agents/skills/multiplex/SKILL.md"],\
+                "failed":[{"dir":"/home/u/.claude/skills","error":"Not a directory (os error 20)"}]}
+                """),
+            .incomplete(
+                installed: ["/home/u/.agents/skills/multiplex/SKILL.md"],
+                refused: [.init(directory: "/home/u/.claude/skills", reason: "Not a directory (os error 20)")]
+            )
+        )
+        // Nothing installed and nothing refused is not a success.
+        XCTAssertEqual(
+            AgentSkillInstall.outcome(fromLine: #"{"skill":"multiplex","installed":[],"failed":[]}"#),
+            .incomplete(installed: [], refused: [])
+        )
+    }
+
+    func testSkillInstallThatEndsWithoutAnAnswerSaysWhy() {
+        // mpx 0.1 has no `skill`; a pre-release 0.2 had no `--json`.
+        XCTAssertEqual(
+            AgentSkillInstall.outcome(endedWith: nil, stderr: "error: unrecognized subcommand 'skill'\n"),
+            .outdatedCLI
+        )
+        XCTAssertEqual(
+            AgentSkillInstall.outcome(endedWith: nil, stderr: "error: unexpected argument '--json' found\n"),
+            .outdatedCLI
+        )
+        XCTAssertEqual(
+            AgentSkillInstall.outcome(endedWith: "eof", stderr: "mpx skill: HOME is not set\n"),
+            .failed("mpx skill: HOME is not set")
+        )
+        XCTAssertEqual(AgentSkillInstall.outcome(endedWith: "channel closed", stderr: " \n"), .failed("channel closed"))
+        XCTAssertEqual(AgentSkillInstall.outcome(endedWith: nil, stderr: ""), .failed(""))
+    }
+
+    func testSkillInstallFailuresAreWordedForThePersonWhoHasToFixThem() throws {
+        let host = Host(name: "devbox", hostname: "devbox.local", username: "demo")
+        XCTAssertNil(AgentSkillInstaller.failureMessage(for: .installed(["/x/SKILL.md"]), host: host))
+        let missing = try XCTUnwrap(AgentSkillInstaller.failureMessage(for: .missingCLI, host: host))
+        XCTAssertTrue(missing.contains("devbox.local"), missing)
+        XCTAssertTrue(missing.contains("brew install multiplex-term/tap/mpx"), missing)
+        let outdated = try XCTUnwrap(AgentSkillInstaller.failureMessage(for: .outdatedCLI, host: host))
+        XCTAssertTrue(outdated.contains("0.2"), outdated)
+        let refused = try XCTUnwrap(AgentSkillInstaller.failureMessage(
+            for: .incomplete(
+                installed: ["/home/u/.agents/skills/multiplex/SKILL.md"],
+                refused: [.init(directory: "/home/u/.claude/skills", reason: "Not a directory")]
+            ),
+            host: host
+        ))
+        XCTAssertEqual(refused, "mpx couldn't write the skill into /home/u/.claude/skills: Not a directory")
+        XCTAssertEqual(
+            AgentSkillInstaller.failureMessage(for: .failed("mpx skill: HOME is not set"), host: host),
+            "mpx on devbox.local couldn't install the skill: mpx skill: HOME is not set"
+        )
+        // Each outcome that is not a clean install has something to say.
+        for outcome in [AgentSkillInstall.Outcome.failed(""), .silent, .incomplete(installed: [], refused: [])] {
+            let message = try XCTUnwrap(AgentSkillInstaller.failureMessage(for: outcome, host: host))
+            XCTAssertTrue(message.contains("devbox.local"), message)
+        }
+        XCTAssertEqual(
+            AgentSkillInstaller.failureMessage(for: .unreachable("No route to devbox.local."), host: host),
+            "No route to devbox.local."
+        )
+    }
+
     // MARK: Address policy
 
     func testAgentsReachTheInternetAndThisHostOnly() throws {

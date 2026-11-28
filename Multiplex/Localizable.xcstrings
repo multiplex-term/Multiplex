@@ -464,6 +464,22 @@
         }
       }
     },
+    "%@ closed the shell before mpx answered. Try again, or run `mpx skill install` there yourself." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "mpxが応答する前に%@がシェルを閉じました。もう一度試すか、そのホストで`mpx skill install`を自分で実行してください。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "%@ 在 mpx 回應前就關閉了 shell。請再試一次，或自行在該主機上執行 `mpx skill install`。"
+          }
+        }
+      }
+    },
     "%@ connected" : {
       "localizations" : {
         "ja" : {
@@ -1734,18 +1750,18 @@
         }
       }
     },
-    "While Multiplex is open, agents on this host can open web pages beside your terminal and read, click, and type in them with `mpx browser` (mpx 0.2 or later; `mpx skill install` teaches an agent how). Agent tabs load through this host over SSH, so they see the host's network and never your device's; they keep their own cookies and never see your own tabs." : {
+    "While Multiplex is open, agents on this host can open web pages beside your terminal and read, click, and type in them with `mpx browser` (mpx 0.2 or later). INSTALL SKILL teaches them how: it runs `mpx skill install` on this host. Agent tabs load through this host over SSH, so they see the host's network and never your device's; they keep their own cookies and never see your own tabs." : {
       "localizations" : {
         "ja" : {
           "stringUnit" : {
-            "state" : "translated",
-            "value" : "Multiplex が開いている間、このホストのエージェントは `mpx browser` でターミナルの横に Web ページを開き、読み取り・クリック・入力ができます（mpx 0.2 以降が必要。`mpx skill install` でエージェントに使い方を教えられます）。エージェントのタブは SSH 経由でこのホストを通して読み込まれるため、見えるのはホストのネットワークだけで、あなたのデバイスのネットワークには届きません。独自の Cookie を持ち、あなた自身のタブは見えません。"
+            "state" : "needs_review",
+            "value" : "Multiplexが開いている間、このホストのエージェントは`mpx browser`でターミナルの横にWebページを開き、読み取り・クリック・入力ができます（mpx 0.2以降が必要）。INSTALL SKILLを押すと、このホストで`mpx skill install`が実行され、エージェントに使い方を教えられます。エージェントのタブはSSH経由でこのホストを通して読み込まれるため、見えるのはホストのネットワークだけで、あなたのデバイスのネットワークには届きません。独自のCookieを持ち、あなた自身のタブは見えません。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
-            "state" : "translated",
-            "value" : "Multiplex 開啟時，這部主機上的 Agent 可以用 `mpx browser` 在終端機旁開啟網頁，並讀取、點按與輸入內容（需要 mpx 0.2 以上；`mpx skill install` 會教 Agent 如何使用）。Agent 標籤頁經由 SSH 透過這部主機載入，只看得到主機的網路，碰不到你裝置所在的網路；它們有自己的 Cookie，也看不到你自己的標籤頁。"
+            "state" : "needs_review",
+            "value" : "Multiplex 開啟時，這部主機上的 Agent 可以用 `mpx browser` 在終端機旁開啟網頁，並讀取、點按與輸入內容（需要 mpx 0.2 以上）。INSTALL SKILL 會教它們如何使用：它會在這部主機上執行 `mpx skill install`。Agent 標籤頁經由 SSH 透過這部主機載入，只看得到主機的網路，碰不到你裝置所在的網路；它們有自己的 Cookie，也看不到你自己的標籤頁。"
           }
         }
       }
@@ -7988,6 +8004,22 @@
         }
       }
     },
+    "Install the agent skill on this host" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "このホストにエージェントスキルをインストール"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "在這部主機上安裝 Agent 技能"
+          }
+        }
+      }
+    },
     "Install guide" : {
       "localizations" : {
         "ja" : {
@@ -8756,6 +8788,82 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在這個網路上執行 mpx bind 的機器會自動出現在這裡。用它的終端機印出的 6 位數 PIN 逐一確認。"
+          }
+        }
+      }
+    },
+    "mpx couldn't write the skill into %@: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "mpx couldn't write the skill into %1$@: %2$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "mpxはスキルを%1$@に書き込めませんでした：%2$@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "mpx 無法將技能寫入 %1$@：%2$@"
+          }
+        }
+      }
+    },
+    "mpx wasn't found on %@. Install it there (brew install multiplex-term/tap/mpx), then try again." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "%@にmpxが見つかりません。そのホストにインストールして（brew install multiplex-term/tap/mpx）から、もう一度お試しください。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "在 %@ 上找不到 mpx。請在該主機上安裝（brew install multiplex-term/tap/mpx），然後再試一次。"
+          }
+        }
+      }
+    },
+    "mpx on %@ couldn't install the skill: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "mpx on %1$@ couldn't install the skill: %2$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "%1$@のmpxはスキルをインストールできませんでした：%2$@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "%1$@ 上的 mpx 無法安裝技能：%2$@"
+          }
+        }
+      }
+    },
+    "mpx on %@ reported nothing installed. Try again." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "%@のmpxは何もインストールしなかったと報告しました。もう一度お試しください。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "%@ 上的 mpx 回報沒有安裝任何項目。請再試一次。"
           }
         }
       }
@@ -10072,6 +10180,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "mpx bind 沒有回應 — 請確保它正在執行。"
+          }
+        }
+      }
+    },
+    "No answer from mpx on %@ after %lld seconds. Try again, or run `mpx skill install` there yourself." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "No answer from mpx on %1$@ after %2$lld seconds. Try again, or run `mpx skill install` there yourself."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "%1$@のmpxから%2$lld秒経っても応答がありません。もう一度試すか、そのホストで`mpx skill install`を自分で実行してください。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "%1$@ 上的 mpx 在 %2$lld 秒內沒有回應。請再試一次，或自行在該主機上執行 `mpx skill install`。"
           }
         }
       }
@@ -16141,6 +16271,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Mac 的鑰匙圈已鎖定，因此 Claude Code 顯示為已登出"
+          }
+        }
+      }
+    },
+    "The multiplex skill is on %@. Agents started from now on can use it." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "multiplexスキルを%@にインストールしました。これ以降に起動するエージェントが利用できます。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "multiplex 技能已安裝到 %@。之後啟動的 Agent 都能使用。"
+          }
+        }
+      }
+    },
+    "The mpx on %@ is too old to install the skill. Update it to 0.2 or later, then try again." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "%@のmpxは古すぎて、スキルをインストールできません。0.2以降に更新してから、もう一度お試しください。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "%@ 上的 mpx 版本太舊，無法安裝技能。請更新到 0.2 以上，然後再試一次。"
           }
         }
       }

@@ -137,6 +137,9 @@ UIKit scene runtime (MultiplexSceneDelegate + UIKitSceneRootViewController;
     AgentBrowserProxy  host route: loopback CONNECT proxy for the tabs'
                      data store + device-loopback forwards (cookie-admitted),
                      every connection an SSH direct-tcpip from the host
+    AgentSkillInstaller  Host Settings' INSTALL SKILL: a throwaway
+                     connection runs `mpx skill install --json` through
+                     the bridge's login-shell road (AgentSkillInstall, pure)
   TerminalFocusArbiter  app-wide single owner of keyboard focus
 ```
 

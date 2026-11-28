@@ -137,14 +137,25 @@ app.multiplexterm.multiplex`):
   presentations — a restored terminal-only scene shows nothing — and the
   notification-permission alert iOS raises on a fresh install sits over the
   middle of the sheet with no headless way to dismiss it.
-- `MULTIPLEX_AUTO_HOST_SETTINGS=1|models|backend|directories` — opens the
-  first host's edit sheet (regression-checks the Observation environment
-  across the sheet boundary — a missing HostStore is a fatal error);
-  `models` scrolls to the Agent launch models section, `backend` to the
-  tmux/herdr Backend section, `directories` to the New session defaults
-  working-directories editor (shown for BOTH backends — the herdr mint
-  roots a session's world with these; only the tmux options editor stays
-  tmux-scoped).
+- `MULTIPLEX_AUTO_HOST_SETTINGS=1|models|backend|directories|agentbrowser|skillinstall`
+  — opens the first host's edit sheet (regression-checks the Observation
+  environment across the sheet boundary — a missing HostStore is a fatal
+  error); `models` scrolls to the Agent launch models section, `backend`
+  to the tmux/herdr Backend section, `directories` to the New session
+  defaults working-directories editor (shown for BOTH backends — the herdr
+  mint roots a session's world with these; only the tmux options editor
+  stays tmux-scoped), `agentbrowser` to the Agent browser section.
+  `skillinstall` scrolls there too, turns the section's switch on IN THE
+  FORM (nothing is saved) and presses INSTALL SKILL — no headless tap
+  reaches the chip. ⚠ The harness sshd logs in as YOU, so a real install
+  lands in the Mac's own `~/.agents/skills` and `~/.claude/skills`. Pass
+  `MULTIPLEX_AGENT_MPX` a wrapper instead of the dev build itself — three
+  lines of `sh`: `HOME=<scratch dir>; export HOME; exec <dev mpx> "$@"` —
+  and read the result out of that directory. Without `MULTIPLEX_AGENT_MPX`
+  the login shell finds whatever `mpx` the Mac has installed; a Homebrew
+  0.1.x has no `skill` command, which is the NOT INSTALLED / "too old"
+  answer (2026-11-28). A file where `<scratch>/.claude/skills` should be
+  gives the INSTALLED + CHECK pair.
 - **Attention alerts** need Pro AND the `attention.alertsEnabled` switch;
   both live in the app container's defaults, and `simctl spawn <UDID>
   defaults write <bundle-id>` lands in a domain the sandboxed app never

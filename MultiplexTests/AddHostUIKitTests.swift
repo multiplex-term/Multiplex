@@ -606,6 +606,77 @@ final class AddHostUIKitTests: XCTestCase {
         XCTAssertEqual(fixture.controller.testState, .idle)
     }
 
+    func testInstallSkillLivesBehindTheAgentBrowserSwitchAndListsWhatMpxWrote() async throws {
+        // The paths carry the form's user, so the result proves which host
+        // the button installed on.
+        let fixture = makeFixture(isPro: true, skillInstaller: { host, _ in
+            .installed([
+                "/home/\(host.username)/.agents/skills/multiplex/SKILL.md",
+                "/home/\(host.username)/.claude/skills/multiplex/SKILL.md",
+            ])
+        })
+        defer { clean(fixture) }
+        fixture.controller.loadViewIfNeeded()
+        fixture.controller.setMode(.manual)
+        enter("devbox.local", in: fixture.controller.hostnameField)
+        enter("demo", in: fixture.controller.usernameField)
+
+        XCTAssertNil(fixture.controller.skillInstallChip, "no button while agents are not let in")
+        fixture.controller.agentBrowserControl?.sendActions(for: .touchUpInside)
+        XCTAssertTrue(fixture.controller.form.agentBrowser)
+        let chip = try XCTUnwrap(fixture.controller.skillInstallChip)
+        XCTAssertFalse(chip.accessibilityTraits.contains(.notEnabled))
+
+        XCTAssertTrue(chip.accessibilityActivate())
+        XCTAssertEqual(fixture.controller.skillInstallState, .running)
+        await waitUntil("skill install result") {
+            if case .finished = fixture.controller.skillInstallState { return true }
+            return false
+        }
+        let text = renderedText(in: fixture.controller.view)
+        XCTAssertTrue(text.contains(
+            "The multiplex skill is on devbox.local. Agents started from now on can use it."
+        ), "\(text)")
+        XCTAssertTrue(text.contains(
+            "/home/demo/.agents/skills/multiplex/SKILL.md\n/home/demo/.claude/skills/multiplex/SKILL.md"
+        ), "\(text)")
+
+        // Switching agents off takes the button and its result away.
+        fixture.controller.agentBrowserControl?.sendActions(for: .touchUpInside)
+        XCTAssertNil(fixture.controller.skillInstallChip)
+        XCTAssertEqual(fixture.controller.skillInstallState, .idle)
+    }
+
+    func testInstallSkillFailureSaysWhatToFixAndAnIdentityEditRetiresIt() async throws {
+        let fixture = makeFixture(isPro: true, skillInstaller: { _, _ in .missingCLI })
+        defer { clean(fixture) }
+        fixture.controller.loadViewIfNeeded()
+        fixture.controller.setMode(.manual)
+        fixture.controller.agentBrowserControl?.sendActions(for: .touchUpInside)
+
+        // No address yet: there is nowhere to install to.
+        var chip = try XCTUnwrap(fixture.controller.skillInstallChip)
+        XCTAssertTrue(chip.accessibilityTraits.contains(.notEnabled))
+        enter("devbox.local", in: fixture.controller.hostnameField)
+        enter("demo", in: fixture.controller.usernameField)
+        chip = try XCTUnwrap(fixture.controller.skillInstallChip)
+        XCTAssertFalse(chip.accessibilityTraits.contains(.notEnabled))
+
+        XCTAssertTrue(chip.accessibilityActivate())
+        await waitUntil("skill install result") {
+            fixture.controller.skillInstallState == .finished(.missingCLI)
+        }
+        XCTAssertTrue(renderedText(in: fixture.controller.view).contains(
+            "mpx wasn't found on devbox.local. Install it there "
+                + "(brew install multiplex-term/tap/mpx), then try again."
+        ))
+
+        // The answer was about devbox.local; another address has none yet.
+        enter("other.local", in: fixture.controller.hostnameField)
+        XCTAssertEqual(fixture.controller.skillInstallState, .idle)
+        XCTAssertFalse(renderedText(in: fixture.controller.view).contains { $0.contains("mpx wasn't found") })
+    }
+
     func testBindHostLimitObservationUsesNativePaywallRoute() async {
         let fixture = makeFixture(isPro: false)
         defer { clean(fixture) }
@@ -629,7 +700,8 @@ final class AddHostUIKitTests: XCTestCase {
         isPro: Bool = false,
         secretWriter: AddHostViewController.SecretWriter? = nil,
         hostWriter: AddHostViewController.HostWriter? = nil,
-        testRunner: AddHostViewController.TestRunner? = nil
+        testRunner: AddHostViewController.TestRunner? = nil,
+        skillInstaller: AddHostViewController.SkillInstaller? = nil
     ) -> Fixture {
         let stem = "AddHostUIKitTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: stem)!
@@ -648,7 +720,8 @@ final class AddHostUIKitTests: XCTestCase {
             secretLoader: { _ in secrets },
             secretWriter: secretWriter,
             hostWriter: hostWriter,
-            testRunner: testRunner
+            testRunner: testRunner,
+            skillInstaller: skillInstaller
         )
         let navigation = UINavigationController(rootViewController: controller)
         return Fixture(

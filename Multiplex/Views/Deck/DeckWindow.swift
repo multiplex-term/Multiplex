@@ -1171,7 +1171,7 @@ final class DeckWindowViewController: UIViewController {
     }
 
     private func presentHostSettingsForVerificationIfRequested() async {
-        guard ["1", "models", "backend", "directories"].contains(
+        guard ["1", "models", "backend", "directories", "agentbrowser", "skillinstall"].contains(
             ProcessInfo.processInfo.environment["MULTIPLEX_AUTO_HOST_SETTINGS"]
         ) else { return }
         for _ in 0..<50 {
